@@ -1,72 +1,129 @@
-# Contributing to Emby Xtream Plugin
+# Contributing to Xtream Tuner
 
-## Architecture
+## Current Architecture
 
-### Emby DI / SimpleInjector — service class construction
+### Startup and DI
 
-Emby's `ApplicationHost.CreateInstanceSafe` scans the plugin assembly and auto-registers **all public classes** whose constructor matches known DI types (e.g. `ILogger`). It instantiates these via SimpleInjector **before** the `Plugin` constructor runs.
+Emby scans the assembly and may instantiate public service classes before `Plugin` itself is fully ready.
 
-This means:
-- `Plugin.Instance` is **null** when Emby creates service classes
-- `Plugin.Instance.Configuration` will throw (wrapped as `ActivationException` by SimpleInjector)
-- **Never call `Plugin.Instance.*` in a service class constructor** (`StrmSyncService`, `LiveTvService`, `TmdbLookupService`, etc.)
+Rules:
+- `Plugin.Instance` can be `null` during service construction
+- `Plugin.Instance.Configuration` must not be touched in constructors
+- defer config access to runtime methods
 
-**Safe pattern**: access `Plugin.Instance.Configuration` only from methods called at runtime, not from constructors.
+### Configuration Persistence
 
-### Plugin configuration path requires ApplicationPaths
+`PluginConfiguration` is serialized by Emby automatically. The plugin uses it for:
+- connection settings
+- M3U and EPG cache settings
+- codec cache persistence
+- sync timestamps and naming-version upgrades
+- sync history
+- auto-sync settings
+- stored category caches
 
-`BasePlugin<T>.get_Configuration()` calls `Path.Combine(ApplicationPaths.PluginConfigurationsPath, ...)` internally. This path may not be initialised when Emby is scanning services, causing `ArgumentNullException: Value cannot be null. (Parameter 'path2')`. Same rule applies — defer config access to runtime methods.
+### Live TV Model
 
-### Delta sync state via PluginConfiguration
+The current plugin streams directly from Xtream endpoints:
+- live playback path: `{BaseUrl}/live/{username}/{password}/{streamId}.{ts|m3u8}`
+- M3U generation comes from the same direct Xtream source
+- there is no current Dispatcharr runtime dependency in the code
 
-`PluginConfiguration` is serialised to XML by Emby automatically. Fields added to it persist across restarts without any extra work. Use this for sync watermarks (`LastMovieSyncTimestamp`, `LastSeriesSyncTimestamp`), channel hashes (`LastChannelListHash`), and similar durable state.
+### Guide Data Model
 
-### SupportsGuideData and EPG
+`EpgSource` controls guide behavior:
+- `XtreamServer`: try bulk XMLTV first, then per-channel Xtream JSON fallback
+- `CustomUrl`: use the configured XMLTV URL only, with no Xtream fallback
+- `Disabled`: tuner reports no guide support
 
-When `SupportsGuideData()` returns `true`, Emby calls `GetProgramsInternal` on the tuner host for each channel. The `tunerChannelId` parameter is whatever was set in `ChannelInfo.TunerChannelId` — the Gracenote station ID (e.g. `"51529"`) when Dispatcharr is enabled and a station ID exists, or the raw stream ID (e.g. `"12345"`) otherwise. Use `_tunerChannelIdToStreamId` to translate either form back to a stream ID.
+`GetProgramsInternal` resolves `ChannelInfo.TunerChannelId` back to the Xtream `streamId`, fetches cached guide data, and creates `ProgramInfo` entries for Emby. If no guide data exists, it returns a placeholder row so the channel still shows in the grid.
 
-### Dispatcharr proxy — never enable probing
+### Channel Caching
 
-When `SupportsProbing = true` and `AnalyzeDurationMs > 0`, Emby runs ffprobe against `MediaSource.Path` independently of `GetChannelStream`. For Dispatcharr proxy URLs (`/proxy/ts/stream/{uuid}`) this is destructive: the probe opens a short-lived connection then closes it, Dispatcharr interprets the close as the last client leaving and tears down the channel, and the real playback connection that follows hits the "channel stop signal" — triggering a rapid retry storm.
+`XtreamTunerHost` keeps a warm in-memory channel cache.
 
-**Rule**: always set `SupportsProbing = false` and `AnalyzeDurationMs = 0` for Dispatcharr proxy URLs. Direct Xtream URLs can still use probing when stream stats are absent.
+Behavior:
+- cold start fetches channels synchronously
+- fresh cache is returned immediately
+- stale cache is returned immediately and refreshed in the background
 
-### Guide grid empty after setup
+### Codec Caching and Probing
 
-If the Emby guide shows no channels despite having data, check browser localStorage for a stale `guide-tagids` filter. The guide calls `/LiveTv/EPG?TagIds=<id>` — if the stored tag ID doesn't match any channel the grid is empty. Fix: click the filter icon in the guide, or run `localStorage.removeItem('guide-tagids')` in the browser console.
+The plugin uses a two-step strategy for faster live playback:
+
+1. first tune can allow a short Emby probe window
+2. background `ffprobe` runs and stores codec info in `StreamCodecCacheJson`
+3. later tunes reuse cached codec data and can skip Emby's full probe
+
+If you change this area, preserve these expectations:
+- cached codec entries should populate `MediaStreams`
+- later tunes should not regress into unnecessary probing
+- `ClearCodecCache` must leave the next tune able to re-probe cleanly
+
+### STRM Sync Behavior
+
+Movie and series sync share a few core rules:
+- output root is `StrmLibraryPath`
+- smart skip avoids rewriting already-correct files
+- orphan cleanup is optional and capped by `OrphanSafetyThreshold`
+- sync progress is reported live
+- sync history is persisted
+- failed items can be retried later
+- trial syncs preview up to 30 items without advancing timestamps
+
+Series sync also uses:
+- `LastSeriesSyncTimestamp` for delta sync
+- `SeriesEpisodeHashesJson` to skip unchanged episode trees even when provider timestamps are noisy
+
+### Metadata Helpers
+
+Current metadata helpers in code:
+- movie folder naming with `tmdbid`
+- series folder naming with `tvdbid` or `tmdbid`
+- Emby-provider fallback lookup for missing IDs
+- optional movie NFO files
+- optional `tvshow.nfo`
+
+### Auto-Sync
+
+Auto-sync supports:
+- interval mode
+- daily time mode
+
+If you extend scheduling, keep the dashboard and saved config fields aligned with runtime behavior.
+
+### Browser Cache Gotcha
+
+If Emby's guide looks empty even though channels exist, a stale `guide-tagids` value in browser localStorage can hide every row. Clearing that localStorage key fixes the UI filter state.
 
 ---
 
-## Architecture Decision Records (ADRs)
+## Docs Policy
 
-Significant decisions are recorded in `docs/decisions/NNN-title.md`. Create a new ADR when:
-- Choosing between multiple viable approaches (especially after trying alternatives that failed)
-- Making a change driven by a non-obvious root cause
-- Reversing or replacing a previous approach
-
-Each ADR should cover: Context, Problem, Alternatives considered, Decision, and Consequences. See `docs/decisions/001-bypass-dispatcharr-proxy.md` as the template.
-
-Numbering: sequential, zero-padded to 3 digits (`001`, `002`, ...).
+- `README.md` is the current feature reference.
+- `docs/architecture` and some ADRs include historical notes from earlier experiments. Update them when behavior changes if they describe current runtime paths.
+- When a document is intentionally historical, label it clearly instead of rewriting the past.
 
 ---
 
-## Development Workflow
+## Workflow
 
-### One concern per branch
+### Keep Changes Scoped
 
-Unrelated fixes should live on separate short-lived branches and be merged to `main` independently. This makes each change revertable without touching unrelated code.
+Prefer one concern per branch or PR.
 
-### Commit before switching context
+### Avoid Tangled Worktrees
 
-Never leave changes in the working tree when starting unrelated work. An uncommitted change is easy to tangle with later work. Use a `WIP:` commit or `git stash` if the change isn't ready.
+If you are switching topics, commit or stash first.
 
-### Building
+### Build
 
 ```bash
 cd Emby.Xtream.Plugin
 bash build.sh
 ```
 
-Output: `Emby.Xtream.Plugin/out/Emby.Xtream.Plugin.dll`
+Output:
+- `Emby.Xtream.Plugin/out/Emby.Xtream.Plugin.dll`
 
 Requires .NET SDK 6.0+.

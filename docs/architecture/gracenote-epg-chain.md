@@ -1,5 +1,7 @@
 # Gracenote EPG Architecture
 
+> Historical note: this document describes an older Gracenote and Dispatcharr-based design explored before the current `EMBY-XC` direct-Xtream architecture. It is not the current feature path described in `README.md`.
+
 How Gracenote guide data flows from a local station database through five applications and into Emby's TV Guide.
 
 ![Architecture Diagram](../../assets/complete-gracenote-architecture-v10.png)

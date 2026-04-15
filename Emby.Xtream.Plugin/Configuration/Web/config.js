@@ -4,6 +4,13 @@ function (BaseView, loading) {
 
     var pluginId = 'b7e3c4a1-9f2d-4e8b-a5c6-d1f0e2b3c4a5';
 
+    // Read Emby's accent colour at runtime so we respect whatever theme the user has chosen.
+    // Falls back to Emby's standard blue if the CSS variable isn't available.
+    var accentColor = (function () {
+        var v = getComputedStyle(document.documentElement).getPropertyValue('--accent-color').trim();
+        return v || '#00a4dc';
+    }());
+
     function View(view, params) {
         BaseView.apply(this, arguments);
 
@@ -24,9 +31,6 @@ function (BaseView, loading) {
         this.selectedVodCategoryIds = [];
         this.loadedSeriesCategories = [];
         this.selectedSeriesCategoryIds = [];
-        this.loadedDispatcharrProfiles = [];
-        this.selectedDispatcharrProfileIds = [];
-
         var self = this;
 
         view.querySelector('.xtreamConfigForm').addEventListener('submit', function (e) {
@@ -40,10 +44,6 @@ function (BaseView, loading) {
 
         view.querySelector('.chkEnableTmdbFolderNaming').addEventListener('change', function () {
             updateTmdbVisibility(view);
-        });
-
-        view.querySelector('.chkEnableDispatcharr').addEventListener('change', function () {
-            updateDispatcharrVisibility(view);
         });
 
         view.querySelector('.selectEpgSource').addEventListener('change', function () {
@@ -119,22 +119,6 @@ function (BaseView, loading) {
             testXtreamConnection(self);
         });
 
-        view.querySelector('.btnTestDispatcharr').addEventListener('click', function () {
-            testDispatcharrConnection(self);
-        });
-
-        view.querySelector('.btnRefreshProfiles').addEventListener('click', function () {
-            loadDispatcharrProfiles(self);
-        });
-
-        view.querySelector('.btnSelectAllProfiles').addEventListener('click', function () {
-            toggleAllProfiles(view, true);
-        });
-
-        view.querySelector('.btnDeselectAllProfiles').addEventListener('click', function () {
-            toggleAllProfiles(view, false);
-        });
-
         view.querySelector('.btnLoadCategories').addEventListener('click', function () {
             loadCategories(self);
         });
@@ -151,8 +135,8 @@ function (BaseView, loading) {
             refreshCache(view);
         });
 
-        view.querySelector('.btnSyncGuideMappings').addEventListener('click', function () {
-            syncGuideMappings(view);
+        view.querySelector('.btnClearCodecCache').addEventListener('click', function () {
+            clearCodecCache(view);
         });
 
         // VOD category buttons (single mode)
@@ -200,6 +184,7 @@ function (BaseView, loading) {
             syncSeries(view);
         });
 
+
         // Delete content buttons
         view.querySelector('.btnDeleteMovies').addEventListener('click', function () {
             deleteContent(view, 'Movies');
@@ -226,26 +211,6 @@ function (BaseView, loading) {
         // Download sanitized log button
         view.querySelector('.btnDownloadLog').addEventListener('click', function () {
             window.open(ApiClient.getUrl('XtreamTuner/Logs') + '?api_key=' + ApiClient.accessToken(), '_blank');
-        });
-
-        // Dismiss update banner
-        view.querySelector('.updateBannerDismiss').addEventListener('click', function () {
-            view.querySelector('.updateBanner').style.display = 'none';
-        });
-
-        // Beta channel toggle — save immediately then re-check for updates
-        view.querySelector('.chkUseBetaChannel').addEventListener('change', function () {
-            saveConfig(self, function () { checkForUpdate(view); });
-        });
-
-        // Install update button
-        view.querySelector('.btnInstallUpdate').addEventListener('click', function () {
-            installUpdate(view);
-        });
-
-        // Restart Emby button
-        view.querySelector('.btnRestartEmby').addEventListener('click', function () {
-            restartEmby(view);
         });
 
         // Danger zone toggles (event delegation on form)
@@ -322,7 +287,6 @@ function (BaseView, loading) {
         BaseView.prototype.onResume.apply(this, arguments);
         loadConfig(this);
         loadDashboard(this.view);
-        checkForUpdate(this.view);
     };
 
     View.prototype.onPause = function () {};
@@ -340,12 +304,13 @@ function (BaseView, loading) {
             view.querySelector('.chkEnableLiveTv').checked = config.EnableLiveTv !== false;
             view.querySelector('.selOutputFormat').value = config.LiveTvOutputFormat || 'ts';
             view.querySelector('.chkIncludeAdult').checked = !!config.IncludeAdultChannels;
+            view.querySelector('.chkLiveTvDirectPlay').checked = config.EnableLiveTvDirectPlay !== false;
+            view.querySelector('.chkIncludeGroupTitle').checked = config.IncludeGroupTitleInM3U !== false;
 
             var epgVal = config.EpgSource;
             var epgNameToInt = { 'XtreamServer': '0', 'CustomUrl': '1', 'Disabled': '2' };
             view.querySelector('.selectEpgSource').value = epgNameToInt[epgVal] || (epgVal || 0).toString();
             view.querySelector('.txtCustomEpgUrl').value = config.CustomEpgUrl || '';
-            view.querySelector('.chkDeferEpgToGuideData').checked = config.DeferEpgToGuideData !== false;
             view.querySelector('.txtEpgCacheMinutes').value = config.EpgCacheMinutes || 30;
             view.querySelector('.txtEpgDaysToFetch').value = config.EpgDaysToFetch || 2;
             view.querySelector('.txtM3UCacheMinutes').value = config.M3UCacheMinutes || 15;
@@ -360,16 +325,6 @@ function (BaseView, loading) {
                 removeTerms = config.ChannelRemoveTerms.split(',').map(function (t) { return t.trim(); }).filter(function (t) { return t; }).join('\n');
             }
             view.querySelector('.txtRemoveTerms').value = removeTerms;
-
-            view.querySelector('.chkEnableDispatcharr').checked = !!config.EnableDispatcharr;
-            view.querySelector('.txtDispatcharrUrl').value = config.DispatcharrUrl || '';
-            view.querySelector('.txtDispatcharrUser').value = config.DispatcharrUser || '';
-            view.querySelector('.txtDispatcharrPass').value = config.DispatcharrPass || '';
-            view.querySelector('.chkDispatcharrFallback').checked = config.DispatcharrFallbackToXtream !== false;
-            view.querySelector('.chkForceAudioTranscode').checked = !!config.ForceAudioTranscode;
-
-            instance.selectedDispatcharrProfileIds = config.SelectedDispatcharrProfileIds || [];
-            loadCachedDispatcharrProfiles(instance, config);
 
             // Pre-parse cached categories so folder cards render correctly from the start
             var cachedVodCats = null;
@@ -397,9 +352,6 @@ function (BaseView, loading) {
             loadFolderEntries(view, 'series', config.SeriesFolderMappings || '', cachedSeriesCats);
             instance.selectedSeriesCategoryIds = config.SelectedSeriesCategoryIds || [];
 
-            // Update channel
-            view.querySelector('.chkUseBetaChannel').checked = !!config.UseBetaChannel;
-
             // Sync settings
             view.querySelector('.txtStrmLibraryPath').value = config.StrmLibraryPath || '/config/xtream';
             validateStrmPath(view);
@@ -426,7 +378,6 @@ function (BaseView, loading) {
 
             updateTmdbVisibility(view);
             updateNameCleaningVisibility(view);
-            updateDispatcharrVisibility(view);
             updateEpgVisibility(view);
             updateVodMovieVisibility(view);
             updateSeriesVisibility(view);
@@ -465,10 +416,11 @@ function (BaseView, loading) {
             config.EnableLiveTv = view.querySelector('.chkEnableLiveTv').checked;
             config.LiveTvOutputFormat = view.querySelector('.selOutputFormat').value;
             config.IncludeAdultChannels = view.querySelector('.chkIncludeAdult').checked;
+            config.EnableLiveTvDirectPlay = view.querySelector('.chkLiveTvDirectPlay').checked;
+            config.IncludeGroupTitleInM3U = view.querySelector('.chkIncludeGroupTitle').checked;
 
             config.EpgSource = parseInt(view.querySelector('.selectEpgSource').value, 10);
             config.CustomEpgUrl = view.querySelector('.txtCustomEpgUrl').value.trim();
-            config.DeferEpgToGuideData = view.querySelector('.chkDeferEpgToGuideData').checked;
             config.EpgCacheMinutes = parseInt(view.querySelector('.txtEpgCacheMinutes').value, 10) || 30;
             config.EpgDaysToFetch = parseInt(view.querySelector('.txtEpgDaysToFetch').value, 10) || 2;
             config.M3UCacheMinutes = parseInt(view.querySelector('.txtM3UCacheMinutes').value, 10) || 15;
@@ -483,14 +435,6 @@ function (BaseView, loading) {
             config.ContentRemoveTerms = removeTermsVal;
             config.ChannelRemoveTerms = removeTermsVal.split('\n').map(function (t) { return t.trim(); }).filter(function (t) { return t; }).join(',');
 
-            config.EnableDispatcharr = view.querySelector('.chkEnableDispatcharr').checked;
-            config.DispatcharrUrl = view.querySelector('.txtDispatcharrUrl').value.replace(/\/+$/, '');
-            config.DispatcharrUser = view.querySelector('.txtDispatcharrUser').value;
-            config.DispatcharrPass = view.querySelector('.txtDispatcharrPass').value;
-            config.DispatcharrFallbackToXtream = view.querySelector('.chkDispatcharrFallback').checked;
-            config.ForceAudioTranscode = view.querySelector('.chkForceAudioTranscode').checked;
-            config.SelectedDispatcharrProfileIds = getSelectedDispatcharrProfileIds(instance);
-
             // VOD Movies
             config.SyncMovies = view.querySelector('.chkSyncMovies').checked;
             config.MovieFolderMode = view.querySelector('.selMovieFolderMode').value;
@@ -502,9 +446,6 @@ function (BaseView, loading) {
             config.SeriesFolderMode = view.querySelector('.selSeriesFolderMode').value;
             config.SeriesFolderMappings = serializeFolderEntries(view, 'series');
             config.SelectedSeriesCategoryIds = getSelectedSeriesCategoryIds(instance);
-
-            // Update channel
-            config.UseBetaChannel = view.querySelector('.chkUseBetaChannel').checked;
 
             // Sync settings
             config.StrmLibraryPath = view.querySelector('.txtStrmLibraryPath').value.replace(/\/+$/, '') || '/config/xtream';
@@ -561,7 +502,7 @@ function (BaseView, loading) {
         var btn = view.querySelector(btnMap[tabName]);
         if (btn) {
             btn.style.opacity = '1';
-            btn.style.borderBottomColor = '#52B54B';
+            btn.style.borderBottomColor = accentColor;
         }
 
         // Hide Save button on Dashboard — nothing to save there
@@ -572,11 +513,6 @@ function (BaseView, loading) {
     function updateTmdbVisibility(view) {
         var enabled = view.querySelector('.chkEnableTmdbFolderNaming').checked;
         view.querySelector('.tmdbSettings').style.display = enabled ? '' : 'none';
-    }
-
-    function updateDispatcharrVisibility(view) {
-        var enabled = view.querySelector('.chkEnableDispatcharr').checked;
-        view.querySelector('.dispatcharrSettings').style.display = enabled ? '' : 'none';
     }
 
     function updateEpgVisibility(view) {
@@ -980,142 +916,6 @@ function (BaseView, loading) {
         });
     }
 
-    function testDispatcharrConnection(instance) {
-        var view = instance.view;
-        var resultEl = view.querySelector('.dispatcharrTestResult');
-        resultEl.innerHTML = '<span style="opacity:0.5;">Testing connection...</span>';
-
-        var url = view.querySelector('.txtDispatcharrUrl').value.replace(/\/+$/, '');
-        var user = view.querySelector('.txtDispatcharrUser').value;
-        var pass = view.querySelector('.txtDispatcharrPass').value;
-
-        if (!url) {
-            setPillResult(resultEl, false, 'Please enter Dispatcharr URL.');
-            return;
-        }
-
-        ApiClient.ajax({
-            type: 'POST',
-            url: ApiClient.getUrl('XtreamTuner/TestDispatcharr'),
-            contentType: 'application/json',
-            data: JSON.stringify({ Url: url, Username: user, Password: pass }),
-            dataType: 'json'
-        }).then(function (result) {
-            setPillResult(resultEl, result.Success, result.Message);
-            if (result.Success) {
-                saveConfig(instance);
-            }
-        }).catch(function () {
-            setPillResult(resultEl, false, 'Test request failed. Check server logs.');
-        });
-    }
-
-    // ---- Dispatcharr Channel Profiles ----
-
-    function loadCachedDispatcharrProfiles(instance, config) {
-        if (!config.CachedDispatcharrProfiles) return;
-        try {
-            var profiles = JSON.parse(config.CachedDispatcharrProfiles);
-            if (profiles && profiles.length > 0) {
-                instance.loadedDispatcharrProfiles = profiles;
-                renderProfileList(instance.view, profiles, instance.selectedDispatcharrProfileIds);
-            }
-        } catch (e) {}
-    }
-
-    function loadDispatcharrProfiles(instance) {
-        var view = instance.view;
-        var listEl = view.querySelector('.dispatcharrProfilesList');
-        var loadingEl = view.querySelector('.dispatcharrProfilesLoading');
-
-        loadingEl.style.display = 'block';
-        listEl.innerHTML = '';
-        listEl.appendChild(loadingEl);
-
-        var apiUrl = ApiClient.getUrl('XtreamTuner/DispatcharrProfiles');
-        ApiClient.getJSON(apiUrl).then(function (profiles) {
-            loadingEl.style.display = 'none';
-            instance.loadedDispatcharrProfiles = profiles;
-
-            if (!profiles || profiles.length === 0) {
-                listEl.innerHTML = '<div style="opacity:0.5;">No profiles found. Check Dispatcharr connection settings.</div>';
-                return;
-            }
-
-            renderProfileList(view, profiles, instance.selectedDispatcharrProfileIds);
-            view.querySelector('.btnSelectAllProfiles').disabled = false;
-            view.querySelector('.btnDeselectAllProfiles').disabled = false;
-            updateProfileCountBadge(view);
-        }).catch(function () {
-            loadingEl.style.display = 'none';
-            listEl.innerHTML = '<div style="color:#cc4444;">Failed to load profiles. Save Dispatcharr settings first.</div>';
-        });
-    }
-
-    function renderProfileList(view, profiles, selectedIds) {
-        var listEl = view.querySelector('.dispatcharrProfilesList');
-        var html = '';
-        for (var i = 0; i < profiles.length; i++) {
-            var p = profiles[i];
-            var checked = (selectedIds || []).indexOf(p.Id) >= 0 ? ' checked' : '';
-            html += '<div class="checkboxContainer" style="margin:0.15em 0;">';
-            html += '<label style="display:flex; align-items:center; cursor:pointer;">';
-            html += '<input type="checkbox" class="dispatcharrProfileCheckbox" data-profile-id="' + p.Id + '"' + checked + ' style="margin-right:0.5em;" onchange="(function(el){var v=el.closest(\'.dispatcharrProfilesList\');v&&v.dispatchEvent(new Event(\'change\',{bubbles:true}));})(this)" />';
-            html += '<span>' + escapeHtml(p.Name || ('Profile ' + p.Id)) + '</span>';
-            html += '</label>';
-            html += '</div>';
-        }
-        listEl.innerHTML = html;
-
-        view.querySelector('.btnSelectAllProfiles').disabled = profiles.length === 0;
-        view.querySelector('.btnDeselectAllProfiles').disabled = profiles.length === 0;
-
-        // Update count badge whenever a checkbox changes
-        listEl.addEventListener('change', function () {
-            updateProfileCountBadge(view);
-        });
-
-        updateProfileCountBadge(view);
-    }
-
-    function toggleAllProfiles(view, checked) {
-        var checkboxes = view.querySelectorAll('.dispatcharrProfileCheckbox');
-        for (var i = 0; i < checkboxes.length; i++) {
-            checkboxes[i].checked = checked;
-        }
-        updateProfileCountBadge(view);
-    }
-
-    function updateProfileCountBadge(view) {
-        var checkboxes = view.querySelectorAll('.dispatcharrProfileCheckbox');
-        var selected = 0;
-        for (var i = 0; i < checkboxes.length; i++) {
-            if (checkboxes[i].checked) selected++;
-        }
-        var badge = view.querySelector('.dispatcharrProfileCountBadge');
-        if (badge) {
-            badge.style.display = checkboxes.length > 0 ? '' : 'none';
-            badge.querySelector('.profileCountSelected').textContent = selected;
-            badge.querySelector('.profileCountTotal').textContent = checkboxes.length;
-        }
-    }
-
-    function getSelectedDispatcharrProfileIds(instance) {
-        var view = instance.view;
-        var checkboxes = view.querySelectorAll('.dispatcharrProfileCheckbox');
-        var ids = [];
-        for (var i = 0; i < checkboxes.length; i++) {
-            if (checkboxes[i].checked) {
-                ids.push(parseInt(checkboxes[i].getAttribute('data-profile-id'), 10));
-            }
-        }
-        // If no checkboxes rendered (page reloaded without refresh), preserve last known selection
-        if (checkboxes.length === 0) {
-            return instance.selectedDispatcharrProfileIds;
-        }
-        return ids;
-    }
-
     // ---- Cached category loading (instant from config) ----
 
     function loadCachedCategories(instance, config) {
@@ -1349,7 +1149,7 @@ function (BaseView, loading) {
             }
 
             statusEl.textContent = 'Loaded ' + categories.length + ' categories';
-            statusEl.style.color = '#52B54B'; statusEl.style.opacity = '1';
+            statusEl.style.color = accentColor; statusEl.style.opacity = '1';
             populateFolderCheckboxes(view, 'movie', categories);
         }).catch(function () {
             statusEl.textContent = 'Failed to load categories. Save connection settings first.';
@@ -1470,7 +1270,7 @@ function (BaseView, loading) {
             }
 
             statusEl.textContent = 'Loaded ' + categories.length + ' categories';
-            statusEl.style.color = '#52B54B'; statusEl.style.opacity = '1';
+            statusEl.style.color = accentColor; statusEl.style.opacity = '1';
             populateFolderCheckboxes(view, 'series', categories);
         }).catch(function () {
             statusEl.textContent = 'Failed to load categories. Save connection settings first.';
@@ -1527,7 +1327,7 @@ function (BaseView, loading) {
         resultEl.innerHTML =
             '<div style="margin:0.5em 0;">' +
                 '<div style="background:rgba(128,128,128,0.2); border-radius:4px; height:20px; overflow:hidden;">' +
-                    '<div style="background:#52B54B; height:100%; width:' + pct + '%; transition:width 0.3s ease; border-radius:4px;"></div>' +
+                    '<div style="background:' + accentColor + '; height:100%; width:' + pct + '%; transition:width 0.3s ease; border-radius:4px;"></div>' +
                 '</div>' +
                 '<div style="opacity:0.7; margin-top:0.4em; font-size:0.9em;">' +
                     escapeHtml(phase) + ' \u2014 ' + completed + ' / ' + total +
@@ -1610,6 +1410,76 @@ function (BaseView, loading) {
         });
     }
 
+    function trialSyncMovies(view) {
+        var resultEl = view.querySelector('.trialMoviesResult');
+        var msgEl = view.querySelector('.trialMoviesMessage');
+        var listEl = view.querySelector('.trialMoviesList');
+        var btn = view.querySelector('.btnTrialSyncMovies');
+        btn.disabled = true;
+        resultEl.style.display = 'block';
+        msgEl.textContent = 'Running trial (30 movies)...';
+        listEl.textContent = '';
+
+        ApiClient.ajax({
+            type: 'POST',
+            url: ApiClient.getUrl('XtreamTuner/Sync/Movies/Trial'),
+            dataType: 'json'
+        }).then(function (result) {
+            btn.disabled = false;
+            if (result.Success) {
+                msgEl.style.color = accentColor;
+                msgEl.textContent = result.Message + ' (' + (result.Preview ? result.Preview.length : 0) + ' items written — no timestamps updated)';
+            } else {
+                msgEl.style.color = '#e74c3c';
+                msgEl.textContent = result.Message || 'Trial failed.';
+            }
+            if (result.Preview && result.Preview.length > 0) {
+                listEl.textContent = result.Preview.join('\n');
+            } else {
+                listEl.textContent = '(no preview items)';
+            }
+        }).catch(function () {
+            btn.disabled = false;
+            msgEl.style.color = '#e74c3c';
+            msgEl.textContent = 'Trial request failed. Check server logs.';
+        });
+    }
+
+    function trialSyncSeries(view) {
+        var resultEl = view.querySelector('.trialSeriesResult');
+        var msgEl = view.querySelector('.trialSeriesMessage');
+        var listEl = view.querySelector('.trialSeriesList');
+        var btn = view.querySelector('.btnTrialSyncSeries');
+        btn.disabled = true;
+        resultEl.style.display = 'block';
+        msgEl.textContent = 'Running trial (30 series)...';
+        listEl.textContent = '';
+
+        ApiClient.ajax({
+            type: 'POST',
+            url: ApiClient.getUrl('XtreamTuner/Sync/Series/Trial'),
+            dataType: 'json'
+        }).then(function (result) {
+            btn.disabled = false;
+            if (result.Success) {
+                msgEl.style.color = accentColor;
+                msgEl.textContent = result.Message + ' (' + (result.Preview ? result.Preview.length : 0) + ' items written — no timestamps updated)';
+            } else {
+                msgEl.style.color = '#e74c3c';
+                msgEl.textContent = result.Message || 'Trial failed.';
+            }
+            if (result.Preview && result.Preview.length > 0) {
+                listEl.textContent = result.Preview.join('\n');
+            } else {
+                listEl.textContent = '(no preview items)';
+            }
+        }).catch(function () {
+            btn.disabled = false;
+            msgEl.style.color = '#e74c3c';
+            msgEl.textContent = 'Trial request failed. Check server logs.';
+        });
+    }
+
     function deleteContent(view, type) {
         var label = type === 'Movies' ? 'movies' : 'series';
         var resultClass = type === 'Movies' ? '.deleteMoviesResult' : '.deleteSeriesResult';
@@ -1651,11 +1521,9 @@ function (BaseView, loading) {
         var resultEl = view.querySelector('.refreshCacheResult');
         resultEl.innerHTML = '<span style="opacity:0.5;">Refreshing cache...</span>';
 
-        var apiUrl = ApiClient.getUrl('XtreamTuner/RefreshCache');
-
         ApiClient.ajax({
             type: 'POST',
-            url: apiUrl
+            url: ApiClient.getUrl('XtreamTuner/RefreshCache')
         }).then(function () {
             setPillResult(resultEl, true, 'Cache refreshed successfully!');
         }).catch(function () {
@@ -1663,23 +1531,17 @@ function (BaseView, loading) {
         });
     }
 
-    function syncGuideMappings(view) {
-        var btn = view.querySelector('.btnSyncGuideMappings');
-        var resultEl = view.querySelector('.guideMappingResult');
-        btn.disabled = true;
-        resultEl.style.display = '';
-        resultEl.innerHTML = '<span style="opacity:0.5;">Syncing guide mappings...</span>';
+    function clearCodecCache(view) {
+        var resultEl = view.querySelector('.clearCodecCacheResult');
+        resultEl.innerHTML = '<span style="opacity:0.5;">Clearing codec cache...</span>';
 
         ApiClient.ajax({
             type: 'POST',
-            url: ApiClient.getUrl('XtreamTuner/SyncGuideMappings'),
-            dataType: 'json'
-        }).then(function (result) {
-            btn.disabled = false;
-            setPillResult(resultEl, result.Success, result.Message);
+            url: ApiClient.getUrl('XtreamTuner/ClearCodecCache')
+        }).then(function () {
+            setPillResult(resultEl, true, 'Codec cache cleared. Channels will be re-probed on next tune.');
         }).catch(function () {
-            btn.disabled = false;
-            setPillResult(resultEl, false, 'Sync request failed. Check server logs.');
+            setPillResult(resultEl, false, 'Failed to clear codec cache.');
         });
     }
 
@@ -1784,168 +1646,6 @@ function (BaseView, loading) {
             });
     }
 
-    function checkForUpdate(view) {
-        // No beta param — server reads UseBetaChannel from its own config.
-        // This lets checkForUpdate run independently of loadConfig.
-        var apiUrl = ApiClient.getUrl('XtreamTuner/CheckUpdate');
-
-        ApiClient.getJSON(apiUrl).then(function (data) {
-            var banner = view.querySelector('.updateBanner');
-            if (!banner) return;
-
-            // Enhance version label with update status
-            var versionEl = view.querySelector('.pluginVersion');
-            if (versionEl && data.CurrentVersion) {
-                if (data.UpdateInstalled) {
-                    versionEl.innerHTML = 'v' + escapeHtml(data.CurrentVersion) +
-                        ' <span style="color:#e67e22;">\u2192 v' + escapeHtml(data.LatestVersion) + ' (restart needed)</span>';
-                } else if (data.UpdateAvailable) {
-                    versionEl.innerHTML = 'v' + escapeHtml(data.CurrentVersion) +
-                        ' <span style="color:#e67e22;">— update available</span>';
-                } else {
-                    versionEl.innerHTML = 'v' + escapeHtml(data.CurrentVersion) +
-                        ' <span style="color:#52B54B;">— latest</span>';
-                }
-            }
-
-            if (data.UpdateInstalled) {
-                // Update already installed, show restart banner
-                banner.style.background = 'rgba(230,126,34,0.15)';
-                banner.style.borderColor = 'rgba(230,126,34,0.4)';
-                view.querySelector('.updateBannerTitle').textContent = 'Update Installed:';
-                view.querySelector('.updateBannerText').textContent =
-                    'v' + data.LatestVersion + ' has been installed. Restart Emby to apply.';
-                view.querySelector('.btnInstallUpdate').style.display = 'none';
-                view.querySelector('.btnRestartEmby').style.display = '';
-                var link = view.querySelector('.updateBannerLink');
-                if (data.ReleaseUrl) {
-                    link.href = data.ReleaseUrl;
-                    link.style.display = '';
-                } else {
-                    link.style.display = 'none';
-                }
-                view.querySelector('.updateStatus').style.display = 'none';
-                banner.style.display = 'block';
-            } else if (data.UpdateAvailable) {
-                var isBeta = !!data.IsPreRelease;
-                banner.style.background = isBeta ? 'rgba(230,152,34,0.15)' : 'rgba(82,181,75,0.15)';
-                banner.style.borderColor = isBeta ? 'rgba(230,152,34,0.4)' : 'rgba(82,181,75,0.4)';
-                view.querySelector('.updateBannerTitle').textContent = 'Update Available:';
-                var betaLabel = isBeta ? ' (beta)' : '';
-                view.querySelector('.updateBannerText').textContent =
-                    'v' + data.LatestVersion + betaLabel + ' is available (you have v' + data.CurrentVersion + ')';
-                view.querySelector('.btnInstallUpdate').style.display = '';
-                view.querySelector('.btnInstallUpdate').disabled = false;
-                view.querySelector('.btnRestartEmby').style.display = 'none';
-                var link = view.querySelector('.updateBannerLink');
-                if (data.ReleaseUrl) {
-                    link.href = data.ReleaseUrl;
-                    link.style.display = '';
-                } else {
-                    link.style.display = 'none';
-                }
-                // Hide install button if no download URL
-                if (!data.DownloadUrl) {
-                    view.querySelector('.btnInstallUpdate').style.display = 'none';
-                }
-                view.querySelector('.updateStatus').style.display = 'none';
-                banner.style.display = 'block';
-            } else {
-                banner.style.display = 'none';
-            }
-        }).catch(function (err) {
-            console.error('Xtream: update check failed', err);
-        });
-    }
-
-    function installUpdate(view) {
-        var btn = view.querySelector('.btnInstallUpdate');
-        var statusEl = view.querySelector('.updateStatus');
-        btn.disabled = true;
-        btn.textContent = 'Installing...';
-        statusEl.style.display = 'block';
-        statusEl.innerHTML = '<span style="opacity:0.5;">Downloading and installing update...</span>';
-
-        ApiClient.ajax({
-            type: 'POST',
-            url: ApiClient.getUrl('XtreamTuner/InstallUpdate'),
-            dataType: 'json'
-        }).then(function (result) {
-            if (result.Success) {
-                statusEl.innerHTML = '<span style="color:#52B54B;">' + escapeHtml(result.Message) + '</span>';
-                // Switch banner to restart state
-                var banner = view.querySelector('.updateBanner');
-                banner.style.background = 'rgba(230,126,34,0.15)';
-                banner.style.borderColor = 'rgba(230,126,34,0.4)';
-                view.querySelector('.updateBannerTitle').textContent = 'Update Installed:';
-                btn.style.display = 'none';
-                view.querySelector('.btnRestartEmby').style.display = '';
-            } else {
-                statusEl.innerHTML = '<span style="color:#cc0000;">' + escapeHtml(result.Message) + '</span>';
-                btn.disabled = false;
-                btn.textContent = 'Update Now';
-            }
-        }).catch(function () {
-            statusEl.innerHTML = '<span style="color:#cc0000;">Install request failed. Check server logs.</span>';
-            btn.disabled = false;
-            btn.textContent = 'Update Now';
-        });
-    }
-
-    function restartEmby(view) {
-        if (!confirm('Are you sure you want to restart Emby? All active streams will be interrupted.')) {
-            return;
-        }
-
-        var btn = view.querySelector('.btnRestartEmby');
-        var statusEl = view.querySelector('.updateStatus');
-        btn.disabled = true;
-        btn.textContent = 'Restarting...';
-        statusEl.style.display = 'block';
-        statusEl.innerHTML = '<span style="opacity:0.5;">Restarting Emby server...</span>';
-
-        ApiClient.ajax({
-            type: 'POST',
-            url: ApiClient.getUrl('XtreamTuner/RestartEmby')
-        }).then(function () {
-            statusEl.innerHTML = '<span style="opacity:0.5;">Waiting for server to come back...</span>';
-            pollServerReady(view);
-        }).catch(function () {
-            // Server may have already restarted and dropped the connection
-            statusEl.innerHTML = '<span style="opacity:0.5;">Waiting for server to come back...</span>';
-            pollServerReady(view);
-        });
-    }
-
-    function pollServerReady(view) {
-        var statusEl = view.querySelector('.updateStatus');
-        var attempts = 0;
-        var maxAttempts = 60; // 60 * 2s = 2 minutes
-
-        var pollId = setInterval(function () {
-            attempts++;
-            if (attempts > maxAttempts) {
-                clearInterval(pollId);
-                statusEl.innerHTML = '<span style="color:#cc0000;">Server did not come back within 2 minutes. Try reloading manually.</span>';
-                return;
-            }
-
-            var xhr = new XMLHttpRequest();
-            xhr.open('GET', ApiClient.getUrl('System/Info/Public'), true);
-            xhr.timeout = 3000;
-            xhr.onload = function () {
-                if (xhr.status >= 200 && xhr.status < 300) {
-                    clearInterval(pollId);
-                    statusEl.innerHTML = '<span style="color:#52B54B;">Server is back! Reloading...</span>';
-                    setTimeout(function () { window.location.reload(); }, 1000);
-                }
-            };
-            xhr.onerror = function () { };
-            xhr.ontimeout = function () { };
-            xhr.send();
-        }, 2000);
-    }
-
     function renderDashboardStatus(view, data) {
         // Show plugin version from dashboard data (independent of update check)
         var versionEl = view.querySelector('.pluginVersion');
@@ -2000,7 +1700,7 @@ function (BaseView, loading) {
         var seriesEntry = last.WasSeriesSync ? last : (companion && companion.WasSeriesSync ? companion : null);
 
         function statTile(value, label, color) {
-            return '<div class="dashboard-stat"><div class="stat-value" style="color:' + (color || '#52B54B') + ';">' + value + '</div><div class="stat-label">' + label + '</div></div>';
+            return '<div class="dashboard-stat"><div class="stat-value" style="color:' + (color || accentColor) + ';">' + value + '</div><div class="stat-label">' + label + '</div></div>';
         }
         function rowLabel(text) {
             return '<div style="font-size:0.75em; font-weight:600; opacity:0.45; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:0.35em;">' + text + '</div>';
@@ -2023,9 +1723,9 @@ function (BaseView, loading) {
                 statsHtml +=
                     statTile(movDiskTotal, 'Total') +
                     statTile(movUpToDate, 'Up to date', '#aaa') +
-                    statTile(mAdded > 0 ? '+' + mAdded : '0', 'Added', mAdded > 0 ? '#52B54B' : '#aaa') +
+                    statTile(mAdded > 0 ? '+' + mAdded : '0', 'Added', mAdded > 0 ? accentColor : '#aaa') +
                     statTile(mDeleted > 0 ? mDeleted : '0', 'Deleted', mDeleted > 0 ? '#e74c3c' : '#aaa') +
-                    statTile(movieEntry.MoviesFailed, 'Failed', movieEntry.MoviesFailed > 0 ? '#cc0000' : '#52B54B');
+                    statTile(movieEntry.MoviesFailed, 'Failed', movieEntry.MoviesFailed > 0 ? '#cc0000' : accentColor);
             }
 
             if (seriesEntry) {
@@ -2035,9 +1735,9 @@ function (BaseView, loading) {
                 statsHtml +=
                     statTile(epDiskTotal, 'Total') +
                     statTile(epUpToDate, 'Up to date', '#aaa') +
-                    statTile(sAdded > 0 ? '+' + sAdded : '0', 'Added', sAdded > 0 ? '#52B54B' : '#aaa') +
+                    statTile(sAdded > 0 ? '+' + sAdded : '0', 'Added', sAdded > 0 ? accentColor : '#aaa') +
                     statTile(sDeleted > 0 ? sDeleted : '0', 'Deleted', sDeleted > 0 ? '#e74c3c' : '#aaa') +
-                    statTile(seriesEntry.EpisodeFailed, 'Failed', seriesEntry.EpisodeFailed > 0 ? '#cc0000' : '#52B54B');
+                    statTile(seriesEntry.EpisodeFailed, 'Failed', seriesEntry.EpisodeFailed > 0 ? '#cc0000' : accentColor);
             }
 
             statsHtml += '</div>';
@@ -2131,7 +1831,7 @@ function (BaseView, loading) {
             var finalTotal = (e.MoviesTotal || 0) - (e.MoviesDeleted || 0);
             return finalTotal +
                 ' <span style="opacity:0.5;">(' +
-                '<span style="color:#52B54B; opacity:1;">+' + (e.MoviesAdded || 0) + '</span> ' +
+                '<span style="color:' + accentColor + '; opacity:1;">+' + (e.MoviesAdded || 0) + '</span> ' +
                 '<span style="color:#e74c3c; opacity:1;">-' + (e.MoviesDeleted || 0) + '</span>, ' +
                 e.MoviesFailed + ' fail' +
                 ')</span>';
@@ -2139,7 +1839,7 @@ function (BaseView, loading) {
         function historySeriesCol(e) {
             return (e.EpisodeTotal || 0) +
                 ' <span style="opacity:0.5;">(' +
-                '<span style="color:#52B54B; opacity:1;">+' + (e.EpisodeAdded || 0) + '</span> ' +
+                '<span style="color:' + accentColor + '; opacity:1;">+' + (e.EpisodeAdded || 0) + '</span> ' +
                 '<span style="color:#e74c3c; opacity:1;">-' + (e.EpisodeDeleted || 0) + '</span>, ' +
                 (e.EpisodeSkipped || 0) + ' skip, ' +
                 (e.EpisodeFailed || 0) + ' fail' +
@@ -2369,7 +2069,6 @@ function (BaseView, loading) {
 
     function renderHealthBar(view, config) {
         var xtreamItem      = view.querySelector('.healthItemXtream');
-        var dispatcharrItem = view.querySelector('.healthItemDispatcharr');
         var syncItem        = view.querySelector('.healthItemLastSync');
         if (!xtreamItem) return;
 
@@ -2379,13 +2078,6 @@ function (BaseView, loading) {
         xtreamItem.querySelector('.healthLabel').textContent = xtreamOk
             ? 'Xtream: Connected (' + config.Username + ')'
             : 'Xtream: Not configured';
-
-        // Dispatcharr dot
-        var dispatcharrOn = !!config.EnableDispatcharr;
-        setHealthDot(dispatcharrItem, dispatcharrOn ? 'ok' : 'grey');
-        dispatcharrItem.querySelector('.healthLabel').textContent = dispatcharrOn
-            ? 'Dispatcharr: Active'
-            : 'Dispatcharr: Disabled';
 
         // Last sync dot — prefer SyncHistoryJson[0].EndTime (updated on every sync),
         // fall back to LastMovieSyncTimestamp (may be Unix epoch int or ISO string).
@@ -2425,7 +2117,7 @@ function (BaseView, loading) {
     function setHealthDot(itemEl, status) {
         var dot = itemEl.querySelector('.healthDot');
         if (!dot) return;
-        var colours = { ok: '#52B54B', error: '#cc0000', grey: '#888' };
+        var colours = { ok: accentColor, error: '#cc0000', grey: '#888' };
         dot.style.background = colours[status] || colours.grey;
     }
 
@@ -2546,6 +2238,57 @@ function (BaseView, loading) {
             cards[i].classList.toggle('active', cards[i].getAttribute('data-mode') === val);
         }
     }
+
+    // Expose trial run handlers on window so plain-button onclick attributes can reach them.
+    window.XtreamTrialMovies = function (btn) {
+        var container = btn.closest('.tabPanel') || document;
+        var resultEl = container.querySelector('.trialMoviesResult');
+        var msgEl = container.querySelector('.trialMoviesMessage');
+        var listEl = container.querySelector('.trialMoviesList');
+        btn.disabled = true;
+        resultEl.style.display = 'block';
+        msgEl.style.color = '';
+        msgEl.textContent = 'Running trial (30 movies)...';
+        listEl.textContent = '';
+        ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('XtreamTuner/Sync/Movies/Trial'), dataType: 'json' })
+            .then(function (result) {
+                btn.disabled = false;
+                msgEl.style.color = result.Success ? accentColor : '#e74c3c';
+                msgEl.textContent = result.Success
+                    ? result.Message + ' (' + (result.Preview ? result.Preview.length : 0) + ' items written \u2014 no timestamps updated)'
+                    : (result.Message || 'Trial failed.');
+                listEl.textContent = (result.Preview && result.Preview.length > 0) ? result.Preview.join('\n') : '(no preview items)';
+            }).catch(function () {
+                btn.disabled = false;
+                msgEl.style.color = '#e74c3c';
+                msgEl.textContent = 'Trial request failed. Check server logs.';
+            });
+    };
+
+    window.XtreamTrialSeries = function (btn) {
+        var container = btn.closest('.tabPanel') || document;
+        var resultEl = container.querySelector('.trialSeriesResult');
+        var msgEl = container.querySelector('.trialSeriesMessage');
+        var listEl = container.querySelector('.trialSeriesList');
+        btn.disabled = true;
+        resultEl.style.display = 'block';
+        msgEl.style.color = '';
+        msgEl.textContent = 'Running trial (30 series)...';
+        listEl.textContent = '';
+        ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('XtreamTuner/Sync/Series/Trial'), dataType: 'json' })
+            .then(function (result) {
+                btn.disabled = false;
+                msgEl.style.color = result.Success ? accentColor : '#e74c3c';
+                msgEl.textContent = result.Success
+                    ? result.Message + ' (' + (result.Preview ? result.Preview.length : 0) + ' items written \u2014 no timestamps updated)'
+                    : (result.Message || 'Trial failed.');
+                listEl.textContent = (result.Preview && result.Preview.length > 0) ? result.Preview.join('\n') : '(no preview items)';
+            }).catch(function () {
+                btn.disabled = false;
+                msgEl.style.color = '#e74c3c';
+                msgEl.textContent = 'Trial request failed. Check server logs.';
+            });
+    };
 
     return View;
 });

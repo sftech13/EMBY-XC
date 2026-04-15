@@ -1,5 +1,7 @@
 # Channel Identifiarr
 
+> Historical note: this document describes an external tool used in earlier guide-data experiments. The current plugin code no longer depends on Channel Identifiarr or Dispatcharr for its core runtime flow.
+
 A web-based TV channel lineup search and Dispatcharr/Emby integration tool. It bridges a local Gracenote SQLite database with Dispatcharr and Emby, automating the process of matching IPTV channels to Gracenote station IDs.
 
 - **GitHub**: [egyptiangio/channelidentifiarr](https://github.com/egyptiangio/channelidentifiarr)

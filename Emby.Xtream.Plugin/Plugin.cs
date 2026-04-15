@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Net.Http;
+using System.Threading.Tasks;
 using Emby.Xtream.Plugin.Service;
 using MediaBrowser.Common;
 using MediaBrowser.Common.Configuration;
@@ -29,6 +30,26 @@ namespace Emby.Xtream.Plugin
             _applicationPaths = applicationPaths;
             _liveTvService = new LiveTvService(logManager.GetLogger("XtreamTuner.LiveTv"));
             _strmSyncService = new StrmSyncService(logManager.GetLogger("XtreamTuner.StrmSync"));
+
+            // Pre-warm the channel cache in the background so the first guide load is instant.
+            // Configuration must NOT be accessed here — DI isn't fully wired at construction time.
+            // The check is deferred into the lambda which runs after startup completes.
+            _ = Task.Run(async () =>
+            {
+                // Small delay to let Emby finish its own startup before we hit the network.
+                await Task.Delay(TimeSpan.FromSeconds(15)).ConfigureAwait(false);
+                try
+                {
+                    var cfg = Plugin.InstanceOrNull?.Configuration;
+                    if (cfg != null && cfg.EnableLiveTv &&
+                        !string.IsNullOrEmpty(cfg.BaseUrl) &&
+                        !string.IsNullOrEmpty(cfg.Username))
+                    {
+                        await _liveTvService.GetFilteredChannelsAsync(System.Threading.CancellationToken.None).ConfigureAwait(false);
+                    }
+                }
+                catch { /* best-effort pre-warm, ignore errors */ }
+            });
         }
 
         public override string Name => "Xtream Tuner";

@@ -5,7 +5,6 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Emby.Xtream.Plugin.Client;
 using Emby.Xtream.Plugin.Client.Models;
 using Emby.Xtream.Plugin.Service;
 using MediaBrowser.Controller.Api;
@@ -35,6 +34,11 @@ namespace Emby.Xtream.Plugin.Api
     {
     }
 
+    [Route("/XtreamTuner/ClearCodecCache", "POST", Summary = "Clears per-channel codec cache so all channels are re-probed on next tune")]
+    public class ClearCodecCache : IReturnVoid
+    {
+    }
+
     [Route("/XtreamTuner/Categories/Vod", "GET", Summary = "Gets VOD movie categories from Xtream API")]
     public class GetVodCategories : IReturn<List<Category>>
     {
@@ -52,6 +56,16 @@ namespace Emby.Xtream.Plugin.Api
 
     [Route("/XtreamTuner/Sync/Series", "POST", Summary = "Triggers series STRM sync")]
     public class SyncSeries : IReturn<SyncResult>
+    {
+    }
+
+    [Route("/XtreamTuner/Sync/Movies/Trial", "POST", Summary = "Runs a trial movie sync of up to 30 items without updating timestamps")]
+    public class TrialSyncMovies : IReturn<SyncResult>
+    {
+    }
+
+    [Route("/XtreamTuner/Sync/Series/Trial", "POST", Summary = "Runs a trial series sync of up to 30 items without updating timestamps")]
+    public class TrialSyncSeries : IReturn<SyncResult>
     {
     }
 
@@ -97,19 +111,6 @@ namespace Emby.Xtream.Plugin.Api
     {
     }
 
-    [Route("/XtreamTuner/TestDispatcharr", "POST", Summary = "Tests connection to Dispatcharr")]
-    public class TestDispatcharrConnection : IReturn<TestConnectionResult>
-    {
-        public string Url { get; set; }
-        public string Username { get; set; }
-        public string Password { get; set; }
-    }
-
-    [Route("/XtreamTuner/DispatcharrProfiles", "GET", Summary = "Gets Channel Profiles from Dispatcharr")]
-    public class GetDispatcharrProfiles : IReturn<List<Client.Models.DispatcharrProfile>>
-    {
-    }
-
     [Route("/XtreamTuner/CheckUpdate", "GET", Summary = "Checks GitHub for a newer plugin release")]
     public class CheckForUpdate : IReturn<UpdateCheckResult>
     {
@@ -148,18 +149,6 @@ namespace Emby.Xtream.Plugin.Api
         public int? Year { get; set; }
     }
 
-    [Route("/XtreamTuner/SyncGuideMappings", "POST", Summary = "Detaches listing providers from the Xtream tuner so Gracenote EPG is fetched by the tuner directly")]
-    public class SyncGuideMappings : IReturn<SyncGuideMappingsResult>
-    {
-    }
-
-    public class SyncGuideMappingsResult
-    {
-        public bool Success { get; set; }
-        public string Message { get; set; }
-        public int ProvidersUpdated { get; set; }
-    }
-
     public class TestConnectionResult
     {
         public bool Success { get; set; }
@@ -194,6 +183,8 @@ namespace Emby.Xtream.Plugin.Api
         public int Completed { get; set; }
         public int Skipped { get; set; }
         public int Failed { get; set; }
+        /// <summary>Populated only for trial runs. Each entry is "Title → relative/path".</summary>
+        public List<string> Preview { get; set; }
     }
 
     public class SyncStatusResult
@@ -474,6 +465,98 @@ namespace Emby.Xtream.Plugin.Api
             {
                 result.Success = false;
                 result.Message = "Series sync failed: " + ex.Message;
+            }
+
+            return result;
+        }
+
+        public async Task<object> Post(TrialSyncMovies request)
+        {
+            var config = Plugin.Instance.Configuration;
+            var syncService = Plugin.Instance.StrmSyncService;
+            var result = new SyncResult();
+
+            if (!config.SyncMovies)
+            {
+                result.Success = false;
+                result.Message = "Movie sync is not enabled. Enable it in Settings first.";
+                return result;
+            }
+
+            if (syncService.MovieProgress.IsRunning)
+            {
+                result.Success = false;
+                result.Message = "Movie sync is already running.";
+                return result;
+            }
+
+            try
+            {
+                await syncService.SyncMoviesAsync(
+                    config,
+                    CancellationToken.None,
+                    saveConfig: null,
+                    taskProgress: null,
+                    trialLimit: 30).ConfigureAwait(false);
+                var progress = syncService.MovieProgress;
+                result.Success = string.IsNullOrEmpty(progress.AbortReason);
+                result.Message = result.Success ? "Trial movie sync completed (no timestamps updated)." : progress.AbortReason;
+                result.Total = progress.Total;
+                result.Completed = progress.Completed;
+                result.Skipped = progress.Skipped;
+                result.Failed = progress.Failed;
+                result.Preview = new List<string>(progress.PreviewItems);
+            }
+            catch (Exception ex)
+            {
+                result.Success = false;
+                result.Message = "Trial movie sync failed: " + ex.Message;
+            }
+
+            return result;
+        }
+
+        public async Task<object> Post(TrialSyncSeries request)
+        {
+            var config = Plugin.Instance.Configuration;
+            var syncService = Plugin.Instance.StrmSyncService;
+            var result = new SyncResult();
+
+            if (!config.SyncSeries)
+            {
+                result.Success = false;
+                result.Message = "Series sync is not enabled. Enable it in Settings first.";
+                return result;
+            }
+
+            if (syncService.SeriesProgress.IsRunning)
+            {
+                result.Success = false;
+                result.Message = "Series sync is already running.";
+                return result;
+            }
+
+            try
+            {
+                await syncService.SyncSeriesAsync(
+                    config,
+                    CancellationToken.None,
+                    saveConfig: null,
+                    taskProgress: null,
+                    trialLimit: 30).ConfigureAwait(false);
+                var progress = syncService.SeriesProgress;
+                result.Success = string.IsNullOrEmpty(progress.AbortReason);
+                result.Message = result.Success ? "Trial series sync completed (no timestamps updated)." : progress.AbortReason;
+                result.Total = progress.Total;
+                result.Completed = progress.Completed;
+                result.Skipped = progress.Skipped;
+                result.Failed = progress.Failed;
+                result.Preview = new List<string>(progress.PreviewItems);
+            }
+            catch (Exception ex)
+            {
+                result.Success = false;
+                result.Message = "Trial series sync failed: " + ex.Message;
             }
 
             return result;
@@ -789,6 +872,11 @@ namespace Emby.Xtream.Plugin.Api
             XtreamTunerHost.Instance?.ClearCaches();
         }
 
+        public void Post(ClearCodecCache request)
+        {
+            StreamProbeService.ClearCache();
+        }
+
         public object Get(GetWritablePaths request)
         {
             return EnumerateWritableMountPaths();
@@ -995,71 +1083,6 @@ namespace Emby.Xtream.Plugin.Api
             return result;
         }
 
-        public async Task<object> Post(TestDispatcharrConnection request)
-        {
-            var result = new TestConnectionResult();
-            var url = request.Url;
-            var user = request.Username ?? "";
-            var pass = request.Password ?? "";
-
-            if (string.IsNullOrEmpty(url))
-            {
-                result.Success = false;
-                result.Message = "Please enter Dispatcharr URL.";
-                return result;
-            }
-
-            try
-            {
-                var logManager = Plugin.Instance.ApplicationHost.Resolve<ILogManager>();
-                var client = new DispatcharrClient(logManager.GetLogger("XtreamTuner.DispatcharrTest"));
-                client.Configure(user, pass);
-
-                var (success, message) = await client.TestConnectionDetailedAsync(
-                    url, user, pass,
-                    CancellationToken.None).ConfigureAwait(false);
-
-                result.Success = success;
-                result.Message = message;
-            }
-            catch (Exception ex)
-            {
-                result.Success = false;
-                result.Message = "Unexpected error: " + ex.Message;
-            }
-
-            return result;
-        }
-
-        public async Task<object> Get(GetDispatcharrProfiles request)
-        {
-            var config = Plugin.Instance?.Configuration;
-            if (config == null || !config.EnableDispatcharr || string.IsNullOrEmpty(config.DispatcharrUrl))
-                return new List<Client.Models.DispatcharrProfile>();
-
-            try
-            {
-                var logManager = Plugin.Instance.ApplicationHost.Resolve<ILogManager>();
-                var client = new DispatcharrClient(logManager.GetLogger("XtreamTuner.DispatcharrProfiles"));
-                client.Configure(config.DispatcharrUser, config.DispatcharrPass);
-
-                var profiles = await client.GetProfilesAsync(config.DispatcharrUrl, CancellationToken.None)
-                    .ConfigureAwait(false);
-
-                // Cache for instant UI loading on next page open
-                config.CachedDispatcharrProfiles = System.Text.Json.JsonSerializer.Serialize(
-                    profiles.Select(p => new { p.Id, p.Name }).ToList());
-                Plugin.Instance.SaveConfiguration();
-
-                return profiles;
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn("Failed to fetch Dispatcharr profiles: {0}", ex.Message);
-                return new List<Client.Models.DispatcharrProfile>();
-            }
-        }
-
         public async Task<object> Get(CheckForUpdate request)
         {
             // Always invalidate before a user-initiated check so the dashboard
@@ -1204,34 +1227,6 @@ namespace Emby.Xtream.Plugin.Api
             catch { }
         }
 
-        public object Post(SyncGuideMappings request)
-        {
-            var result = new SyncGuideMappingsResult();
-
-            var tunerHost = XtreamTunerHost.Instance;
-            if (tunerHost == null)
-            {
-                result.Message = "Xtream tuner host is not initialized.";
-                return result;
-            }
-
-            try
-            {
-                var updated = tunerHost.DetachListingProviders();
-                result.Success = true;
-                result.ProvidersUpdated = updated;
-                result.Message = updated > 0
-                    ? string.Format("Detached Xtream tuner from {0} listing provider(s). Gracenote EPG is now fetched by the tuner directly for channels with station IDs; all other channels use Xtream EPG.", updated)
-                    : "Xtream tuner is already detached from all listing providers. Gracenote EPG will be fetched by the tuner for channels with station IDs.";
-            }
-            catch (Exception ex)
-            {
-                result.Message = "Failed: " + ex.Message;
-            }
-
-            return result;
-        }
-
         public object Get(GetSanitizedLogs request)
         {
             var config = Plugin.Instance.Configuration;
@@ -1246,7 +1241,7 @@ namespace Emby.Xtream.Plugin.Api
                     .Take(5)
                     .ToArray();
 
-                var keywords = new[] { "XtreamTuner", "Xtream", "Dispatcharr", "LiveTv" };
+                var keywords = new[] { "XtreamTuner", "Xtream", "LiveTv" };
 
                 foreach (var logFile in logFiles)
                 {
@@ -1278,8 +1273,7 @@ namespace Emby.Xtream.Plugin.Api
             foreach (var line in lines)
             {
                 var s = LogSanitizer.SanitizeLine(line,
-                    config.Username, config.Password,
-                    config.DispatcharrUser, config.DispatcharrPass);
+                    config.Username, config.Password);
                 sanitized.AppendLine(s);
             }
 

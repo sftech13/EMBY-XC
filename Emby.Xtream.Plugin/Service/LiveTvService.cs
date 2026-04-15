@@ -68,10 +68,6 @@ namespace Emby.Xtream.Plugin.Service
                 }
 
                 _logger.Info("Generating M3U playlist");
-                // Ensure Dispatcharr maps are loaded so tvg-id and tvc-guide-stationid
-                // attributes are available even if Emby hasn't polled the tuner yet.
-                if (XtreamTunerHost.Instance != null)
-                    await XtreamTunerHost.Instance.EnsureStatsLoadedAsync(cancellationToken).ConfigureAwait(false);
                 var channelsTask = GetFilteredChannelsAsync(cancellationToken);
                 var categoriesTask = GetLiveCategoriesAsync(cancellationToken);
                 Dictionary<int, string> categoryMap;
@@ -88,9 +84,7 @@ namespace Emby.Xtream.Plugin.Service
                 }
 
                 var channels = channelsTask.Result;
-                var m3u = GenerateM3U(channels, config, categoryMap,
-                    XtreamTunerHost.Instance?.TvgIdMap,
-                    XtreamTunerHost.Instance?.StationIdMap);
+                var m3u = GenerateM3U(channels, config, categoryMap);
 
                 _cachedM3U = m3u;
                 _m3uCacheTime = DateTime.UtcNow;
@@ -183,37 +177,17 @@ namespace Emby.Xtream.Plugin.Service
         {
             var config = Plugin.Instance.Configuration;
 
-            List<LiveStreamInfo> allChannels;
+            // Always fetch the full channel list so the global `num` field is preserved.
+            // Per-category fetches reset `num` to 1 within each category, causing duplicate
+            // channel numbers in the guide. Filtering to selected categories is done in-memory.
+            var allChannels = await FetchAllChannelsAsync(cancellationToken).ConfigureAwait(false);
 
             if (config.SelectedLiveCategoryIds != null && config.SelectedLiveCategoryIds.Length > 0)
             {
-                allChannels = new List<LiveStreamInfo>();
-                var semaphore = new SemaphoreSlim(5);
-                var tasks = config.SelectedLiveCategoryIds.Select(async categoryId =>
-                {
-                    await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
-                    try
-                    {
-                        return await FetchChannelsByCategoryAsync(categoryId, cancellationToken).ConfigureAwait(false);
-                    }
-                    finally
-                    {
-                        semaphore.Release();
-                    }
-                });
-
-                var results = await Task.WhenAll(tasks).ConfigureAwait(false);
-                foreach (var result in results)
-                {
-                    allChannels.AddRange(result);
-                }
-
-                // Remove duplicates by StreamId
-                allChannels = allChannels.GroupBy(c => c.StreamId).Select(g => g.First()).ToList();
-            }
-            else
-            {
-                allChannels = await FetchAllChannelsAsync(cancellationToken).ConfigureAwait(false);
+                var selectedIds = new HashSet<int>(config.SelectedLiveCategoryIds);
+                allChannels = allChannels
+                    .Where(c => c.CategoryId.HasValue && selectedIds.Contains(c.CategoryId.Value))
+                    .ToList();
             }
 
             // Filter adult channels
@@ -284,9 +258,7 @@ namespace Emby.Xtream.Plugin.Service
         private static string GenerateM3U(
             List<LiveStreamInfo> channels,
             PluginConfiguration config,
-            Dictionary<int, string> categoryNames,
-            IReadOnlyDictionary<int, string> tvgIdMap = null,
-            IReadOnlyDictionary<int, string> stationIdMap = null)
+            Dictionary<int, string> categoryNames)
         {
             var sb = new StringBuilder();
             sb.AppendLine("#EXTM3U");
@@ -298,18 +270,9 @@ namespace Emby.Xtream.Plugin.Service
                     config.ChannelRemoveTerms,
                     config.EnableChannelNameCleaning);
 
-                // Priority for tvg-id:
-                //  1. Dispatcharr tvg_id override
-                //  2. Xtream epg_channel_id
-                //  3. numeric stream ID
-                string epgId;
-                if (tvgIdMap != null && tvgIdMap.TryGetValue(channel.StreamId, out var dispatcharrTvgId)
-                    && !string.IsNullOrEmpty(dispatcharrTvgId))
-                    epgId = dispatcharrTvgId;
-                else
-                    epgId = !string.IsNullOrEmpty(channel.EpgChannelId)
-                        ? channel.EpgChannelId
-                        : channel.StreamId.ToString(CultureInfo.InvariantCulture);
+                var epgId = !string.IsNullOrEmpty(channel.EpgChannelId)
+                    ? channel.EpgChannelId
+                    : channel.StreamId.ToString(CultureInfo.InvariantCulture);
 
                 var extinf = new StringBuilder();
                 extinf.Append("#EXTINF:-1");
@@ -322,17 +285,12 @@ namespace Emby.Xtream.Plugin.Service
                     extinf.AppendFormat(CultureInfo.InvariantCulture, " tvg-logo=\"{0}\"", EscapeAttribute(channel.StreamIcon));
                 }
 
-                if (channel.CategoryId.HasValue
+                if (config.IncludeGroupTitleInM3U
+                    && channel.CategoryId.HasValue
                     && categoryNames.TryGetValue(channel.CategoryId.Value, out var groupTitle)
                     && !string.IsNullOrEmpty(groupTitle))
                 {
                     extinf.AppendFormat(CultureInfo.InvariantCulture, " group-title=\"{0}\"", EscapeAttribute(groupTitle));
-                }
-
-                if (stationIdMap != null && stationIdMap.TryGetValue(channel.StreamId, out var stationId)
-                    && !string.IsNullOrEmpty(stationId))
-                {
-                    extinf.AppendFormat(CultureInfo.InvariantCulture, " tvc-guide-stationid=\"{0}\"", EscapeAttribute(stationId));
                 }
 
                 extinf.AppendFormat(CultureInfo.InvariantCulture, ",{0}", cleanName);

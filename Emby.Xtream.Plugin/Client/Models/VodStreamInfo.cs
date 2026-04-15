@@ -14,6 +14,7 @@ namespace Emby.Xtream.Plugin.Client.Models
         public string StreamIcon { get; set; } = string.Empty;
 
         [JsonPropertyName("rating")]
+        [JsonConverter(typeof(StringOrNumberConverter))]
         public string Rating { get; set; } = string.Empty;
 
         [JsonPropertyName("category_id")]
@@ -23,7 +24,7 @@ namespace Emby.Xtream.Plugin.Client.Models
         public string ContainerExtension { get; set; } = "mp4";
 
         [JsonPropertyName("added")]
-        public long Added { get; set; }
+        public double? Added { get; set; }
 
         [JsonPropertyName("tmdb_id")]
         public string TmdbId { get; set; } = string.Empty;

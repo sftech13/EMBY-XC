@@ -23,7 +23,7 @@ namespace Emby.Xtream.Plugin.Client.Models
         public string EpgChannelId { get; set; } = string.Empty;
 
         [JsonPropertyName("added")]
-        public long Added { get; set; }
+        public double? Added { get; set; }
 
         [JsonPropertyName("category_id")]
         public int? CategoryId { get; set; }

@@ -29,8 +29,7 @@ namespace Emby.Xtream.Plugin.Service
         /// Xtream URL credentials, emails, and provider hostnames.
         /// </summary>
         public static string SanitizeLine(string line,
-            string username, string password,
-            string dispatcharrUser, string dispatcharrPass)
+            string username, string password)
         {
             if (string.IsNullOrEmpty(line)) return line;
 
@@ -41,10 +40,6 @@ namespace Emby.Xtream.Plugin.Service
                 s = s.Replace(username, "<redacted>");
             if (!string.IsNullOrEmpty(password))
                 s = s.Replace(password, "<redacted>");
-            if (!string.IsNullOrEmpty(dispatcharrUser))
-                s = s.Replace(dispatcharrUser, "<redacted>");
-            if (!string.IsNullOrEmpty(dispatcharrPass))
-                s = s.Replace(dispatcharrPass, "<redacted>");
 
             // Redact IP addresses, but preserve version numbers (e.g. Version=1.2.0.0)
             // Replace version patterns with placeholders first, then redact IPs, then restore

@@ -14,12 +14,16 @@ namespace Emby.Xtream.Plugin
         // Live TV
         public bool EnableLiveTv { get; set; } = true;
         public string LiveTvOutputFormat { get; set; } = "ts";
+        public bool EnableLiveTvDirectPlay { get; set; } = true;
+
+        // Per-channel codec cache: JSON dict (streamId → {VideoCodec, AudioCodec})
+        // Populated automatically by background ffprobe on first tune; used to skip
+        // Emby's own probe on subsequent tunes (same effect as TiviMate's codec cache).
+        public string StreamCodecCacheJson { get; set; } = string.Empty;
 
         // EPG / Guide Data
         public EpgSourceMode EpgSource { get; set; } = EpgSourceMode.XtreamServer;
         public string CustomEpgUrl { get; set; } = string.Empty;
-        public bool DeferEpgToGuideData { get; set; } = true;
-
         // Back-compat: migrate EnableEpg (bool) → EpgSource on first load
         [Obsolete("Use EpgSource instead")] public bool EnableEpg { get; set; } = true;
         public int EpgCacheMinutes { get; set; } = 30;
@@ -29,20 +33,11 @@ namespace Emby.Xtream.Plugin
         // Category filtering
         public int[] SelectedLiveCategoryIds { get; set; } = new int[0];
         public bool IncludeAdultChannels { get; set; }
+        public bool IncludeGroupTitleInM3U { get; set; } = true;
 
         // Channel name cleaning
         public string ChannelRemoveTerms { get; set; } = string.Empty;
         public bool EnableChannelNameCleaning { get; set; } = true;
-
-        // Dispatcharr
-        public bool EnableDispatcharr { get; set; }
-        public string DispatcharrUrl { get; set; } = string.Empty;
-        public string DispatcharrUser { get; set; } = string.Empty;
-        public string DispatcharrPass { get; set; } = string.Empty;
-        public bool DispatcharrFallbackToXtream { get; set; } = true;
-        public bool ForceAudioTranscode { get; set; }
-        public int[] SelectedDispatcharrProfileIds { get; set; } = new int[0];
-        public string CachedDispatcharrProfiles { get; set; } = string.Empty;
 
         // VOD Movies
         public bool SyncMovies { get; set; }

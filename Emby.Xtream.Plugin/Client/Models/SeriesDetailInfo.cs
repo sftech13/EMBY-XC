@@ -51,6 +51,7 @@ namespace Emby.Xtream.Plugin.Client.Models
         public string Duration { get; set; } = string.Empty;
 
         [JsonPropertyName("rating")]
+        [JsonConverter(typeof(StringOrNumberConverter))]
         public string Rating { get; set; } = string.Empty;
 
         [JsonPropertyName("season")]
