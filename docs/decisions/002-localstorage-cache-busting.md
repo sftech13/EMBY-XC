@@ -1,5 +1,7 @@
 # ADR-002: localStorage-Based Cache Busting for Plugin Config Pages
 
+> Current ADR note: this decision still applies, but `README.md` and `CONTRIBUTING.md` are the primary current feature references for `EMBY-XC`.
+
 **Date**: 2026-02-22
 **Status**: ACTIVE
 **Affects**: `config.js` (loadDashboard callback), `XtreamTunerApi.cs` (DashboardResult), `config.html` (version label)

@@ -1,5 +1,7 @@
 # Test Expansion — Integration Harness Implementation Plan
 
+> Historical planning note: this plan is retained for reference. `README.md` and `CONTRIBUTING.md` now describe the current plugin behavior more accurately.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Add ~50 integration tests covering `SyncMoviesAsync`, `SyncSeriesAsync`, `XtreamTunerHost`, `NfoWriter`, folder naming, and pure-logic gaps via a shared `FakeHttpHandler` + `TempDirectory` harness.

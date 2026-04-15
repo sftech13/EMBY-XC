@@ -1,5 +1,7 @@
 # ADR-001: Bypass Dispatcharr Proxy — Use Xtream Emulation URL
 
+> Historical ADR: kept for context from an earlier architecture. `README.md` describes the current direct-Xtream feature set for `EMBY-XC`.
+
 **Date**: 2026-02-20
 **Status**: REVERTED — see Outcome section
 **Affects**: `XtreamTunerHost.BuildStreamUrl()`

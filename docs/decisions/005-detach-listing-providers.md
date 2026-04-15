@@ -1,5 +1,7 @@
 # ADR-005: Detach Listing Providers for Gracenote EPG Control
 
+> Historical ADR: this documents an older guide-data design. The current `EMBY-XC` feature set is described in `README.md`.
+
 **Date**: 2026-03-22
 **Status**: ADOPTED (v1.4.61), REVISED (v1.4.69)
 **Affects**: `XtreamTunerHost.DetachListingProviders()`, `GetChannelsInternal()`, `ClearWrongChannelArtwork()`

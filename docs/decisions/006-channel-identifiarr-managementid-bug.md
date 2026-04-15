@@ -1,5 +1,7 @@
 # ADR-006: Channel Identifiarr ManagementId Bug and Fix
 
+> Historical ADR: preserved from earlier Channel Identifiarr integration work. The current plugin no longer relies on that runtime path.
+
 **Date**: 2026-03-25
 **Status**: FIX PUSHED (PR #7 updated, awaiting merge)
 **Affects**: Channel Identifiarr `backend/app.py` (`scan_emby_missing_listings`)

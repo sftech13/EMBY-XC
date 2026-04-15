@@ -1,5 +1,7 @@
 # ADR 003 — Stream metadata routed through Streamflow rather than probed by the plugin
 
+> Historical ADR: this describes an earlier metadata path. The current repo now documents the active direct-Xtream and local ffprobe cache behavior in `README.md` and `CONTRIBUTING.md`.
+
 ## Context
 
 Emby uses `MediaSourceInfo.MediaStreams` to decide whether a live TV stream can be

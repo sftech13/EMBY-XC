@@ -1,5 +1,7 @@
 # ADR-004: StrmNamingVersion — Force Re-Sync After Naming Bug Fixes
 
+> Current ADR note: this decision still applies to the plugin. Use `README.md` for the feature summary and this file for the design rationale behind naming-version resyncs.
+
 **Date**: 2026-03-07
 **Status**: Accepted
 **Affects**: `PluginConfiguration`, `StrmSyncService.SyncMoviesAsync`, `StrmSyncService.SyncSeriesAsync`

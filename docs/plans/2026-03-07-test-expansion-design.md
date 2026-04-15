@@ -1,5 +1,7 @@
 # Test Expansion Design — Integration + Harness
 
+> Historical planning note: this design doc predates the current refactor and fresh-history fork. Treat it as planning context, not as the current feature spec.
+
 **Date**: 2026-03-07
 **Status**: Approved
 **Scope**: `Emby.Xtream.Plugin.Tests`
