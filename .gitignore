@@ -1,0 +1,58 @@
+# Build output
+bin/
+obj/
+out/
+
+# NuGet
+packages/
+*.nuget.props
+*.nuget.targets
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.user
+
+# Local/sensitive config
+CLAUDE.local.md
+CLAUDE.md
+BUGS.md
+.claude/
+
+# Test artifacts
+.playwright-mcp/
+
+# Dev tools & scripts
+InspectSDK/
+tools/*.py
+tools/*.sh
+tools/*.csx
+tools/results/
+
+# Documentation (local working/scratch docs — ADRs in docs/decisions/ are committed)
+docs/*.md
+docs/play-timing-analysis.md
+
+# Screenshots (scratch reference images)
+*.png
+!Emby.Xtream.Plugin/thumb.png
+
+# Bug logs (local only)
+logs/
+
+# Credentials (committed as .env.example)
+.env
+
+# Playwright E2E tests
+tests/e2e/node_modules/
+tests/e2e/results/
+tests/e2e/test-results/
+tests/e2e/playwright-report/
+
+# Git worktrees
+.worktrees/
+
+# OS files
+.DS_Store
+Thumbs.db
