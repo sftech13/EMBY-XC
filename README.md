@@ -48,7 +48,7 @@ Xtream Tuner currently focuses on direct Xtream integration. The codebase no lon
 - Optional Live TV direct play toggle
 - Runs background `ffprobe` on first tune to learn codecs and resolution
 - Caches codec metadata for later tunes so Emby can skip repeated probing
-- Exposes a dashboard action to clear the codec cache and re-probe channels
+- Exposes a Live TV settings action to clear the codec cache and re-probe channels
 - Passes a custom HTTP `User-Agent` to provider requests when configured
 
 ### Movies
@@ -61,7 +61,7 @@ Xtream Tuner currently focuses on direct Xtream integration. The codebase no lon
 - Supports TMDb fallback lookup through Emby's provider stack
 - Optionally writes movie `.nfo` sidecars
 - Supports trial sync previews for up to 30 movies
-- Supports one-click deletion of synced movie content from the dashboard
+- Supports one-click deletion of synced movie content from the Movies tab
 
 ### Series
 
@@ -75,7 +75,7 @@ Xtream Tuner currently focuses on direct Xtream integration. The codebase no lon
 - Supports TVDb fallback lookup through Emby's provider stack
 - Optionally writes `tvshow.nfo`
 - Supports trial sync previews for up to 30 series
-- Supports one-click deletion of synced series content from the dashboard
+- Supports one-click deletion of synced series content from the Series tab
 
 ### Dashboard And Operations
 
@@ -209,7 +209,7 @@ Download the latest DLL from [Releases](../../releases/latest), replace the exis
 ## Repo Notes
 
 - `README.md` and `CONTRIBUTING.md` describe the current plugin behavior.
-- Some files under `docs/architecture` and `docs/decisions` are preserved as historical notes from earlier experiments and may describe removed integrations.
+- Some ADR files under `docs/decisions` are preserved as implementation history for behavior that has since been removed or revised.
 
 ## License
 
