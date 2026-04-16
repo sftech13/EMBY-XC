@@ -60,6 +60,7 @@ namespace Emby.Xtream.Plugin.Service
         public override bool IsSupported => true;
         public override string SetupUrl => null;
         protected override bool UseTunerHostIdAsPrefix => false;
+        protected override string LegacyChannelIdPrefix => string.Empty;
 
         public override TunerHostInfo GetDefaultConfiguration()
         {
@@ -70,121 +71,8 @@ namespace Emby.Xtream.Plugin.Service
             };
         }
 
-        public override bool SupportsGuideData(TunerHostInfo tuner)
-        {
-            return Plugin.Instance.Configuration.EpgSource != EpgSourceMode.Disabled;
-        }
-
-        protected override async Task<List<ProgramInfo>> GetProgramsInternal(
-            TunerHostInfo tuner, string tunerChannelId,
-            DateTimeOffset startDateUtc, DateTimeOffset endDateUtc,
-            CancellationToken cancellationToken)
-        {
-            var config = Plugin.Instance.Configuration;
-
-            int streamId;
-            if (_tunerChannelIdToStreamId.TryGetValue(tunerChannelId, out streamId))
-            {
-                // Translated station ID → stream ID via mapping
-            }
-            else if (!int.TryParse(tunerChannelId, NumberStyles.None, CultureInfo.InvariantCulture, out streamId))
-            {
-                Logger.Warn("GetProgramsInternal: cannot parse tunerChannelId '{0}'", tunerChannelId);
-                return new List<ProgramInfo>();
-            }
-
-            var liveTvService = Plugin.Instance.LiveTvService;
-            List<Client.Models.EpgProgram> programs;
-            try
-            {
-                programs = await liveTvService.FetchEpgForChannelCachedAsync(streamId, cancellationToken)
-                    .ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn("GetProgramsInternal: failed to fetch EPG for stream {0}: {1}", streamId, ex.Message);
-                programs = new List<EpgProgram>();
-            }
-
-            var startUnix = startDateUtc.ToUnixTimeSeconds();
-            var endUnix = endDateUtc.ToUnixTimeSeconds();
-
-            const long MinTimestamp = 946684800L;   // 2000-01-01
-            const long MaxTimestamp = 4102444800L;  // 2100-01-01
-
-            var result = new List<ProgramInfo>();
-            foreach (var p in programs)
-            {
-                if (p.StopTimestamp <= startUnix || p.StartTimestamp >= endUnix)
-                {
-                    continue;
-                }
-
-                if (p.StartTimestamp < MinTimestamp || p.StartTimestamp > MaxTimestamp
-                    || p.StopTimestamp < MinTimestamp || p.StopTimestamp > MaxTimestamp)
-                {
-                    Logger.Debug("GetProgramsInternal: skipping program with out-of-range timestamps " +
-                        "(start={0}, stop={1}) on channel {2}", p.StartTimestamp, p.StopTimestamp, streamId);
-                    continue;
-                }
-
-                // Skip zero-duration or reversed programs — Emby's GetProgram throws when
-                // EndDate <= StartDate, which causes the entire channel to be rejected.
-                if (p.StopTimestamp <= p.StartTimestamp)
-                {
-                    Logger.Warn("GetProgramsInternal: skipping zero-duration or reversed program " +
-                        "(start={0}, stop={1}, title='{2}') on channel {3}",
-                        p.StartTimestamp, p.StopTimestamp,
-                        p.IsPlainText ? (p.Title ?? string.Empty) : "(base64)", streamId);
-                    continue;
-                }
-
-                var title = p.IsPlainText ? p.Title : LiveTvService.DecodeBase64(p.Title);
-                var description = p.IsPlainText ? p.Description : LiveTvService.DecodeBase64(p.Description);
-                try
-                {
-                    result.Add(BuildProgramInfo(p, streamId, tunerChannelId, title, description));
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warn("GetProgramsInternal: skipping program on channel {0} " +
-                        "(start={1}, stop={2}, title='{3}'): {4}",
-                        streamId, p.StartTimestamp, p.StopTimestamp,
-                        p.IsPlainText ? p.Title : "(base64)", ex.Message);
-                }
-            }
-
-            // No EPG data — return a dummy entry spanning the requested window so the channel
-            // row stays visible and clickable in the guide (matches M3U tuner behaviour).
-            if (result.Count == 0)
-            {
-                var channelName = _cachedChannels?.Find(c => c.TunerChannelId == tunerChannelId)?.Name;
-                if (!string.IsNullOrEmpty(channelName))
-                {
-                    result.Add(new ProgramInfo
-                    {
-                        Id = string.Format(CultureInfo.InvariantCulture, "xtream_dummy_{0}_{1}", streamId, startDateUtc.ToUnixTimeSeconds()),
-                        ChannelId = tunerChannelId,
-                        StartDate = startDateUtc.UtcDateTime,
-                        EndDate = endDateUtc.UtcDateTime,
-                        Name = channelName,
-                        Genres = new List<string>(),
-                    });
-                    Logger.Debug("GetProgramsInternal: no EPG for channel {0}, returning dummy entry", streamId);
-                }
-            }
-
-            if (result.Count > 0 && result.Count <= 15)
-            {
-                // Low program count — log first entry to help diagnose EPG quality issues.
-                var first = result[0];
-                Logger.Debug("GetProgramsInternal: channel {0} first program: start={1:u}, end={2:u}, name='{3}'",
-                    streamId, first.StartDate, first.EndDate, first.Name);
-            }
-
-            Logger.Debug("GetProgramsInternal: returning {0} programs for channel {1}", result.Count, streamId);
-            return result;
-        }
+        // EPG is provided entirely by XtreamListingsProvider — no GetProgramsInternal override.
+        public override bool SupportsGuideData(TunerHostInfo tuner) => true;
 
         /// <summary>
         /// Converts a single <see cref="EpgProgram"/> into a <see cref="ProgramInfo"/> ready for
@@ -317,6 +205,13 @@ namespace Emby.Xtream.Plugin.Service
                     }
 
                     newIdMap[streamIdStr] = channel.StreamId;
+
+                    // ListingsChannelId links this tuner channel to XtreamListingsProvider.
+                    // It must match the XMLTV <channel id="..."> value (= EpgChannelId from Xtream).
+                    var listingsId = !string.IsNullOrEmpty(channel.EpgChannelId)
+                        ? channel.EpgChannelId
+                        : streamIdStr;
+
                     result.Add(new ChannelInfo
                     {
                         Id = CreateEmbyChannelId(tuner, streamIdStr),
@@ -327,6 +222,7 @@ namespace Emby.Xtream.Plugin.Service
                         ChannelType = ChannelType.TV,
                         TunerHostId = tuner.Id,
                         Tags = tags,
+                        ListingsChannelId = listingsId,
                     });
                 }
 

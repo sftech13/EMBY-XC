@@ -531,6 +531,50 @@ namespace Emby.Xtream.Plugin.Service
         }
 
         /// <summary>
+        /// Fetches programs for an EPG channel ID directly from the XMLTV cache.
+        /// Used by XtreamListingsProvider which already has the epg_channel_id.
+        /// </summary>
+        internal async Task<List<EpgProgram>> FetchEpgByEpgChannelIdAsync(string epgChannelId, CancellationToken cancellationToken)
+        {
+            var config = Plugin.Instance.Configuration;
+            var cacheTtl = TimeSpan.FromMinutes(config.EpgCacheMinutes);
+
+            var xmltvCacheFresh = _xmltvCache != null && DateTime.UtcNow - _xmltvCacheTime < cacheTtl;
+            if (!xmltvCacheFresh)
+            {
+                var xmltvRetryAllowed = !_xmltvFailed || (DateTime.UtcNow - _xmltvFailTime) >= cacheTtl;
+                if (xmltvRetryAllowed)
+                    await TryFetchXmltvEpgAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            List<EpgProgram> programs;
+            if (_xmltvCache != null && _xmltvCache.TryGetValue(epgChannelId, out programs))
+                return programs ?? new List<EpgProgram>();
+
+            return new List<EpgProgram>();
+        }
+
+        /// <summary>
+        /// Returns the list of EPG channel IDs known from the XMLTV cache (after ensuring it is loaded).
+        /// Used by XtreamListingsProvider.GetChannels to report available channels.
+        /// </summary>
+        internal async Task<List<string>> GetXmltvChannelIdsAsync(CancellationToken cancellationToken)
+        {
+            var config = Plugin.Instance.Configuration;
+            var cacheTtl = TimeSpan.FromMinutes(config.EpgCacheMinutes);
+
+            var xmltvCacheFresh = _xmltvCache != null && DateTime.UtcNow - _xmltvCacheTime < cacheTtl;
+            if (!xmltvCacheFresh)
+            {
+                var xmltvRetryAllowed = !_xmltvFailed || (DateTime.UtcNow - _xmltvFailTime) >= cacheTtl;
+                if (xmltvRetryAllowed)
+                    await TryFetchXmltvEpgAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            return _xmltvCache != null ? new List<string>(_xmltvCache.Keys) : new List<string>();
+        }
+
+        /// <summary>
         /// Attempts to fetch the full XMLTV EPG from /xmltv.php and populate _xmltvCache.
         /// Builds the stream_id ↔ epg_channel_id mapping from the channel list.
         /// Returns true on success, false if the fetch failed (sets _xmltvFailed).

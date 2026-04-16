@@ -11,7 +11,7 @@
     <form class="xtreamConfigForm auto-center">
 
                 <style>
-                    :root { --xt-accent: var(--accent-color, #00a4dc); }
+                    :root { --xt-accent: var(--theme-accent-text-color, var(--accent-color, #00a4dc)); }
                     .dashboard-grid {
                         display: grid;
                         grid-template-columns: 1fr 1fr;
@@ -52,8 +52,8 @@
                         color: #cc0000;
                     }
                     .status-badge.running {
-                        background: rgba(52,152,219,0.2);
-                        color: #3498db;
+                        background: color-mix(in srgb, var(--xt-accent) 20%, transparent);
+                        color: var(--xt-accent);
                     }
                     .status-badge.idle {
                         background: rgba(128,128,128,0.15);
@@ -128,8 +128,8 @@
                         border-bottom: 1px solid rgba(128,128,128,0.1);
                     }
                     .dashboard-progress-card {
-                        background: rgba(52,152,219,0.08);
-                        border: 1px solid rgba(52,152,219,0.3);
+                        background: color-mix(in srgb, var(--xt-accent) 8%, transparent);
+                        border: 1px solid color-mix(in srgb, var(--xt-accent) 30%, transparent);
                         border-radius: 8px;
                         padding: 1.2em;
                         margin-bottom: 1.2em;
@@ -279,23 +279,23 @@
                 </style>
 
                 <div class="configTabs" style="display:flex; gap:0; margin-bottom:1.5em; border-bottom:2px solid rgba(128,128,128,0.15);">
-                    <button type="button" class="tabBtn tabBtnDashboard" data-tab="dashboard" onclick="var f=this.closest('.xtreamConfigForm'),p=f.querySelectorAll('.tabPanel'),b=f.querySelectorAll('.tabBtn'),i;for(i=0;i<p.length;i++)p[i].style.display='none';for(i=0;i<b.length;i++){b[i].style.opacity='0.7';b[i].style.borderBottomColor='transparent';}f.querySelector('.tabDashboard').style.display='block';this.style.opacity='1';this.style.borderBottomColor='var(--xt-accent)';"
+                    <button type="button" class="tabBtn tabBtnDashboard" data-tab="dashboard" onclick="var f=this.closest('.xtreamConfigForm'),p=f.querySelectorAll('.tabPanel'),b=f.querySelectorAll('.tabBtn'),i;for(i=0;i<p.length;i++)p[i].style.display='none';for(i=0;i<b.length;i++){b[i].style.opacity='0.7';b[i].style.borderBottomColor='transparent';}f.querySelector('.tabDashboard').style.display='block';this.style.opacity='1';this.style.setProperty('border-bottom-color','var(--xt-accent)');"
                             style="padding:0.6em 1.5em; background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-2px; cursor:pointer; color:inherit; font-size:1em; opacity:0.7;">
                         Dashboard
                     </button>
-                    <button type="button" class="tabBtn tabBtnGeneric" data-tab="generic" onclick="var f=this.closest('.xtreamConfigForm'),p=f.querySelectorAll('.tabPanel'),b=f.querySelectorAll('.tabBtn'),i;for(i=0;i<p.length;i++)p[i].style.display='none';for(i=0;i<b.length;i++){b[i].style.opacity='0.7';b[i].style.borderBottomColor='transparent';}f.querySelector('.tabGeneric').style.display='block';this.style.opacity='1';this.style.borderBottomColor='var(--xt-accent)';"
+                    <button type="button" class="tabBtn tabBtnGeneric" data-tab="generic" onclick="var f=this.closest('.xtreamConfigForm'),p=f.querySelectorAll('.tabPanel'),b=f.querySelectorAll('.tabBtn'),i;for(i=0;i<p.length;i++)p[i].style.display='none';for(i=0;i<b.length;i++){b[i].style.opacity='0.7';b[i].style.borderBottomColor='transparent';}f.querySelector('.tabGeneric').style.display='block';this.style.opacity='1';this.style.setProperty('border-bottom-color','var(--xt-accent)');"
                             style="padding:0.6em 1.5em; background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-2px; cursor:pointer; color:inherit; font-size:1em; opacity:0.7;">
                         Settings
                     </button>
-                    <button type="button" class="tabBtn tabBtnMovies" data-tab="movies" onclick="var f=this.closest('.xtreamConfigForm'),p=f.querySelectorAll('.tabPanel'),b=f.querySelectorAll('.tabBtn'),i;for(i=0;i<p.length;i++)p[i].style.display='none';for(i=0;i<b.length;i++){b[i].style.opacity='0.7';b[i].style.borderBottomColor='transparent';}f.querySelector('.tabMovies').style.display='block';this.style.opacity='1';this.style.borderBottomColor='var(--xt-accent)';"
+                    <button type="button" class="tabBtn tabBtnMovies" data-tab="movies" onclick="var f=this.closest('.xtreamConfigForm'),p=f.querySelectorAll('.tabPanel'),b=f.querySelectorAll('.tabBtn'),i;for(i=0;i<p.length;i++)p[i].style.display='none';for(i=0;i<b.length;i++){b[i].style.opacity='0.7';b[i].style.borderBottomColor='transparent';}f.querySelector('.tabMovies').style.display='block';this.style.opacity='1';this.style.setProperty('border-bottom-color','var(--xt-accent)');"
                             style="padding:0.6em 1.5em; background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-2px; cursor:pointer; color:inherit; font-size:1em; opacity:0.7;">
                         Movies
                     </button>
-                    <button type="button" class="tabBtn tabBtnSeries" data-tab="series" onclick="var f=this.closest('.xtreamConfigForm'),p=f.querySelectorAll('.tabPanel'),b=f.querySelectorAll('.tabBtn'),i;for(i=0;i<p.length;i++)p[i].style.display='none';for(i=0;i<b.length;i++){b[i].style.opacity='0.7';b[i].style.borderBottomColor='transparent';}f.querySelector('.tabSeries').style.display='block';this.style.opacity='1';this.style.borderBottomColor='var(--xt-accent)';"
+                    <button type="button" class="tabBtn tabBtnSeries" data-tab="series" onclick="var f=this.closest('.xtreamConfigForm'),p=f.querySelectorAll('.tabPanel'),b=f.querySelectorAll('.tabBtn'),i;for(i=0;i<p.length;i++)p[i].style.display='none';for(i=0;i<b.length;i++){b[i].style.opacity='0.7';b[i].style.borderBottomColor='transparent';}f.querySelector('.tabSeries').style.display='block';this.style.opacity='1';this.style.setProperty('border-bottom-color','var(--xt-accent)');"
                             style="padding:0.6em 1.5em; background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-2px; cursor:pointer; color:inherit; font-size:1em; opacity:0.7;">
                         Series
                     </button>
-                    <button type="button" class="tabBtn tabBtnLiveTv" data-tab="liveTv" onclick="var f=this.closest('.xtreamConfigForm'),p=f.querySelectorAll('.tabPanel'),b=f.querySelectorAll('.tabBtn'),i;for(i=0;i<p.length;i++)p[i].style.display='none';for(i=0;i<b.length;i++){b[i].style.opacity='0.7';b[i].style.borderBottomColor='transparent';}f.querySelector('.tabLiveTv').style.display='block';this.style.opacity='1';this.style.borderBottomColor='var(--xt-accent)';"
+                    <button type="button" class="tabBtn tabBtnLiveTv" data-tab="liveTv" onclick="var f=this.closest('.xtreamConfigForm'),p=f.querySelectorAll('.tabPanel'),b=f.querySelectorAll('.tabBtn'),i;for(i=0;i<p.length;i++)p[i].style.display='none';for(i=0;i<b.length;i++){b[i].style.opacity='0.7';b[i].style.borderBottomColor='transparent';}f.querySelector('.tabLiveTv').style.display='block';this.style.opacity='1';this.style.setProperty('border-bottom-color','var(--xt-accent)');"
                             style="padding:0.6em 1.5em; background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-2px; cursor:pointer; color:inherit; font-size:1em; opacity:0.7;">
                         Live TV
                     </button>
@@ -325,7 +325,7 @@
                     <div class="dashboardLiveProgress" style="display:none;">
                         <div class="dashboard-progress-card">
                             <div style="font-size:0.75em; opacity:0.55; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:0.25em;">Sync in Progress</div>
-                            <h3 class="dashboardProgressPhase" style="margin:0 0 0.6em 0; font-size:1em; color:#3498db;">Working...</h3>
+                            <h3 class="dashboardProgressPhase" style="margin:0 0 0.6em 0; font-size:1em; color:var(--xt-accent);">Working...</h3>
                             <div class="dashboard-progress-bar-track">
                                 <div class="dashboardProgressBarFill dashboard-progress-bar-fill" style="width:0%;"></div>
                             </div>

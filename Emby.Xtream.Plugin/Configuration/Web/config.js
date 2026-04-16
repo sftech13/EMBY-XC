@@ -4,12 +4,11 @@ function (BaseView, loading) {
 
     var pluginId = 'b7e3c4a1-9f2d-4e8b-a5c6-d1f0e2b3c4a5';
 
-    // Read Emby's accent colour at runtime so we respect whatever theme the user has chosen.
-    // Falls back to Emby's standard blue if the CSS variable isn't available.
-    var accentColor = (function () {
-        var v = getComputedStyle(document.documentElement).getPropertyValue('--accent-color').trim();
-        return v || '#00a4dc';
-    }());
+    // Use the CSS variable reference directly — the browser resolves it natively.
+    // getPropertyValue() returns the *declared* value (e.g. "var(--x)"), not the resolved
+    // color, so attempting to parse it in JS always fails. Instead we pass the CSS var
+    // string as-is; inline style="color:var(--xt-accent)" is valid in all modern browsers.
+    var accentColor = 'var(--xt-accent)';
 
     function View(view, params) {
         BaseView.apply(this, arguments);
@@ -291,6 +290,21 @@ function (BaseView, loading) {
 
     View.prototype.onPause = function () {};
 
+    // emby-checkbox uses a Polymer-based custom element that initialises lazily.
+    // Setting .checked on an element inside a hidden panel (display:none) does not
+    // trigger a visual re-render; the element renders from its HTML attribute when
+    // the panel is first shown, ignoring the earlier programmatic assignment.
+    // setChecked() updates BOTH the JS property AND the HTML attribute so the
+    // element renders correctly regardless of panel visibility.
+    function setChecked(el, value) {
+        el.checked = value;
+        if (value) {
+            el.setAttribute('checked', '');
+        } else {
+            el.removeAttribute('checked');
+        }
+    }
+
     function loadConfig(instance) {
         loading.show();
         ApiClient.getPluginConfiguration(pluginId).then(function (config) {
@@ -301,11 +315,11 @@ function (BaseView, loading) {
             view.querySelector('.txtPassword').value = config.Password || '';
             view.querySelector('.txtHttpUserAgent').value = config.HttpUserAgent || '';
 
-            view.querySelector('.chkEnableLiveTv').checked = config.EnableLiveTv !== false;
+            setChecked(view.querySelector('.chkEnableLiveTv'), config.EnableLiveTv !== false);
             view.querySelector('.selOutputFormat').value = config.LiveTvOutputFormat || 'ts';
-            view.querySelector('.chkIncludeAdult').checked = !!config.IncludeAdultChannels;
-            view.querySelector('.chkLiveTvDirectPlay').checked = config.EnableLiveTvDirectPlay !== false;
-            view.querySelector('.chkIncludeGroupTitle').checked = config.IncludeGroupTitleInM3U !== false;
+            setChecked(view.querySelector('.chkIncludeAdult'), !!config.IncludeAdultChannels);
+            setChecked(view.querySelector('.chkLiveTvDirectPlay'), config.EnableLiveTvDirectPlay !== false);
+            setChecked(view.querySelector('.chkIncludeGroupTitle'), config.IncludeGroupTitleInM3U !== false);
 
             var epgVal = config.EpgSource;
             var epgNameToInt = { 'XtreamServer': '0', 'CustomUrl': '1', 'Disabled': '2' };
@@ -355,7 +369,7 @@ function (BaseView, loading) {
             // Sync settings
             view.querySelector('.txtStrmLibraryPath').value = config.StrmLibraryPath || '/config/xtream';
             validateStrmPath(view);
-            view.querySelector('.chkSmartSkipExisting').checked = config.SmartSkipExisting !== false;
+            setChecked(view.querySelector('.chkSmartSkipExisting'), config.SmartSkipExisting !== false);
             view.querySelector('.txtSyncParallelism').value = config.SyncParallelism || 3;
             view.querySelector('.chkCleanupOrphans').checked = !!config.CleanupOrphans;
             view.querySelector('.txtOrphanSafetyThreshold').value = Math.round((config.OrphanSafetyThreshold || 0.20) * 100);
@@ -502,7 +516,7 @@ function (BaseView, loading) {
         var btn = view.querySelector(btnMap[tabName]);
         if (btn) {
             btn.style.opacity = '1';
-            btn.style.borderBottomColor = accentColor;
+            btn.style.setProperty('border-bottom-color', accentColor);
         }
 
         // Hide Save button on Dashboard — nothing to save there

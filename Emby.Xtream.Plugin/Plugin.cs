@@ -38,6 +38,7 @@ namespace Emby.Xtream.Plugin
             {
                 // Small delay to let Emby finish its own startup before we hit the network.
                 await Task.Delay(TimeSpan.FromSeconds(15)).ConfigureAwait(false);
+
                 try
                 {
                     var cfg = Plugin.InstanceOrNull?.Configuration;

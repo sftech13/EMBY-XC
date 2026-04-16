@@ -13,6 +13,9 @@ packages/
 .vscode/
 .idea/
 *.user
+*.sln
+*.suo
+*.DotSettings
 
 # Local/sensitive config
 CLAUDE.local.md
@@ -52,6 +55,11 @@ tests/e2e/playwright-report/
 
 # Git worktrees
 .worktrees/
+
+# Backup files
+*.bk
+*.bak
+*.orig
 
 # OS files
 .DS_Store

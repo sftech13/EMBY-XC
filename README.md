@@ -18,37 +18,36 @@
 
 ## What It Does
 
-Xtream Tuner currently focuses on direct Xtream integration. The codebase no longer depends on Dispatcharr for streaming or guide data.
+Xtream Tuner integrates directly with any Xtream-compatible IPTV provider. No Dispatcharr or external proxy is required.
 
 ### Live TV
 
 - Generates an Emby-compatible M3U playlist from Xtream live streams
-- Supports `ts` and `m3u8` live stream URLs
+- Supports `ts` and `m3u8` live stream output formats
 - Filters channels by selected categories
 - Optionally hides adult channels
 - Optionally includes category names as M3U `group-title` tags
 - Cleans channel names before they reach Emby
 - Keeps a warm channel cache so guide loads do not block on the provider every time
 
-### Guide Data
+### Guide Data (EPG)
 
+- Registered as a native Emby `IListingsProvider` — guide data flows through Emby's standard Live TV pipeline
 - Supports three guide modes:
-  - Xtream server EPG
-  - custom XMLTV URL
-  - disabled
-- Caches generated XMLTV output and per-channel EPG responses
-- Uses bulk XMLTV first when available
-- Falls back to Xtream `get_simple_data_table` per channel when Xtream XMLTV fails
-- Intentionally does not fall back when a custom XMLTV URL fails
-- Returns a placeholder guide row when a channel has no EPG so the channel still appears in Emby
+  - **Xtream server** — fetches XMLTV directly from the provider's `/xmltv.php` endpoint
+  - **Custom XMLTV URL** — fetches from any XMLTV-compatible URL you supply
+  - **Disabled** — no guide data fetched
+- Caches the full XMLTV document in memory; cache TTL is configurable
+- Each program is assigned a unique `ShowId` scoped to its channel, which prevents Emby from showing irrelevant "Other Showings" suggestions across unrelated channels
 
 ### Live Stream Playback
 
-- Uses direct Xtream live URLs instead of a proxy layer
+- Uses direct Xtream live URLs without a proxy layer
 - Optional Live TV direct play toggle
-- Runs background `ffprobe` on first tune to learn codecs and resolution
-- Caches codec metadata for later tunes so Emby can skip repeated probing
-- Exposes a Live TV settings action to clear the codec cache and re-probe channels
+- Runs `ffprobe` in the background on first tune to detect video codec, resolution, and audio codec
+- Caches codec metadata per stream so Emby skips repeated probing on subsequent tunes — codec and resolution appear in the player OSD automatically
+- Cache persists across Emby restarts; entries expire after 30 days and are re-probed automatically
+- Exposes a Live TV settings action to clear the codec cache and trigger fresh probes
 - Passes a custom HTTP `User-Agent` to provider requests when configured
 
 ### Movies
@@ -56,7 +55,7 @@ Xtream Tuner currently focuses on direct Xtream integration. The codebase no lon
 - Syncs VOD movies into `.strm` files
 - Supports single-folder, per-category, and custom folder-mapping layouts
 - Supports smart skip for already-correct files
-- Supports orphan cleanup with a safety threshold
+- Supports orphan cleanup with a configurable safety threshold
 - Supports TMDb folder naming like `Movie Name [tmdbid=123]`
 - Supports TMDb fallback lookup through Emby's provider stack
 - Optionally writes movie `.nfo` sidecars
@@ -65,7 +64,7 @@ Xtream Tuner currently focuses on direct Xtream integration. The codebase no lon
 
 ### Series
 
-- Syncs Xtream series into `Show/Season XX/Episode.strm`
+- Syncs Xtream series into `Show/Season XX/Episode.strm` folder structure
 - Fetches per-series detail to build season and episode structure
 - Cleans duplicate provider text out of episode titles
 - Supports single-folder, per-category, and custom folder-mapping layouts
@@ -77,7 +76,7 @@ Xtream Tuner currently focuses on direct Xtream integration. The codebase no lon
 - Supports trial sync previews for up to 30 series
 - Supports one-click deletion of synced series content from the Series tab
 
-### Dashboard And Operations
+### Dashboard And Configuration Page
 
 - Built-in dashboard with sync status, history, and library counts
 - Real-time progress for running sync jobs
@@ -85,6 +84,7 @@ Xtream Tuner currently focuses on direct Xtream integration. The codebase no lon
 - Sanitized log download endpoint
 - Auto-sync on an interval or at a daily clock time
 - Manual cache refresh for M3U and EPG output
+- Config page uses Emby's active theme accent color throughout — adapts automatically to any theme selected in Emby Display settings
 
 ---
 
@@ -103,11 +103,11 @@ Requires .NET SDK 6.0+:
 
 ```bash
 git clone https://github.com/sftech13/EMBY-XC.git
-cd EMBY-XC/Emby.Xtream.Plugin
-bash build.sh
+cd EMBY-XC
+dotnet build Emby.Xtream.Plugin/Emby.Xtream.Plugin.csproj -c Release
 ```
 
-The compiled DLL will be at `Emby.Xtream.Plugin/out/Emby.Xtream.Plugin.dll`.
+The compiled DLL will be at `Emby.Xtream.Plugin/bin/Release/netstandard2.0/Emby.Xtream.Plugin.dll`.
 
 </details>
 
@@ -123,8 +123,8 @@ docker restart emby
 
 **Linux**
 ```bash
-cp Emby.Xtream.Plugin.dll /var/lib/emby/plugins/
-systemctl restart emby-server
+sudo cp Emby.Xtream.Plugin.dll /var/lib/emby/plugins/
+sudo systemctl restart emby-server
 ```
 
 ### Step 3: Configure Xtream Access
@@ -143,18 +143,20 @@ systemctl restart emby-server
 
 1. Open the `Live TV` tab.
 2. Enable Live TV if needed.
-3. Choose `ts` or `m3u8`.
+3. Choose `ts` or `m3u8` output format.
 4. Choose guide mode:
-   - Xtream server
-   - custom XMLTV URL
-   - disabled
+   - **Xtream server** — uses the provider's built-in XMLTV feed
+   - **Custom XMLTV URL** — enter your own XMLTV endpoint
+   - **Disabled** — no guide
 5. Refresh categories and select the ones you want.
 6. Optionally enable:
    - adult channels
    - direct play
    - M3U group-title tags
 7. Save.
-8. Add the plugin as a tuner in Emby Live TV settings.
+8. In Emby's Live TV settings, add the plugin as a tuner host.
+
+> **Note:** Codec and resolution info appears in the player OSD after a channel's first tune. The plugin runs a background probe on first play and caches the result — subsequent tunes show full codec info immediately.
 
 ### Step 5: Set Up Movies Or Series Sync
 
@@ -181,7 +183,7 @@ Download the latest DLL from [Releases](../../releases/latest), replace the exis
 
 ---
 
-## Configuration Highlights
+## Configuration Reference
 
 | Setting | Default | Notes |
 |---|---|---|
@@ -190,11 +192,11 @@ Download the latest DLL from [Releases](../../releases/latest), replace the exis
 | `EnableLiveTvDirectPlay` | On | Lets clients play the remote URL directly when possible |
 | `EpgSource` | Xtream server | Xtream, custom URL, or disabled |
 | `CustomEpgUrl` | empty | Used only in custom guide mode |
-| `EpgCacheMinutes` | `30` | XMLTV and per-channel guide cache TTL |
-| `M3UCacheMinutes` | `15` | M3U cache TTL |
+| `EpgCacheMinutes` | `30` | XMLTV cache TTL in minutes |
+| `M3UCacheMinutes` | `15` | M3U cache TTL in minutes |
 | `StrmLibraryPath` | `/config/xtream` | Base output path for Movies and Shows |
-| `SmartSkipExisting` | On | Skips already-correct files |
-| `CleanupOrphans` | Off | Deletes missing provider content from disk |
+| `SmartSkipExisting` | On | Skips already-correct files during sync |
+| `CleanupOrphans` | Off | Deletes provider-removed content from disk |
 | `OrphanSafetyThreshold` | `20%` | Caps deletion percentage per cleanup pass |
 | `EnableNfoFiles` | Off | Writes movie and show sidecar NFOs |
 | `EnableTmdbFolderNaming` | Off | Adds `tmdbid` tags to movie folders |
@@ -205,11 +207,6 @@ Download the latest DLL from [Releases](../../releases/latest), replace the exis
 | `AutoSyncMode` | `interval` | `interval` or `daily` |
 
 ---
-
-## Repo Notes
-
-- `README.md` and `CONTRIBUTING.md` describe the current plugin behavior.
-- Some ADR files under `docs/decisions` are preserved as implementation history for behavior that has since been removed or revised.
 
 ## License
 

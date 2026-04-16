@@ -6,9 +6,11 @@ namespace Emby.Xtream.Plugin.Client.Models
     public class EpgProgram
     {
         [JsonPropertyName("id")]
+        [JsonConverter(typeof(StringOrNumberConverter))]
         public string Id { get; set; } = string.Empty;
 
         [JsonPropertyName("epg_id")]
+        [JsonConverter(typeof(StringOrNumberConverter))]
         public string EpgId { get; set; } = string.Empty;
 
         [JsonPropertyName("title")]
