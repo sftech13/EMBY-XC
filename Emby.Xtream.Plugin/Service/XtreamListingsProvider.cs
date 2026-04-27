@@ -66,24 +66,39 @@ namespace Emby.Xtream.Plugin.Service
                 if (stop <= startDateUtc || start >= endDateUtc)
                     continue;
 
-                var title = StripEpgQualifiers(prog.Element("title")?.Value ?? "Unknown");
-                var seriesKey = NormalizeGuideKey(title);
+                var title        = StripEpgQualifiers(prog.Element("title")?.Value ?? "Unknown");
+                var rawSubTitle  = prog.Element("sub-title")?.Value;
+                var episodeTitle = StripEpgQualifiers(rawSubTitle);
+                var seriesKey    = NormalizeGuideKey(title);
+                var episodeKey   = NormalizeGuideKey(episodeTitle);
+
+                // ShowId drives PresentationUniqueKey → "Other Showings".
+                // Scope it to series+episode when a sub-title is available so that
+                // "Other Showings" finds only airings of that specific episode, not
+                // every episode of the same series (e.g. only "Lizzo" guest airings of
+                // The Drew Barrymore Show, not Charlize Theron/Belle Burden/etc.).
+                // Without a sub-title, fall back to series key so cross-channel
+                // matching still works for movies and one-off specials.
+                var showId = (!string.IsNullOrEmpty(seriesKey) && !string.IsNullOrEmpty(episodeKey))
+                    ? seriesKey + "::" + episodeKey
+                    : seriesKey ?? title.ToLowerInvariant();
+
                 var program = new ProgramInfo
                 {
                     ChannelId    = channelId,
                     Id           = string.Format(CultureInfo.InvariantCulture, "{0}_{1}", channelId, startStr),
-                    ShowId       = seriesKey ?? title.ToLowerInvariant(),
+                    ShowId       = showId,
                     Name         = title,
                     Overview     = prog.Element("desc")?.Value,
                     StartDate    = start,
                     EndDate      = stop,
                     Genres       = prog.Elements("category").Select(e => e.Value).ToList(),
                     ImageUrl     = prog.Element("icon")?.Attribute("src")?.Value,
-                    EpisodeTitle = prog.Element("sub-title")?.Value,
+                    EpisodeTitle = episodeTitle,
                     IsMovie      = false,
                     IsSeries     = prog.Element("episode-num") != null,
-                    // Keep SeriesId non-null so Emby can build series timers; ShowId above
-                    // separately feeds the non-series "Other Showings" query.
+                    // SeriesId feeds SeriesPresentationUniqueKey — used by series timers
+                    // to match all episodes of a show. Keep it series-level only.
                     SeriesId     = seriesKey,
                 };
 
