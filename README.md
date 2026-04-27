@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="logo.svg" width="180" alt="Xtream Tuner" />
+  <img src="logo.svg" width="180" alt="XC2EMBY" />
 </p>
 
-<h1 align="center">Xtream Tuner</h1>
+<h1 align="center">XC2EMBY</h1>
 
 <p align="center">
   An Emby Server plugin that connects directly to any Xtream-compatible IPTV provider.<br/>
@@ -94,7 +94,7 @@
 
 **Option A: Download a release**
 
-Download `Emby.Xtream.Plugin.dll` from the [latest release](../../releases/latest). Only the DLL is needed.
+Download `XC2EMBY.Plugin.dll` from the [latest release](../../releases/latest). Only the DLL is needed.
 
 **Option B: Build from source**
 
@@ -104,7 +104,7 @@ Requires .NET SDK 6.0+:
 git clone https://github.com/sftech13/EMBY-XC.git
 cd EMBY-XC
 dotnet build Emby.Xtream.Plugin/Emby.Xtream.Plugin.csproj -c Release
-# Output: Emby.Xtream.Plugin/bin/Release/netstandard2.0/Emby.Xtream.Plugin.dll
+# Output: Emby.Xtream.Plugin/bin/Release/netstandard2.0/XC2EMBY.Plugin.dll
 ```
 
 ### Step 2 — Install
@@ -113,19 +113,19 @@ Copy the DLL to your Emby plugins directory and restart Emby.
 
 **Linux (systemd)**
 ```bash
-sudo cp Emby.Xtream.Plugin.dll /var/lib/emby/plugins/
+sudo cp XC2EMBY.Plugin.dll /var/lib/emby/plugins/
 sudo systemctl restart emby-server
 ```
 
 **Docker**
 ```bash
-docker cp Emby.Xtream.Plugin.dll emby:/config/plugins/
+docker cp XC2EMBY.Plugin.dll emby:/config/plugins/
 docker restart emby
 ```
 
 ### Step 3 — Open the Config Page
 
-Go to **Emby Dashboard → Plugins → Xtream Tuner** to open the configuration page.
+Go to **Emby Dashboard → Plugins → XC2EMBY** to open the configuration page.
 
 ### Updating
 

@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Pipelines;
+using System.Net;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
@@ -50,13 +51,19 @@ namespace Emby.Xtream.Plugin.Service
             return Task.CompletedTask;
         }
 
+        private async Task EnsureConnectedAsync(CancellationToken cancellationToken)
+        {
+            if (_stream == null && !_needsReconnect)
+                await ConnectAsync(cancellationToken).ConfigureAwait(false);
+
+            if (_needsReconnect)
+                await ReopenStreamAsync(cancellationToken).ConfigureAwait(false);
+        }
+
         private async Task ConnectAsync(CancellationToken cancellationToken)
         {
             var sw = Stopwatch.StartNew();
-            _response = await _httpClient.GetAsync(
-                MediaSource.Path,
-                HttpCompletionOption.ResponseHeadersRead,
-                cancellationToken).ConfigureAwait(false);
+            _response = await OpenUpstreamResponseAsync(MediaSource.Path, cancellationToken).ConfigureAwait(false);
             _logger?.Info("[stream-timing] Connect.HttpGet={0}ms status={1}", sw.ElapsedMilliseconds, (int)_response.StatusCode);
             sw.Restart();
 
@@ -84,22 +91,56 @@ namespace Emby.Xtream.Plugin.Service
             _response = null;
             _needsReconnect = false;
 
-            _response = await _httpClient.GetAsync(
-                MediaSource.Path,
-                HttpCompletionOption.ResponseHeadersRead,
-                cancellationToken).ConfigureAwait(false);
+            _response = await OpenUpstreamResponseAsync(MediaSource.Path, cancellationToken).ConfigureAwait(false);
             _response.EnsureSuccessStatusCode();
             _stream = await _response.Content.ReadAsStreamAsync().ConfigureAwait(false);
             _logger?.Info("[stream-timing] Reconnected to upstream after client disconnect");
         }
 
+        private async Task<HttpResponseMessage> OpenUpstreamResponseAsync(string url, CancellationToken cancellationToken)
+        {
+            var currentUrl = url;
+
+            for (var redirectCount = 0; redirectCount <= 10; redirectCount++)
+            {
+                var response = await _httpClient.GetAsync(
+                    currentUrl,
+                    HttpCompletionOption.ResponseHeadersRead,
+                    cancellationToken).ConfigureAwait(false);
+
+                if (!IsRedirect(response.StatusCode))
+                    return response;
+
+                var location = response.Headers.Location;
+                if (location == null)
+                    return response;
+
+                var nextUri = location.IsAbsoluteUri
+                    ? location
+                    : new Uri(new Uri(currentUrl), location);
+
+                _logger?.Info("[stream-timing] Upstream redirect {0} → {1}://{2}",
+                    (int)response.StatusCode, nextUri.Scheme, nextUri.Host);
+
+                response.Dispose();
+                currentUrl = nextUri.ToString();
+            }
+
+            throw new HttpRequestException("Too many redirects while opening Xtream live stream");
+        }
+
+        private static bool IsRedirect(HttpStatusCode statusCode)
+        {
+            return statusCode == HttpStatusCode.Moved ||
+                   statusCode == HttpStatusCode.Redirect ||
+                   statusCode == HttpStatusCode.RedirectMethod ||
+                   statusCode == HttpStatusCode.TemporaryRedirect ||
+                   (int)statusCode == 308;
+        }
+
         public async Task CopyToAsync(PipeWriter writer, CancellationToken cancellationToken)
         {
-            if (_stream == null && !_needsReconnect)
-                await ConnectAsync(cancellationToken).ConfigureAwait(false);
-
-            if (_needsReconnect)
-                await ReopenStreamAsync(cancellationToken).ConfigureAwait(false);
+            await EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
 
             var buffer = new byte[262144];
             try
@@ -139,10 +180,17 @@ namespace Emby.Xtream.Plugin.Service
             Action<SegmentedStreamSegmentInfo> onSegmentWritten,
             CancellationToken cancellationToken)
         {
-            if (_stream == null)
-                await ConnectAsync(cancellationToken).ConfigureAwait(false);
+            await EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
 
-            await _stream.CopyToAsync(writer, 262144, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await _stream.CopyToAsync(writer, 262144, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                _needsReconnect = true;
+                throw;
+            }
         }
 
         public void Dispose()

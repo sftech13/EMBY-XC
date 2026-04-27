@@ -181,13 +181,29 @@ namespace Emby.Xtream.Plugin.Service
             // Per-category fetches reset `num` to 1 within each category, causing duplicate
             // channel numbers in the guide. Filtering to selected categories is done in-memory.
             var allChannels = await FetchAllChannelsAsync(cancellationToken).ConfigureAwait(false);
+            var fetchedCount = allChannels.Count;
 
             if (config.SelectedLiveCategoryIds != null && config.SelectedLiveCategoryIds.Length > 0)
             {
                 var selectedIds = new HashSet<int>(config.SelectedLiveCategoryIds);
-                allChannels = allChannels
+                var filteredChannels = allChannels
                     .Where(c => c.CategoryId.HasValue && selectedIds.Contains(c.CategoryId.Value))
                     .ToList();
+
+                // Xtream providers can renumber category IDs over time. If saved filters no longer
+                // match any live channels, failing closed makes the entire tuner disappear. Fall
+                // back to the full channel list so Live TV still works and the user can refresh
+                // categories/reselect filters from the current provider state.
+                if (filteredChannels.Count == 0 && fetchedCount > 0)
+                {
+                    _logger.Warn(
+                        "Selected live category filter matched 0 of {0} fetched channels; ignoring stale filter selection",
+                        fetchedCount);
+                }
+                else
+                {
+                    allChannels = filteredChannels;
+                }
             }
 
             // Filter adult channels
@@ -228,30 +244,6 @@ namespace Emby.Xtream.Plugin.Service
                 var json = await httpClient.GetStringAsync(url).ConfigureAwait(false);
                 return STJ.JsonSerializer.Deserialize<List<LiveStreamInfo>>(json, JsonOptions)
                     ?? new List<LiveStreamInfo>();
-            }
-        }
-
-        private async Task<List<LiveStreamInfo>> FetchChannelsByCategoryAsync(int categoryId, CancellationToken cancellationToken)
-        {
-            var config = Plugin.Instance.Configuration;
-            var url = string.Format(
-                CultureInfo.InvariantCulture,
-                "{0}/player_api.php?username={1}&password={2}&action=get_live_streams&category_id={3}",
-                config.BaseUrl, Uri.EscapeDataString(config.Username ?? string.Empty), Uri.EscapeDataString(config.Password ?? string.Empty), categoryId);
-
-            using (var httpClient = Plugin.CreateHttpClient(30))
-            {
-                try
-                {
-                    var json = await httpClient.GetStringAsync(url).ConfigureAwait(false);
-                    return STJ.JsonSerializer.Deserialize<List<LiveStreamInfo>>(json, JsonOptions)
-                        ?? new List<LiveStreamInfo>();
-                }
-                catch (Exception ex)
-                {
-                    _logger.Warn("Failed to fetch channels for category {0}: {1}", categoryId, ex.Message);
-                    return new List<LiveStreamInfo>();
-                }
             }
         }
 
@@ -314,7 +306,7 @@ namespace Emby.Xtream.Plugin.Service
         {
             var sb = new StringBuilder();
             sb.AppendLine("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
-            sb.AppendLine("<tv generator-info-name=\"Emby Xtream Tuner\">");
+            sb.AppendLine("<tv generator-info-name=\"XC2EMBY\">");
 
             // Channel definitions
             foreach (var channel in channels.OrderBy(c => c.Num))
@@ -602,7 +594,7 @@ namespace Emby.Xtream.Plugin.Service
                     url = string.Format(
                         CultureInfo.InvariantCulture,
                         "{0}/xmltv.php?username={1}&password={2}",
-                        config.BaseUrl, config.Username, config.Password);
+                        config.BaseUrl, Uri.EscapeDataString(config.Username ?? string.Empty), Uri.EscapeDataString(config.Password ?? string.Empty));
                     _logger.Info("Fetching bulk XMLTV EPG from {0}/xmltv.php", config.BaseUrl);
                 }
 
@@ -662,7 +654,7 @@ namespace Emby.Xtream.Plugin.Service
             var url = string.Format(
                 CultureInfo.InvariantCulture,
                 "{0}/player_api.php?username={1}&password={2}&action=get_simple_data_table&stream_id={3}",
-                config.BaseUrl, config.Username, config.Password, streamId);
+                config.BaseUrl, Uri.EscapeDataString(config.Username ?? string.Empty), Uri.EscapeDataString(config.Password ?? string.Empty), streamId);
 
             using (var httpClient = Plugin.CreateHttpClient())
             {

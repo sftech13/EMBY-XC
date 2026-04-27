@@ -4,8 +4,8 @@
      data-forcescrollbar="true"
      data-centerfocus="true"
      data-bindheader="true"
-     data-controller="__plugin/xtreamconfigjs"
-     data-title="Xtream Tuner">
+     data-controller="__plugin/xtreamconfigjs101"
+     data-title="XC2EMBY">
 
   <div class="scrollSlider flex-grow flex-direction-column padded-left padded-left-page padded-right padded-top-page padded-bottom-page">
     <form class="xtreamConfigForm auto-center">
@@ -308,7 +308,7 @@
                     <!-- System Health Bar -->
                     <div class="dashboardHealthBar" style="display:flex; gap:1.5em; align-items:center; padding:0.6em 0.8em; margin-bottom:1em; background:rgba(128,128,128,0.05); border:1px solid rgba(128,128,128,0.1); border-radius:6px; flex-wrap:wrap; font-size:0.88em;">
                         <span class="pluginVersion" style="opacity:0.5;"></span>
-                        <span class="healthItemXtream" style="display:flex; align-items:center;"><span class="healthDot" style="display:inline-block; width:8px; height:8px; border-radius:50%; background:#888; margin-right:0.45em; flex-shrink:0;"></span><span class="healthLabel">Xtream: Not configured</span></span>
+                        <span class="healthItemXtream" style="display:flex; align-items:center;"><span class="healthDot" style="display:inline-block; width:8px; height:8px; border-radius:50%; background:#888; margin-right:0.45em; flex-shrink:0;"></span><span class="healthLabel">XC2EMBY: Not configured</span></span>
                         <span class="healthItemLastSync" style="display:flex; align-items:center;"><span class="healthDot" style="display:inline-block; width:8px; height:8px; border-radius:50%; background:#888; margin-right:0.45em; flex-shrink:0;"></span><span class="healthLabel">Last Sync: Never</span></span>
                     </div>
 
@@ -435,7 +435,21 @@
                     </div>
                     <div class="fieldDescription" style="margin-top:0.25em;">
                         Root directory where STRM files are written (default: /config/xtream).
-                        Movies go in a Movies/ subfolder, series in Shows/.
+                        Movies and series go into subfolders under this root.
+                    </div>
+                    <div class="inputContainer">
+                        <input class="txtMovieRootFolderName" type="text" is="emby-input"
+                               label="Movies Subfolder" />
+                        <div class="fieldDescription">
+                            Folder name under the STRM library root for movie syncs. Default: Movies
+                        </div>
+                    </div>
+                    <div class="inputContainer">
+                        <input class="txtSeriesRootFolderName" type="text" is="emby-input"
+                               label="Series Subfolder" />
+                        <div class="fieldDescription">
+                            Folder name under the STRM library root for series syncs. Default: TV Shows
+                        </div>
                     </div>
                     <div class="strmPathValidationResult" style="margin-top:0.25em; margin-bottom:0.75em; font-size:0.9em;"></div>
                     <div class="checkboxContainer checkboxContainer-withDescription" style="margin-top:0;">
@@ -679,13 +693,6 @@
                                 <span>Sync Movies Now</span>
                             </button>
                             <div class="syncMoviesResult" style="margin-top:0.5em;"></div>
-                            <button class="btnTrialSyncMovies" type="button" style="margin-top:0.5em;width:100%;padding:0.6em;background:rgba(255,255,255,0.08);color:inherit;border:1px solid rgba(255,255,255,0.2);border-radius:4px;cursor:pointer;font-size:0.95em;" onclick="XtreamTrialMovies(this)">
-                                Trial Run (30 Movies)
-                            </button>
-                            <div class="trialMoviesResult" style="margin-top:0.5em;display:none;">
-                                <div class="trialMoviesMessage" style="font-weight:bold;margin-bottom:0.25em;"></div>
-                                <div class="trialMoviesList" style="max-height:200px;overflow-y:auto;background:#111;padding:0.5em;border-radius:4px;font-size:0.85em;white-space:pre-wrap;font-family:monospace;word-break:break-all;"></div>
-                            </div>
                         </div>
 
                         <div class="danger-zone">
@@ -730,13 +737,13 @@
                         <div class="folder-mode-cards seriesFolderModeCards">
                             <div class="folder-mode-card" data-mode="single">
                                 <div class="folder-mode-card-title">Single Folder <span class="folder-mode-card-check">&#10003;</span></div>
-                                <pre>Shows/
+                                <pre>TV Shows/
 &#9500;&#9472; Crime Drama (2022)/
 &#9492;&#9472; Sci-Fi Series (2019)/</pre>
                             </div>
                             <div class="folder-mode-card" data-mode="custom">
                                 <div class="folder-mode-card-title">Multiple Folders <span class="folder-mode-card-check">&#10003;</span></div>
-                                <pre>Shows/
+                                <pre>TV Shows/
 &#9500;&#9472; Spanish/
 &#9474;  &#9492;&#9472; Drama Series/
 &#9492;&#9472; HD/
@@ -799,13 +806,6 @@
                                 <span>Sync Series Now</span>
                             </button>
                             <div class="syncSeriesResult" style="margin-top:0.5em;"></div>
-                            <button class="btnTrialSyncSeries" type="button" style="margin-top:0.5em;width:100%;padding:0.6em;background:rgba(255,255,255,0.08);color:inherit;border:1px solid rgba(255,255,255,0.2);border-radius:4px;cursor:pointer;font-size:0.95em;" onclick="XtreamTrialSeries(this)">
-                                Trial Run (30 Series)
-                            </button>
-                            <div class="trialSeriesResult" style="margin-top:0.5em;display:none;">
-                                <div class="trialSeriesMessage" style="font-weight:bold;margin-bottom:0.25em;"></div>
-                                <div class="trialSeriesList" style="max-height:200px;overflow-y:auto;background:#111;padding:0.5em;border-radius:4px;font-size:0.85em;white-space:pre-wrap;font-family:monospace;word-break:break-all;"></div>
-                            </div>
                         </div>
 
                         <div class="danger-zone">
@@ -846,6 +846,13 @@
                         </select>
                         <div class="fieldDescription">
                             Stream container format. MPEG-TS is recommended for lower latency.
+                        </div>
+                    </div>
+                    <div class="inputContainer">
+                        <input class="txtTunerCount" type="number" is="emby-input"
+                               label="Max Simultaneous Streams" min="1" max="99" step="1" />
+                        <div class="fieldDescription">
+                            How many live streams can play at the same time. Set this to match your Xtream subscription's connection limit (default: 1).
                         </div>
                     </div>
                     <button class="btnRefreshCache raised button-secondary" is="emby-button" type="button" style="margin-top:0.5em;">
@@ -929,15 +936,6 @@
                     <div class="categoriesContainer" style="max-height:450px; overflow-y:auto; border:1px solid rgba(128,128,128,0.15); border-radius:4px; padding:0.5em;">
                         <div class="categoriesLoading" style="display:none; opacity:0.5;">Loading categories...</div>
                         <div class="categoriesList"></div>
-                    </div>
-                    <div class="checkboxContainer checkboxContainer-withDescription" style="margin-top:0.8em;">
-                        <label>
-                            <input class="chkIncludeAdult" type="checkbox" is="emby-checkbox" />
-                            <span>Include Adult Channels</span>
-                        </label>
-                        <div class="fieldDescription checkboxFieldDescription">
-                            When enabled, adult-flagged channels will be included in the channel list.
-                        </div>
                     </div>
                     <div class="checkboxContainer checkboxContainer-withDescription" style="margin-top:0.8em;">
                         <label>

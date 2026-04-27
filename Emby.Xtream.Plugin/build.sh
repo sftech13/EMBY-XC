@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUT_DIR="$SCRIPT_DIR/out"
-DLL_NAME="Emby.Xtream.Plugin.dll"
+DLL_NAME="XC2EMBY.Plugin.dll"
 
 # Derive version from git tags automatically:
 #   On tag v1.2.0        -> 1.2.0

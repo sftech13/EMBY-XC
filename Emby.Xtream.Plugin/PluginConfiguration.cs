@@ -15,6 +15,7 @@ namespace Emby.Xtream.Plugin
         public bool EnableLiveTv { get; set; } = true;
         public string LiveTvOutputFormat { get; set; } = "ts";
         public bool EnableLiveTvDirectPlay { get; set; } = true;
+        public int TunerCount { get; set; } = 1;
 
         // Per-channel codec cache: JSON dict (streamId → {VideoCodec, AudioCodec})
         // Populated automatically by background ffprobe on first tune; used to skip
@@ -34,6 +35,9 @@ namespace Emby.Xtream.Plugin
         public int[] SelectedLiveCategoryIds { get; set; } = new int[0];
         public bool IncludeAdultChannels { get; set; }
         public bool IncludeGroupTitleInM3U { get; set; } = true;
+        // Categories in this list are excluded from the guide tag filter.
+        // All categories are included by default; add names here to permanently exclude.
+        public System.Collections.Generic.List<string> ExcludedLiveCategories { get; set; } = new System.Collections.Generic.List<string>();
 
         // Channel name cleaning
         public string ChannelRemoveTerms { get; set; } = string.Empty;
@@ -42,12 +46,14 @@ namespace Emby.Xtream.Plugin
         // VOD Movies
         public bool SyncMovies { get; set; }
         public string StrmLibraryPath { get; set; } = "/config/xtream";
+        public string MovieRootFolderName { get; set; } = "Movies";
         public int[] SelectedVodCategoryIds { get; set; } = new int[0];
         public string MovieFolderMode { get; set; } = "single";
         public string MovieFolderMappings { get; set; } = string.Empty;
 
         // Series / TV Shows
         public bool SyncSeries { get; set; }
+        public string SeriesRootFolderName { get; set; } = "TV Shows";
         public int[] SelectedSeriesCategoryIds { get; set; } = new int[0];
         public string SeriesFolderMode { get; set; } = "single";
         public string SeriesFolderMappings { get; set; } = string.Empty;

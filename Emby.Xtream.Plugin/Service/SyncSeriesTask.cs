@@ -14,9 +14,9 @@ namespace Emby.Xtream.Plugin.Service
         public SyncSeriesTask(ILogManager logManager)
             => _logger = logManager.GetLogger("XtreamTuner.SyncSeriesTask");
 
-        public string Name        => "Xtream Tuner \u2013 Sync Series";
-        public string Description => "Sync series/TV show STRM files from the Xtream server.";
-        public string Category    => "Xtream Tuner";
+        public string Name        => "XC2EMBY \u2013 Sync Series";
+        public string Description => "Sync series/TV show STRM files from your Xtream server.";
+        public string Category    => "XC2EMBY";
         public string Key         => "XtreamTunerSyncSeries";
 
         public IEnumerable<TaskTriggerInfo> GetDefaultTriggers()

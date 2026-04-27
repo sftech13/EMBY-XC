@@ -2,7 +2,7 @@ define(['baseView', 'loading', 'emby-input', 'emby-select', 'emby-checkbox', 'em
 function (BaseView, loading) {
     'use strict';
 
-    var pluginId = 'b7e3c4a1-9f2d-4e8b-a5c6-d1f0e2b3c4a5';
+    var pluginId = 'ff489847-080b-475c-99fc-f448db175b56';
 
     // Use the CSS variable reference directly — the browser resolves it natively.
     // getPropertyValue() returns the *declared* value (e.g. "var(--x)"), not the resolved
@@ -119,7 +119,9 @@ function (BaseView, loading) {
         });
 
         view.querySelector('.btnLoadCategories').addEventListener('click', function () {
-            loadCategories(self);
+            saveConfig(self, function () {
+                loadCategories(self);
+            });
         });
 
         view.querySelector('.btnSelectAllCategories').addEventListener('click', function () {
@@ -140,7 +142,9 @@ function (BaseView, loading) {
 
         // VOD category buttons (single mode)
         view.querySelector('.btnLoadVodCategories').addEventListener('click', function () {
-            loadVodCategories(self);
+            saveConfig(self, function () {
+                loadVodCategories(self);
+            });
         });
 
         view.querySelector('.btnSelectAllVodCategories').addEventListener('click', function () {
@@ -153,12 +157,16 @@ function (BaseView, loading) {
 
         // VOD category buttons (multi mode)
         view.querySelector('.btnLoadVodCategoriesMulti').addEventListener('click', function () {
-            loadVodCategoriesMulti(self);
+            saveConfig(self, function () {
+                loadVodCategoriesMulti(self);
+            });
         });
 
         // Series category buttons (single mode)
         view.querySelector('.btnLoadSeriesCategories').addEventListener('click', function () {
-            loadSeriesCategories(self);
+            saveConfig(self, function () {
+                loadSeriesCategories(self);
+            });
         });
 
         view.querySelector('.btnSelectAllSeriesCategories').addEventListener('click', function () {
@@ -171,7 +179,9 @@ function (BaseView, loading) {
 
         // Series category buttons (multi mode)
         view.querySelector('.btnLoadSeriesCategoriesMulti').addEventListener('click', function () {
-            loadSeriesCategoriesMulti(self);
+            saveConfig(self, function () {
+                loadSeriesCategoriesMulti(self);
+            });
         });
 
         // Sync buttons
@@ -209,7 +219,7 @@ function (BaseView, loading) {
 
         // Download sanitized log button
         view.querySelector('.btnDownloadLog').addEventListener('click', function () {
-            window.open(ApiClient.getUrl('XtreamTuner/Logs') + '?api_key=' + ApiClient.accessToken(), '_blank');
+            window.open(ApiClient.getUrl('XC2EMBY/Logs') + '?api_key=' + ApiClient.accessToken(), '_blank');
         });
 
         // Danger zone toggles (event delegation on form)
@@ -317,7 +327,7 @@ function (BaseView, loading) {
 
             setChecked(view.querySelector('.chkEnableLiveTv'), config.EnableLiveTv !== false);
             view.querySelector('.selOutputFormat').value = config.LiveTvOutputFormat || 'ts';
-            setChecked(view.querySelector('.chkIncludeAdult'), !!config.IncludeAdultChannels);
+            view.querySelector('.txtTunerCount').value = config.TunerCount > 0 ? config.TunerCount : 1;
             setChecked(view.querySelector('.chkLiveTvDirectPlay'), config.EnableLiveTvDirectPlay !== false);
             setChecked(view.querySelector('.chkIncludeGroupTitle'), config.IncludeGroupTitleInM3U !== false);
 
@@ -333,7 +343,7 @@ function (BaseView, loading) {
 
             // Unified name cleaning (drives both content + channel cleaning)
             var nameCleaningEnabled = !!config.EnableContentNameCleaning || !!config.EnableChannelNameCleaning;
-            view.querySelector('.chkEnableNameCleaning').checked = nameCleaningEnabled;
+            setChecked(view.querySelector('.chkEnableNameCleaning'), nameCleaningEnabled);
             var removeTerms = config.ContentRemoveTerms || '';
             if (!removeTerms && config.ChannelRemoveTerms) {
                 removeTerms = config.ChannelRemoveTerms.split(',').map(function (t) { return t.trim(); }).filter(function (t) { return t; }).join('\n');
@@ -351,7 +361,7 @@ function (BaseView, loading) {
             }
 
             // VOD Movies
-            view.querySelector('.chkSyncMovies').checked = !!config.SyncMovies;
+            setChecked(view.querySelector('.chkSyncMovies'), !!config.SyncMovies);
             var movieMode = config.MovieFolderMode || 'single';
             if (movieMode === 'multiple') movieMode = 'custom';
             view.querySelector('.selMovieFolderMode').value = movieMode;
@@ -359,7 +369,7 @@ function (BaseView, loading) {
             instance.selectedVodCategoryIds = config.SelectedVodCategoryIds || [];
 
             // Series
-            view.querySelector('.chkSyncSeries').checked = !!config.SyncSeries;
+            setChecked(view.querySelector('.chkSyncSeries'), !!config.SyncSeries);
             var seriesMode = config.SeriesFolderMode || 'single';
             if (seriesMode === 'multiple') seriesMode = 'custom';
             view.querySelector('.selSeriesFolderMode').value = seriesMode;
@@ -368,16 +378,18 @@ function (BaseView, loading) {
 
             // Sync settings
             view.querySelector('.txtStrmLibraryPath').value = config.StrmLibraryPath || '/config/xtream';
+            view.querySelector('.txtMovieRootFolderName').value = config.MovieRootFolderName || 'Movies';
+            view.querySelector('.txtSeriesRootFolderName').value = config.SeriesRootFolderName || 'TV Shows';
             validateStrmPath(view);
             setChecked(view.querySelector('.chkSmartSkipExisting'), config.SmartSkipExisting !== false);
             view.querySelector('.txtSyncParallelism').value = config.SyncParallelism || 3;
-            view.querySelector('.chkCleanupOrphans').checked = !!config.CleanupOrphans;
+            setChecked(view.querySelector('.chkCleanupOrphans'), !!config.CleanupOrphans);
             view.querySelector('.txtOrphanSafetyThreshold').value = Math.round((config.OrphanSafetyThreshold || 0.20) * 100);
             view.querySelector('.orphanThresholdContainer').style.display = config.CleanupOrphans ? '' : 'none';
-            view.querySelector('.chkEnableNfoFiles').checked = !!config.EnableNfoFiles;
+            setChecked(view.querySelector('.chkEnableNfoFiles'), !!config.EnableNfoFiles);
 
             // Auto-sync schedule
-            view.querySelector('.chkAutoSyncEnabled').checked = !!config.AutoSyncEnabled;
+            setChecked(view.querySelector('.chkAutoSyncEnabled'), !!config.AutoSyncEnabled);
             view.querySelector('.selAutoSyncMode').value = config.AutoSyncMode || 'interval';
             view.querySelector('.txtAutoSyncIntervalHours').value = config.AutoSyncIntervalHours || 24;
             view.querySelector('.txtAutoSyncDailyTime').value = config.AutoSyncDailyTime || '03:00';
@@ -385,9 +397,9 @@ function (BaseView, loading) {
 
             // Metadata ID naming (unified)
             var metadataIdEnabled = !!config.EnableTmdbFolderNaming || !!config.EnableSeriesIdFolderNaming;
-            view.querySelector('.chkEnableTmdbFolderNaming').checked = metadataIdEnabled;
+            setChecked(view.querySelector('.chkEnableTmdbFolderNaming'), metadataIdEnabled);
             var fallbackEnabled = !!config.EnableTmdbFallbackLookup || !!config.EnableSeriesMetadataLookup;
-            view.querySelector('.chkEnableTmdbFallbackLookup').checked = fallbackEnabled;
+            setChecked(view.querySelector('.chkEnableTmdbFallbackLookup'), fallbackEnabled);
             view.querySelector('.txtTvdbFolderIdOverrides').value = config.TvdbFolderIdOverrides || '';
 
             updateTmdbVisibility(view);
@@ -413,7 +425,7 @@ function (BaseView, loading) {
             loadCachedCategories(instance, config);
         }).catch(function (err) {
             loading.hide();
-            console.error('Xtream: failed to load plugin configuration', err);
+            console.error('XC2EMBY: failed to load plugin configuration', err);
         });
     }
 
@@ -429,7 +441,8 @@ function (BaseView, loading) {
 
             config.EnableLiveTv = view.querySelector('.chkEnableLiveTv').checked;
             config.LiveTvOutputFormat = view.querySelector('.selOutputFormat').value;
-            config.IncludeAdultChannels = view.querySelector('.chkIncludeAdult').checked;
+            config.TunerCount = Math.max(1, parseInt(view.querySelector('.txtTunerCount').value, 10) || 1);
+            config.IncludeAdultChannels = false;
             config.EnableLiveTvDirectPlay = view.querySelector('.chkLiveTvDirectPlay').checked;
             config.IncludeGroupTitleInM3U = view.querySelector('.chkIncludeGroupTitle').checked;
 
@@ -463,6 +476,8 @@ function (BaseView, loading) {
 
             // Sync settings
             config.StrmLibraryPath = view.querySelector('.txtStrmLibraryPath').value.replace(/\/+$/, '') || '/config/xtream';
+            config.MovieRootFolderName = (view.querySelector('.txtMovieRootFolderName').value || 'Movies').trim() || 'Movies';
+            config.SeriesRootFolderName = (view.querySelector('.txtSeriesRootFolderName').value || 'TV Shows').trim() || 'TV Shows';
             config.SmartSkipExisting = view.querySelector('.chkSmartSkipExisting').checked;
             config.SyncParallelism = parseInt(view.querySelector('.txtSyncParallelism').value, 10) || 3;
             config.CleanupOrphans = view.querySelector('.chkCleanupOrphans').checked;
@@ -485,13 +500,19 @@ function (BaseView, loading) {
             config.TvdbFolderIdOverrides = view.querySelector('.txtTvdbFolderIdOverrides').value;
 
             ApiClient.updatePluginConfiguration(pluginId, config).then(function () {
+                loading.hide();
                 Dashboard.processPluginConfigurationUpdateResult();
                 applyScheduleToTasks(view, config, ApiClient);
                 if (typeof callback === 'function') callback();
+            }).catch(function (err) {
+                loading.hide();
+                console.error('XC2EMBY: updatePluginConfiguration failed', err);
+                Dashboard.alert('Failed to save configuration. Check the browser console for details.');
             });
-        }).catch(function () {
+        }).catch(function (err) {
             loading.hide();
-            Dashboard.alert('Failed to save configuration.');
+            console.error('XC2EMBY: getPluginConfiguration failed', err);
+            Dashboard.alert('Failed to load configuration before saving. Try a hard refresh (Ctrl+Shift+R) and try again.');
         });
     }
 
@@ -606,7 +627,7 @@ function (BaseView, loading) {
         apiClient.ajax({ url: apiClient.getUrl('ScheduledTasks'), type: 'GET' })
             .then(function (tasks) {
                 var xtreamTasks = tasks.filter(function (t) {
-                    return t.Category === 'Xtream Tuner';
+                    return t.Category === 'XC2EMBY';
                 });
                 var triggers = buildTriggers(config);
                 xtreamTasks.forEach(function (task) {
@@ -847,7 +868,7 @@ function (BaseView, loading) {
         listEl.innerHTML = '<div style="padding:1.2em 1.5em; opacity:0.5;">Loading...</div>';
         modal.querySelector('.txtBrowserCurrentPath').value = path || '';
 
-        var url = ApiClient.getUrl('XtreamTuner/BrowsePath');
+        var url = ApiClient.getUrl('XC2EMBY/BrowsePath');
         if (path) url += '?path=' + encodeURIComponent(path);
 
         ApiClient.ajax({ type: 'GET', url: url, dataType: 'json' })
@@ -919,7 +940,7 @@ function (BaseView, loading) {
         resultEl.innerHTML = '<span style="opacity:0.5;">Checking path...</span>';
         ApiClient.ajax({
             type: 'POST',
-            url: ApiClient.getUrl('XtreamTuner/ValidateStrmPath'),
+            url: ApiClient.getUrl('XC2EMBY/ValidateStrmPath'),
             contentType: 'application/json',
             data: JSON.stringify({ Path: path }),
             dataType: 'json'
@@ -1032,7 +1053,7 @@ function (BaseView, loading) {
         loadingEl.style.display = 'block';
         listEl.innerHTML = '';
 
-        var apiUrl = ApiClient.getUrl('XtreamTuner/Categories/Live');
+        var apiUrl = ApiClient.getUrl('XC2EMBY/Categories/Live');
 
         ApiClient.getJSON(apiUrl).then(function (categories) {
             loadingEl.style.display = 'none';
@@ -1099,7 +1120,7 @@ function (BaseView, loading) {
         loadingEl.style.display = 'block';
         listEl.innerHTML = '';
 
-        var apiUrl = ApiClient.getUrl('XtreamTuner/Categories/Vod');
+        var apiUrl = ApiClient.getUrl('XC2EMBY/Categories/Vod');
 
         ApiClient.getJSON(apiUrl).then(function (categories) {
             loadingEl.style.display = 'none';
@@ -1150,7 +1171,7 @@ function (BaseView, loading) {
         statusEl.textContent = 'Loading...';
         statusEl.style.opacity = '0.5';
 
-        var apiUrl = ApiClient.getUrl('XtreamTuner/Categories/Vod');
+        var apiUrl = ApiClient.getUrl('XC2EMBY/Categories/Vod');
 
         ApiClient.getJSON(apiUrl).then(function (categories) {
             instance.loadedVodCategories = categories || [];
@@ -1220,7 +1241,7 @@ function (BaseView, loading) {
         loadingEl.style.display = 'block';
         listEl.innerHTML = '';
 
-        var apiUrl = ApiClient.getUrl('XtreamTuner/Categories/Series');
+        var apiUrl = ApiClient.getUrl('XC2EMBY/Categories/Series');
 
         ApiClient.getJSON(apiUrl).then(function (categories) {
             loadingEl.style.display = 'none';
@@ -1271,7 +1292,7 @@ function (BaseView, loading) {
         statusEl.textContent = 'Loading...';
         statusEl.style.opacity = '0.5';
 
-        var apiUrl = ApiClient.getUrl('XtreamTuner/Categories/Series');
+        var apiUrl = ApiClient.getUrl('XC2EMBY/Categories/Series');
 
         ApiClient.getJSON(apiUrl).then(function (categories) {
             instance.loadedSeriesCategories = categories || [];
@@ -1353,7 +1374,7 @@ function (BaseView, loading) {
     function pollSyncProgress(view, type) {
         var resultClass = type === 'Movies' ? '.syncMoviesResult' : '.syncSeriesResult';
         var resultEl = view.querySelector(resultClass);
-        var apiUrl = ApiClient.getUrl('XtreamTuner/Sync/Status');
+        var apiUrl = ApiClient.getUrl('XC2EMBY/Sync/Status');
 
         var intervalId = setInterval(function () {
             ApiClient.getJSON(apiUrl).then(function (status) {
@@ -1377,7 +1398,7 @@ function (BaseView, loading) {
         resultEl.innerHTML = '<span style="opacity:0.5;">Starting movie sync...</span>';
 
         var pollId = pollSyncProgress(view, 'Movies');
-        var apiUrl = ApiClient.getUrl('XtreamTuner/Sync/Movies');
+        var apiUrl = ApiClient.getUrl('XC2EMBY/Sync/Movies');
 
         ApiClient.ajax({
             type: 'POST',
@@ -1404,7 +1425,7 @@ function (BaseView, loading) {
         resultEl.innerHTML = '<span style="opacity:0.5;">Starting series sync...</span>';
 
         var pollId = pollSyncProgress(view, 'Series');
-        var apiUrl = ApiClient.getUrl('XtreamTuner/Sync/Series');
+        var apiUrl = ApiClient.getUrl('XC2EMBY/Sync/Series');
 
         ApiClient.ajax({
             type: 'POST',
@@ -1421,76 +1442,6 @@ function (BaseView, loading) {
             clearInterval(pollId);
             btn.disabled = false;
             setPillResult(resultEl, false, 'Series sync request failed. Check server logs for details.');
-        });
-    }
-
-    function trialSyncMovies(view) {
-        var resultEl = view.querySelector('.trialMoviesResult');
-        var msgEl = view.querySelector('.trialMoviesMessage');
-        var listEl = view.querySelector('.trialMoviesList');
-        var btn = view.querySelector('.btnTrialSyncMovies');
-        btn.disabled = true;
-        resultEl.style.display = 'block';
-        msgEl.textContent = 'Running trial (30 movies)...';
-        listEl.textContent = '';
-
-        ApiClient.ajax({
-            type: 'POST',
-            url: ApiClient.getUrl('XtreamTuner/Sync/Movies/Trial'),
-            dataType: 'json'
-        }).then(function (result) {
-            btn.disabled = false;
-            if (result.Success) {
-                msgEl.style.color = accentColor;
-                msgEl.textContent = result.Message + ' (' + (result.Preview ? result.Preview.length : 0) + ' items written — no timestamps updated)';
-            } else {
-                msgEl.style.color = '#e74c3c';
-                msgEl.textContent = result.Message || 'Trial failed.';
-            }
-            if (result.Preview && result.Preview.length > 0) {
-                listEl.textContent = result.Preview.join('\n');
-            } else {
-                listEl.textContent = '(no preview items)';
-            }
-        }).catch(function () {
-            btn.disabled = false;
-            msgEl.style.color = '#e74c3c';
-            msgEl.textContent = 'Trial request failed. Check server logs.';
-        });
-    }
-
-    function trialSyncSeries(view) {
-        var resultEl = view.querySelector('.trialSeriesResult');
-        var msgEl = view.querySelector('.trialSeriesMessage');
-        var listEl = view.querySelector('.trialSeriesList');
-        var btn = view.querySelector('.btnTrialSyncSeries');
-        btn.disabled = true;
-        resultEl.style.display = 'block';
-        msgEl.textContent = 'Running trial (30 series)...';
-        listEl.textContent = '';
-
-        ApiClient.ajax({
-            type: 'POST',
-            url: ApiClient.getUrl('XtreamTuner/Sync/Series/Trial'),
-            dataType: 'json'
-        }).then(function (result) {
-            btn.disabled = false;
-            if (result.Success) {
-                msgEl.style.color = accentColor;
-                msgEl.textContent = result.Message + ' (' + (result.Preview ? result.Preview.length : 0) + ' items written — no timestamps updated)';
-            } else {
-                msgEl.style.color = '#e74c3c';
-                msgEl.textContent = result.Message || 'Trial failed.';
-            }
-            if (result.Preview && result.Preview.length > 0) {
-                listEl.textContent = result.Preview.join('\n');
-            } else {
-                listEl.textContent = '(no preview items)';
-            }
-        }).catch(function () {
-            btn.disabled = false;
-            msgEl.style.color = '#e74c3c';
-            msgEl.textContent = 'Trial request failed. Check server logs.';
         });
     }
 
@@ -1519,7 +1470,7 @@ function (BaseView, loading) {
 
             ApiClient.ajax({
                 type: 'DELETE',
-                url: ApiClient.getUrl('XtreamTuner/Content/' + type),
+                url: ApiClient.getUrl('XC2EMBY/Content/' + type),
                 dataType: 'json'
             }).then(function (result) {
                 btn.disabled = false;
@@ -1537,7 +1488,7 @@ function (BaseView, loading) {
 
         ApiClient.ajax({
             type: 'POST',
-            url: ApiClient.getUrl('XtreamTuner/RefreshCache')
+            url: ApiClient.getUrl('XC2EMBY/RefreshCache')
         }).then(function () {
             setPillResult(resultEl, true, 'Cache refreshed successfully!');
         }).catch(function () {
@@ -1551,7 +1502,7 @@ function (BaseView, loading) {
 
         ApiClient.ajax({
             type: 'POST',
-            url: ApiClient.getUrl('XtreamTuner/ClearCodecCache')
+            url: ApiClient.getUrl('XC2EMBY/ClearCodecCache')
         }).then(function () {
             setPillResult(resultEl, true, 'Codec cache cleared. Channels will be re-probed on next tune.');
         }).catch(function () {
@@ -1564,7 +1515,7 @@ function (BaseView, loading) {
     var dashboardPollId = null;
 
     function loadDashboard(view) {
-        var apiUrl = ApiClient.getUrl('XtreamTuner/Dashboard');
+        var apiUrl = ApiClient.getUrl('XC2EMBY/Dashboard');
 
         ApiClient.getJSON(apiUrl).then(function (data) {
             loadDashboard._retries = 0;
@@ -1579,8 +1530,8 @@ function (BaseView, loading) {
                 sessionStorage.setItem('xtream-cache-bust', '1');
                 var v = document.documentElement.getAttribute('data-appversion') || '';
                 Promise.all([
-                    fetch('configurationpage?name=xtreamconfig&v=' + v, { cache: 'reload' }),
-                    fetch('configurationpage?name=xtreamconfigjs&v=' + v, { cache: 'reload' })
+                    fetch('configurationpage?name=xtreamconfig101&v=' + v, { cache: 'reload' }),
+                    fetch('configurationpage?name=xtreamconfigjs101&v=' + v, { cache: 'reload' })
                 ]).then(function () { location.reload(); });
                 return;
             }
@@ -1609,7 +1560,7 @@ function (BaseView, loading) {
         var card = view.querySelector('.dashboardFailedItemsCard');
         if (!card) return;
 
-        ApiClient.getJSON(ApiClient.getUrl('XtreamTuner/Sync/FailedItems')).then(function (items) {
+        ApiClient.getJSON(ApiClient.getUrl('XC2EMBY/Sync/FailedItems')).then(function (items) {
             if (!items || items.length === 0) {
                 card.style.display = 'none';
                 return;
@@ -1647,7 +1598,7 @@ function (BaseView, loading) {
         if (btn) btn.disabled = true;
         if (result) result.textContent = 'Retrying...';
 
-        ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('XtreamTuner/Sync/RetryFailed') })
+        ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('XC2EMBY/Sync/RetryFailed') })
             .then(function (data) {
                 if (result) result.textContent = data.Message || 'Done.';
                 loadFailedItems(view);
@@ -1816,13 +1767,8 @@ function (BaseView, loading) {
         html += libTile(stats.SeriesCount || 0, 'Shows');
         html += libTile(stats.SeasonCount || 0, 'Seasons');
         html += libTile(stats.EpisodeCount || 0, 'Episodes');
+        html += libTile(stats.LiveTvChannels || 0, 'Live TV');
         html += '</div>';
-
-        if (stats.LiveTvChannels > 0) {
-            html += '<div style="margin-top:0.5em;">' +
-                libTile(stats.LiveTvChannels, 'Live TV channels') +
-            '</div>';
-        }
 
         container.innerHTML = html;
     }
@@ -1918,7 +1864,7 @@ function (BaseView, loading) {
         progressCard.style.display = 'block';
 
         dashboardPollId = setInterval(function () {
-            var apiUrl = ApiClient.getUrl('XtreamTuner/Sync/Status');
+            var apiUrl = ApiClient.getUrl('XC2EMBY/Sync/Status');
             ApiClient.getJSON(apiUrl).then(function (status) {
                 var movieProg = status.Movies;
                 var seriesProg = status.Series;
@@ -1970,8 +1916,8 @@ function (BaseView, loading) {
 
             startDashboardProgressPolling(view);
 
-            var movieUrl = ApiClient.getUrl('XtreamTuner/Sync/Movies');
-            var seriesUrl = ApiClient.getUrl('XtreamTuner/Sync/Series');
+            var movieUrl = ApiClient.getUrl('XC2EMBY/Sync/Movies');
+            var seriesUrl = ApiClient.getUrl('XC2EMBY/Sync/Series');
             var movieMsg = '';
 
             var moviePromise = doMovies
@@ -2090,8 +2036,8 @@ function (BaseView, loading) {
         var xtreamOk = !!(config.BaseUrl && config.Username);
         setHealthDot(xtreamItem, xtreamOk ? 'ok' : 'grey');
         xtreamItem.querySelector('.healthLabel').textContent = xtreamOk
-            ? 'Xtream: Connected (' + config.Username + ')'
-            : 'Xtream: Not configured';
+            ? 'XC2EMBY: Connected (' + config.Username + ')'
+            : 'XC2EMBY: Not configured';
 
         // Last sync dot — prefer SyncHistoryJson[0].EndTime (updated on every sync),
         // fall back to LastMovieSyncTimestamp (may be Unix epoch int or ISO string).
@@ -2165,23 +2111,54 @@ function (BaseView, loading) {
         if (!config.AutoSyncEnabled) {
             el.innerHTML = 'Auto-sync: Off \u00a0\u2014\u00a0<a class="lnkGoToAutoSync" href="#" style="color:inherit; text-decoration:underline;">Enable in Settings</a>';
         } else {
-            var interval = config.AutoSyncIntervalHours || 24;
-            var nextText = '';
-            var lastTs = config.LastMovieSyncTimestamp;
-            if (lastTs) {
-                var lastDate = typeof lastTs === 'number' ? new Date(lastTs * 1000) : new Date(lastTs);
-                if (!isNaN(lastDate.getTime())) {
-                    var diff = new Date(lastDate.getTime() + interval * 3600000) - new Date();
-                    if (diff > 0) {
-                        var h = Math.floor(diff / 3600000);
-                        var m = Math.floor((diff % 3600000) / 60000);
-                        nextText = ' \u2014 next run in ' + (h > 0 ? h + 'h ' : '') + m + 'm';
-                    } else {
-                        nextText = ' \u2014 overdue';
+            var summary = '';
+            var nextDate = null;
+            var now = new Date();
+
+            if (config.AutoSyncMode === 'daily') {
+                var parts = (config.AutoSyncDailyTime || '03:00').split(':');
+                var hour = parseInt(parts[0], 10) || 3;
+                var minute = parseInt(parts[1] || '0', 10) || 0;
+                nextDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hour, minute, 0, 0);
+                if (nextDate <= now) nextDate.setDate(nextDate.getDate() + 1);
+                summary = 'Auto-sync: Daily at ' + (config.AutoSyncDailyTime || '03:00');
+            } else {
+                var interval = Math.max(1, config.AutoSyncIntervalHours || 24);
+                summary = 'Auto-sync: Every ' + interval + 'h';
+
+                try {
+                    var hist = config.SyncHistoryJson ? JSON.parse(config.SyncHistoryJson) : null;
+                    if (hist && hist.length > 0 && hist[0].EndTime) {
+                        var parsedHistoryDate = new Date(hist[0].EndTime);
+                        if (!isNaN(parsedHistoryDate.getTime())) {
+                            nextDate = new Date(parsedHistoryDate.getTime() + interval * 3600000);
+                        }
+                    }
+                } catch (e) { /* ignore parse errors */ }
+
+                if (!nextDate) {
+                    var lastTs = config.LastMovieSyncTimestamp;
+                    if (lastTs) {
+                        var lastDate = typeof lastTs === 'number' ? new Date(lastTs * 1000) : new Date(lastTs);
+                        if (!isNaN(lastDate.getTime())) {
+                            nextDate = new Date(lastDate.getTime() + interval * 3600000);
+                        }
                     }
                 }
             }
-            el.textContent = 'Auto-sync: Every ' + interval + 'h' + nextText;
+
+            if (nextDate) {
+                var diff = nextDate - now;
+                if (diff > 0) {
+                    var h = Math.floor(diff / 3600000);
+                    var m = Math.floor((diff % 3600000) / 60000);
+                    summary += ' \u2014 next run in ' + (h > 0 ? h + 'h ' : '') + m + 'm';
+                } else {
+                    summary += ' \u2014 overdue';
+                }
+            }
+
+            el.textContent = summary;
         }
         var link = el.querySelector('.lnkGoToAutoSync');
         if (link) {
@@ -2252,57 +2229,6 @@ function (BaseView, loading) {
             cards[i].classList.toggle('active', cards[i].getAttribute('data-mode') === val);
         }
     }
-
-    // Expose trial run handlers on window so plain-button onclick attributes can reach them.
-    window.XtreamTrialMovies = function (btn) {
-        var container = btn.closest('.tabPanel') || document;
-        var resultEl = container.querySelector('.trialMoviesResult');
-        var msgEl = container.querySelector('.trialMoviesMessage');
-        var listEl = container.querySelector('.trialMoviesList');
-        btn.disabled = true;
-        resultEl.style.display = 'block';
-        msgEl.style.color = '';
-        msgEl.textContent = 'Running trial (30 movies)...';
-        listEl.textContent = '';
-        ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('XtreamTuner/Sync/Movies/Trial'), dataType: 'json' })
-            .then(function (result) {
-                btn.disabled = false;
-                msgEl.style.color = result.Success ? accentColor : '#e74c3c';
-                msgEl.textContent = result.Success
-                    ? result.Message + ' (' + (result.Preview ? result.Preview.length : 0) + ' items written \u2014 no timestamps updated)'
-                    : (result.Message || 'Trial failed.');
-                listEl.textContent = (result.Preview && result.Preview.length > 0) ? result.Preview.join('\n') : '(no preview items)';
-            }).catch(function () {
-                btn.disabled = false;
-                msgEl.style.color = '#e74c3c';
-                msgEl.textContent = 'Trial request failed. Check server logs.';
-            });
-    };
-
-    window.XtreamTrialSeries = function (btn) {
-        var container = btn.closest('.tabPanel') || document;
-        var resultEl = container.querySelector('.trialSeriesResult');
-        var msgEl = container.querySelector('.trialSeriesMessage');
-        var listEl = container.querySelector('.trialSeriesList');
-        btn.disabled = true;
-        resultEl.style.display = 'block';
-        msgEl.style.color = '';
-        msgEl.textContent = 'Running trial (30 series)...';
-        listEl.textContent = '';
-        ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('XtreamTuner/Sync/Series/Trial'), dataType: 'json' })
-            .then(function (result) {
-                btn.disabled = false;
-                msgEl.style.color = result.Success ? accentColor : '#e74c3c';
-                msgEl.textContent = result.Success
-                    ? result.Message + ' (' + (result.Preview ? result.Preview.length : 0) + ' items written \u2014 no timestamps updated)'
-                    : (result.Message || 'Trial failed.');
-                listEl.textContent = (result.Preview && result.Preview.length > 0) ? result.Preview.join('\n') : '(no preview items)';
-            }).catch(function () {
-                btn.disabled = false;
-                msgEl.style.color = '#e74c3c';
-                msgEl.textContent = 'Trial request failed. Check server logs.';
-            });
-    };
 
     return View;
 });

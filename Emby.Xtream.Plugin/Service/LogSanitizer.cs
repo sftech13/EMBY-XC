@@ -13,7 +13,7 @@ namespace Emby.Xtream.Plugin.Service
             RegexOptions.Compiled);
 
         private static readonly Regex XtreamCredRegex = new Regex(
-            @"/live/[^/]+/[^/]+/",
+            @"/(live|movie|series)/[^/]+/[^/]+/",
             RegexOptions.Compiled);
 
         private static readonly Regex EmailRegex = new Regex(
@@ -55,8 +55,8 @@ namespace Emby.Xtream.Plugin.Service
                 s = s.Replace("\x00VER" + i + "\x00", versionMatches[i].Value);
             }
 
-            // Redact Xtream credentials in URLs: /live/user/pass/
-            s = XtreamCredRegex.Replace(s, "/live/<user>/<pass>/");
+            // Redact Xtream credentials in URLs: /live/user/pass/, /movie/user/pass/, /series/user/pass/
+            s = XtreamCredRegex.Replace(s, "/$1/<user>/<pass>/");
 
             // Redact email patterns
             s = EmailRegex.Replace(s, "<email-redacted>");

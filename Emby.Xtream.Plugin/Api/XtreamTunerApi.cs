@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -14,135 +15,132 @@ using MediaBrowser.Model.Services;
 
 namespace Emby.Xtream.Plugin.Api
 {
-    [Route("/XtreamTuner/Epg", "GET", Summary = "Gets XMLTV EPG data for Live TV channels")]
+    [Route("/XC2EMBY/Epg", "GET", Summary = "Gets XMLTV EPG data for Live TV channels")]
     public class GetEpgXml : IReturnVoid
     {
     }
 
-    [Route("/XtreamTuner/LiveTv", "GET", Summary = "Gets M3U playlist for Live TV channels")]
+    [Route("/XC2EMBY/LiveTv", "GET", Summary = "Gets M3U playlist for Live TV channels")]
     public class GetM3UPlaylist : IReturnVoid
     {
     }
 
-    [Route("/XtreamTuner/Categories/Live", "GET", Summary = "Gets Live TV categories from Xtream API")]
+    [Route("/XC2EMBY/Categories/Live", "GET", Summary = "Gets Live TV categories from Xtream API")]
     public class GetLiveCategories : IReturn<List<Category>>
     {
     }
 
-    [Route("/XtreamTuner/RefreshCache", "POST", Summary = "Invalidates M3U and EPG caches")]
+    [Route("/XC2EMBY/RefreshCache", "POST", Summary = "Invalidates M3U and EPG caches")]
     public class RefreshCache : IReturnVoid
     {
     }
 
-    [Route("/XtreamTuner/ClearCodecCache", "POST", Summary = "Clears per-channel codec cache so all channels are re-probed on next tune")]
+    [Route("/XC2EMBY/ClearCodecCache", "POST", Summary = "Clears per-channel codec cache so all channels are re-probed on next tune")]
     public class ClearCodecCache : IReturnVoid
     {
     }
 
-    [Route("/XtreamTuner/Categories/Vod", "GET", Summary = "Gets VOD movie categories from Xtream API")]
+    [Route("/XC2EMBY/Categories/Vod", "GET", Summary = "Gets VOD movie categories from Xtream API")]
     public class GetVodCategories : IReturn<List<Category>>
     {
     }
 
-    [Route("/XtreamTuner/Categories/Series", "GET", Summary = "Gets Series categories from Xtream API")]
+    [Route("/XC2EMBY/Categories/Series", "GET", Summary = "Gets Series categories from Xtream API")]
     public class GetSeriesCategories : IReturn<List<Category>>
     {
     }
 
-    [Route("/XtreamTuner/Sync/Movies", "POST", Summary = "Triggers VOD movie STRM sync")]
+    [Route("/XC2EMBY/Sync/Movies", "POST", Summary = "Triggers VOD movie STRM sync")]
     public class SyncMovies : IReturn<SyncResult>
     {
     }
 
-    [Route("/XtreamTuner/Sync/Series", "POST", Summary = "Triggers series STRM sync")]
+    [Route("/XC2EMBY/Sync/Series", "POST", Summary = "Triggers series STRM sync")]
     public class SyncSeries : IReturn<SyncResult>
     {
     }
 
-    [Route("/XtreamTuner/Sync/Movies/Trial", "POST", Summary = "Runs a trial movie sync of up to 30 items without updating timestamps")]
-    public class TrialSyncMovies : IReturn<SyncResult>
-    {
-    }
-
-    [Route("/XtreamTuner/Sync/Series/Trial", "POST", Summary = "Runs a trial series sync of up to 30 items without updating timestamps")]
-    public class TrialSyncSeries : IReturn<SyncResult>
-    {
-    }
-
-    [Route("/XtreamTuner/Sync/Status", "GET", Summary = "Gets current sync progress")]
+[Route("/XC2EMBY/Sync/Status", "GET", Summary = "Gets current sync progress")]
     public class GetSyncStatus : IReturn<SyncStatusResult>
     {
     }
 
-    [Route("/XtreamTuner/Dashboard", "GET", Summary = "Gets dashboard data including sync history and library stats")]
+    [Route("/XC2EMBY/Dashboard", "GET", Summary = "Gets dashboard data including sync history and library stats")]
     public class GetDashboard : IReturn<DashboardResult>
     {
     }
 
-    [Route("/XtreamTuner/Content/Movies", "DELETE", Summary = "Deletes all movie STRM content")]
+    [Route("/XC2EMBY/Content/Movies", "DELETE", Summary = "Deletes all movie STRM content")]
     public class DeleteMovieContent : IReturn<DeleteContentResult>
     {
     }
 
-    [Route("/XtreamTuner/Content/Series", "DELETE", Summary = "Deletes all series STRM content")]
+    [Route("/XC2EMBY/Content/Series", "DELETE", Summary = "Deletes all series STRM content")]
     public class DeleteSeriesContent : IReturn<DeleteContentResult>
     {
     }
 
-    [Route("/XtreamTuner/WritablePaths", "GET", Summary = "Returns writable mount points available to Emby")]
+    [Route("/XC2EMBY/WritablePaths", "GET", Summary = "Returns writable mount points available to Emby")]
     public class GetWritablePaths : IReturn<List<string>>
     {
     }
 
-    [Route("/XtreamTuner/BrowsePath", "GET", Summary = "Lists subdirectories at the given path, or writable mounts if no path given")]
+    [Route("/XC2EMBY/BrowsePath", "GET", Summary = "Lists subdirectories at the given path, or writable mounts if no path given")]
     public class BrowsePath : IReturn<BrowsePathResult>
     {
         public string Path { get; set; }
     }
 
-    [Route("/XtreamTuner/ValidateStrmPath", "POST", Summary = "Validates that the STRM library path is writable")]
+    [Route("/XC2EMBY/ValidateStrmPath", "POST", Summary = "Validates that the STRM library path is writable")]
     public class ValidateStrmPath : IReturn<TestConnectionResult>
     {
         public string Path { get; set; }
     }
 
-    [Route("/XtreamTuner/TestConnection", "POST", Summary = "Tests connection to Xtream server")]
+    [Route("/XC2EMBY/TestConnection", "POST", Summary = "Tests connection to Xtream server")]
     public class TestXtreamConnection : IReturn<TestConnectionResult>
     {
     }
 
-    [Route("/XtreamTuner/CheckUpdate", "GET", Summary = "Checks GitHub for a newer plugin release")]
+    [Route("/XC2EMBY/CheckUpdate", "GET", Summary = "Checks GitHub for a newer plugin release")]
     public class CheckForUpdate : IReturn<UpdateCheckResult>
     {
         public bool? Beta { get; set; }
     }
 
-    [Route("/XtreamTuner/Sync/FailedItems", "GET", Summary = "Returns items that failed during the last sync")]
+    [Route("/XC2EMBY/Sync/FailedItems", "GET", Summary = "Returns items that failed during the last sync")]
     public class GetFailedItems : IReturn<List<FailedSyncItem>>
     {
     }
 
-    [Route("/XtreamTuner/Sync/RetryFailed", "POST", Summary = "Retries all items that failed during the last sync")]
+    [Route("/XC2EMBY/Sync/RetryFailed", "POST", Summary = "Retries all items that failed during the last sync")]
     public class RetryFailed : IReturn<SyncResult>
     {
     }
 
-    [Route("/XtreamTuner/Logs", "GET", Summary = "Downloads sanitized plugin logs")]
+    [Route("/XC2EMBY/Logs", "GET", Summary = "Downloads sanitized plugin logs")]
     public class GetSanitizedLogs : IReturnVoid
     {
     }
 
-    [Route("/XtreamTuner/InstallUpdate", "POST", Summary = "Downloads and installs the latest plugin update")]
-    public class InstallUpdate : IReturn<InstallUpdateResult>
+    [Route("/XC2EMBY/GuideDiagnostics", "GET", Summary = "Returns Live TV channel to XMLTV guide mapping diagnostics")]
+    public class GetGuideDiagnostics : IReturn<GuideDiagnosticsResult>
     {
+        public bool ProblemsOnly { get; set; }
     }
 
-    [Route("/XtreamTuner/RestartEmby", "POST", Summary = "Restarts the Emby server")]
+    [Route("/XC2EMBY/InstallUpdate", "POST", Summary = "Downloads and installs the latest plugin update")]
+    public class InstallUpdate : IReturn<InstallUpdateResult>
+    {
+        public bool? Beta { get; set; }
+    }
+
+    [Route("/XC2EMBY/RestartEmby", "POST", Summary = "Restarts the Emby server")]
     public class RestartEmby : IReturnVoid
     {
     }
 
-    [Route("/XtreamTuner/TestTmdbLookup", "GET", Summary = "Tests TMDB fallback lookup")]
+    [Route("/XC2EMBY/TestTmdbLookup", "GET", Summary = "Tests TMDB fallback lookup")]
     public class TestTmdbLookup : IReturn<TestConnectionResult>
     {
         public string Name { get; set; }
@@ -183,8 +181,6 @@ namespace Emby.Xtream.Plugin.Api
         public int Completed { get; set; }
         public int Skipped { get; set; }
         public int Failed { get; set; }
-        /// <summary>Populated only for trial runs. Each entry is "Title → relative/path".</summary>
-        public List<string> Preview { get; set; }
     }
 
     public class SyncStatusResult
@@ -223,6 +219,28 @@ namespace Emby.Xtream.Plugin.Api
         public int SeasonCount    { get; set; }
         public int EpisodeCount   { get; set; }
         public int LiveTvChannels { get; set; }
+    }
+
+    public class GuideDiagnosticsResult
+    {
+        public int ChannelCount { get; set; }
+        public int MappedCount { get; set; }
+        public int MissingEpgChannelIdCount { get; set; }
+        public int MissingXmltvChannelCount { get; set; }
+        public int NoProgrammesCount { get; set; }
+        public List<GuideDiagnosticItem> Items { get; set; }
+    }
+
+    public class GuideDiagnosticItem
+    {
+        public int Number { get; set; }
+        public string Name { get; set; }
+        public int StreamId { get; set; }
+        public string EpgChannelId { get; set; }
+        public string ResolvedXmltvId { get; set; }
+        public bool XmltvChannelExists { get; set; }
+        public int ProgrammeCount { get; set; }
+        public string Status { get; set; }
     }
 
     public class XtreamTunerApi : BaseApiService
@@ -282,13 +300,37 @@ namespace Emby.Xtream.Plugin.Api
             using (var httpClient = Plugin.CreateHttpClient())
             {
                 var json = await httpClient.GetStringAsync(url).ConfigureAwait(false);
-                var categories = System.Text.Json.JsonSerializer.Deserialize<List<Category>>(json,
-                    new System.Text.Json.JsonSerializerOptions
-                    {
-                        NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString,
-                        PropertyNameCaseInsensitive = true,
-                    }) ?? new List<Category>();
+                var jsonOptions = new System.Text.Json.JsonSerializerOptions
+                {
+                    NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString,
+                    PropertyNameCaseInsensitive = true,
+                };
+                var categories = XtreamResponseParser.DeserializeCategories(json, jsonOptions);
                 var sorted = categories.OrderBy(c => c.CategoryName).ToList();
+
+                // Fallback: derive categories from VOD stream list when server returns empty
+                if (sorted.Count == 0)
+                {
+                    var streamsUrl = string.Format(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        "{0}/player_api.php?username={1}&password={2}&action=get_vod_streams",
+                        config.BaseUrl, Uri.EscapeDataString(config.Username), Uri.EscapeDataString(config.Password));
+
+                    var streamsJson = await httpClient.GetStringAsync(streamsUrl).ConfigureAwait(false);
+                    var vodStreams = System.Text.Json.JsonSerializer.Deserialize<List<VodStreamInfo>>(streamsJson, jsonOptions)
+                        ?? new List<VodStreamInfo>();
+
+                    sorted = vodStreams
+                        .Where(s => s.CategoryId.HasValue)
+                        .GroupBy(s => s.CategoryId.Value)
+                        .Select(g => new Category
+                        {
+                            CategoryId = g.Key,
+                            CategoryName = "Category " + g.Key,
+                        })
+                        .OrderBy(c => c.CategoryName)
+                        .ToList();
+                }
 
                 // Cache for instant UI loading
                 config.CachedVodCategories = System.Text.Json.JsonSerializer.Serialize(
@@ -322,8 +364,7 @@ namespace Emby.Xtream.Plugin.Api
                     config.BaseUrl, Uri.EscapeDataString(config.Username), Uri.EscapeDataString(config.Password));
 
                 var json = await httpClient.GetStringAsync(url).ConfigureAwait(false);
-                var categories = System.Text.Json.JsonSerializer.Deserialize<List<Category>>(json, jsonOptions)
-                    ?? new List<Category>();
+                var categories = XtreamResponseParser.DeserializeCategories(json, jsonOptions);
                 var sorted = categories.OrderBy(c => c.CategoryName).ToList();
 
                 // Fallback: derive categories from series list when server returns empty
@@ -335,8 +376,7 @@ namespace Emby.Xtream.Plugin.Api
                         config.BaseUrl, Uri.EscapeDataString(config.Username), Uri.EscapeDataString(config.Password));
 
                     var seriesJson = await httpClient.GetStringAsync(seriesUrl).ConfigureAwait(false);
-                    var seriesList = System.Text.Json.JsonSerializer.Deserialize<List<SeriesInfo>>(seriesJson, jsonOptions)
-                        ?? new List<SeriesInfo>();
+                    var seriesList = XtreamResponseParser.DeserializeSeriesList(seriesJson, jsonOptions);
 
                     sorted = seriesList
                         .Where(s => s.CategoryId.HasValue)
@@ -470,98 +510,6 @@ namespace Emby.Xtream.Plugin.Api
             return result;
         }
 
-        public async Task<object> Post(TrialSyncMovies request)
-        {
-            var config = Plugin.Instance.Configuration;
-            var syncService = Plugin.Instance.StrmSyncService;
-            var result = new SyncResult();
-
-            if (!config.SyncMovies)
-            {
-                result.Success = false;
-                result.Message = "Movie sync is not enabled. Enable it in Settings first.";
-                return result;
-            }
-
-            if (syncService.MovieProgress.IsRunning)
-            {
-                result.Success = false;
-                result.Message = "Movie sync is already running.";
-                return result;
-            }
-
-            try
-            {
-                await syncService.SyncMoviesAsync(
-                    config,
-                    CancellationToken.None,
-                    saveConfig: null,
-                    taskProgress: null,
-                    trialLimit: 30).ConfigureAwait(false);
-                var progress = syncService.MovieProgress;
-                result.Success = string.IsNullOrEmpty(progress.AbortReason);
-                result.Message = result.Success ? "Trial movie sync completed (no timestamps updated)." : progress.AbortReason;
-                result.Total = progress.Total;
-                result.Completed = progress.Completed;
-                result.Skipped = progress.Skipped;
-                result.Failed = progress.Failed;
-                result.Preview = new List<string>(progress.PreviewItems);
-            }
-            catch (Exception ex)
-            {
-                result.Success = false;
-                result.Message = "Trial movie sync failed: " + ex.Message;
-            }
-
-            return result;
-        }
-
-        public async Task<object> Post(TrialSyncSeries request)
-        {
-            var config = Plugin.Instance.Configuration;
-            var syncService = Plugin.Instance.StrmSyncService;
-            var result = new SyncResult();
-
-            if (!config.SyncSeries)
-            {
-                result.Success = false;
-                result.Message = "Series sync is not enabled. Enable it in Settings first.";
-                return result;
-            }
-
-            if (syncService.SeriesProgress.IsRunning)
-            {
-                result.Success = false;
-                result.Message = "Series sync is already running.";
-                return result;
-            }
-
-            try
-            {
-                await syncService.SyncSeriesAsync(
-                    config,
-                    CancellationToken.None,
-                    saveConfig: null,
-                    taskProgress: null,
-                    trialLimit: 30).ConfigureAwait(false);
-                var progress = syncService.SeriesProgress;
-                result.Success = string.IsNullOrEmpty(progress.AbortReason);
-                result.Message = result.Success ? "Trial series sync completed (no timestamps updated)." : progress.AbortReason;
-                result.Total = progress.Total;
-                result.Completed = progress.Completed;
-                result.Skipped = progress.Skipped;
-                result.Failed = progress.Failed;
-                result.Preview = new List<string>(progress.PreviewItems);
-            }
-            catch (Exception ex)
-            {
-                result.Success = false;
-                result.Message = "Trial series sync failed: " + ex.Message;
-            }
-
-            return result;
-        }
-
         public object Get(GetSyncStatus request)
         {
             var syncService = Plugin.Instance.StrmSyncService;
@@ -624,13 +572,15 @@ namespace Emby.Xtream.Plugin.Api
 
             var movieFolders = 0;
             var movieCount = 0;
+            var seriesFolders = 0;
             var seriesCount = 0;
             var seasonCount = 0;
             var episodeCount = 0;
+            var liveTvChannels = 0;
 
             try
             {
-                var moviesRoot = Path.Combine(config.StrmLibraryPath, "Movies");
+                var moviesRoot = Path.Combine(config.StrmLibraryPath, StrmSyncService.GetMovieRootFolderName(config));
                 if (Directory.Exists(moviesRoot))
                 {
                     movieFolders = Directory.GetDirectories(moviesRoot, "*", SearchOption.TopDirectoryOnly).Length;
@@ -641,13 +591,16 @@ namespace Emby.Xtream.Plugin.Api
 
             try
             {
-                var showsRoot = Path.Combine(config.StrmLibraryPath, "Shows");
-                if (Directory.Exists(showsRoot))
+                var showsRoot = Path.Combine(config.StrmLibraryPath, StrmSyncService.GetSeriesRootFolderName(config));
+                var legacySeriesRoot = Path.Combine(config.StrmLibraryPath, "Series");
+                var seriesRoot = Directory.Exists(showsRoot) ? showsRoot : legacySeriesRoot;
+                if (Directory.Exists(seriesRoot))
                 {
-                    // In single mode: Shows/ShowName/Season XX/
-                    // In multiple/custom mode: Shows/Category/ShowName/Season XX/
+                    // In single mode: <SeriesRoot>/ShowName/Season XX/
+                    // In multiple/custom mode: <SeriesRoot>/Category/ShowName/Season XX/
                     var isFlat = string.Equals(config.SeriesFolderMode, "single", StringComparison.OrdinalIgnoreCase);
-                    var topDirs = Directory.GetDirectories(showsRoot, "*", SearchOption.TopDirectoryOnly);
+                    var topDirs = Directory.GetDirectories(seriesRoot, "*", SearchOption.TopDirectoryOnly);
+                    seriesFolders = topDirs.Length;
                     var seriesDirList = isFlat
                         ? topDirs
                         : topDirs.SelectMany(cat => { try { return Directory.GetDirectories(cat, "*", SearchOption.TopDirectoryOnly); } catch { return new string[0]; } }).ToArray();
@@ -660,10 +613,29 @@ namespace Emby.Xtream.Plugin.Api
                         }
                         catch { }
                     }
-                    episodeCount = Directory.GetFiles(showsRoot, "*.strm", SearchOption.AllDirectories).Length;
+                    episodeCount = Directory.GetFiles(seriesRoot, "*.strm", SearchOption.AllDirectories).Length;
                 }
             }
             catch { }
+
+            try
+            {
+                if (config.EnableLiveTv &&
+                    !string.IsNullOrEmpty(config.BaseUrl) &&
+                    !string.IsNullOrEmpty(config.Username) &&
+                    !string.IsNullOrEmpty(config.Password))
+                {
+                    liveTvChannels = Plugin.Instance.LiveTvService
+                        .GetFilteredChannelsAsync(CancellationToken.None)
+                        .GetAwaiter()
+                        .GetResult()
+                        .Count;
+                }
+            }
+            catch
+            {
+                liveTvChannels = Emby.Xtream.Plugin.Service.XtreamTunerHost.Instance?.CachedChannelCount ?? 0;
+            }
 
             // Compute next sync time
             DateTime? nextSyncTime = null;
@@ -699,23 +671,102 @@ namespace Emby.Xtream.Plugin.Api
                 {
                     MovieFolders   = movieFolders,
                     MovieCount     = movieCount,
-                    SeriesFolders  = seriesCount,
+                    SeriesFolders  = seriesFolders,
                     SeriesCount    = seriesCount,
                     SeasonCount    = seasonCount,
                     EpisodeCount   = episodeCount,
-                    LiveTvChannels = Emby.Xtream.Plugin.Service.XtreamTunerHost.Instance?.CachedChannelCount ?? 0,
+                    LiveTvChannels = liveTvChannels,
                 },
             };
         }
 
+        public async Task<object> Get(GetGuideDiagnostics request)
+        {
+            var result = new GuideDiagnosticsResult
+            {
+                Items = new List<GuideDiagnosticItem>()
+            };
+
+            var provider = XtreamListingsProvider.Instance;
+            var xmltvIds = provider != null
+                ? await provider.GetXmltvChannelIdsAsync(CancellationToken.None).ConfigureAwait(false)
+                : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var programmeCounts = provider != null
+                ? await provider.GetXmltvProgramCountsAsync(CancellationToken.None).ConfigureAwait(false)
+                : new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+            var channels = await Plugin.Instance.LiveTvService
+                .GetFilteredChannelsAsync(CancellationToken.None)
+                .ConfigureAwait(false);
+
+            var config = Plugin.Instance.Configuration;
+
+            foreach (var channel in channels.OrderBy(c => c.Num).ThenBy(c => c.Name))
+            {
+                var rawEpgId = string.IsNullOrWhiteSpace(channel.EpgChannelId)
+                    ? null
+                    : channel.EpgChannelId.Trim();
+                var resolvedId = !string.IsNullOrEmpty(rawEpgId)
+                    ? XtreamListingsProvider.ResolveToXmltvId(rawEpgId, xmltvIds)
+                    : null;
+                var xmltvExists = !string.IsNullOrEmpty(resolvedId) &&
+                                  (xmltvIds == null || xmltvIds.Contains(resolvedId));
+                var programmeCount = 0;
+                if (xmltvExists && programmeCounts != null)
+                    programmeCounts.TryGetValue(resolvedId, out programmeCount);
+
+                string status;
+                if (string.IsNullOrEmpty(rawEpgId))
+                {
+                    status = "Missing epg_channel_id from Xtream";
+                    result.MissingEpgChannelIdCount++;
+                }
+                else if (!xmltvExists)
+                {
+                    status = "epg_channel_id not found in XMLTV";
+                    result.MissingXmltvChannelCount++;
+                }
+                else if (programmeCount <= 0)
+                {
+                    status = "XMLTV channel has no programmes";
+                    result.NoProgrammesCount++;
+                }
+                else
+                {
+                    status = "Mapped";
+                    result.MappedCount++;
+                }
+
+                var include = !request.ProblemsOnly || !string.Equals(status, "Mapped", StringComparison.OrdinalIgnoreCase);
+                if (!include)
+                    continue;
+
+                result.Items.Add(new GuideDiagnosticItem
+                {
+                    Number = channel.Num,
+                    Name = ChannelNameCleaner.CleanChannelName(
+                        channel.Name, config.ChannelRemoveTerms, config.EnableChannelNameCleaning),
+                    StreamId = channel.StreamId,
+                    EpgChannelId = rawEpgId,
+                    ResolvedXmltvId = resolvedId,
+                    XmltvChannelExists = xmltvExists,
+                    ProgrammeCount = programmeCount,
+                    Status = status
+                });
+            }
+
+            result.ChannelCount = channels.Count;
+            return result;
+        }
+
         public object Delete(DeleteMovieContent request)
         {
-            return DeleteContentFolder("Movies");
+            return DeleteContentFolder(StrmSyncService.GetMovieRootFolderName(Plugin.Instance.Configuration));
         }
 
         public object Delete(DeleteSeriesContent request)
         {
-            return DeleteContentFolder("Shows");
+            return DeleteContentFolder(StrmSyncService.GetSeriesRootFolderName(Plugin.Instance.Configuration));
         }
 
         private DeleteContentResult DeleteContentFolder(string folderName)
@@ -870,6 +921,7 @@ namespace Emby.Xtream.Plugin.Api
         {
             Plugin.Instance.LiveTvService.InvalidateCache();
             XtreamTunerHost.Instance?.ClearCaches();
+            XtreamServerEntryPoint.Instance?.TriggerGuideRefresh();
         }
 
         public void Post(ClearCodecCache request)
@@ -1097,7 +1149,10 @@ namespace Emby.Xtream.Plugin.Api
 
             try
             {
-                var checkResult = await UpdateChecker.CheckForUpdateAsync().ConfigureAwait(false);
+                // Force a fresh lookup for the requested channel so install uses the same
+                // release selection logic as the explicit "check for update" action.
+                UpdateChecker.InvalidateCache();
+                var checkResult = await UpdateChecker.CheckForUpdateAsync(request.Beta).ConfigureAwait(false);
 
                 if (!checkResult.UpdateAvailable)
                 {
@@ -1119,7 +1174,7 @@ namespace Emby.Xtream.Plugin.Api
                     var pluginsDir = Plugin.Instance.ApplicationPaths.PluginsPath;
                     if (!string.IsNullOrEmpty(pluginsDir))
                     {
-                        currentDll = Path.Combine(pluginsDir, "Emby.Xtream.Plugin.dll");
+                        currentDll = Path.Combine(pluginsDir, "XC2EMBY.Plugin.dll");
                     }
                 }
 
@@ -1241,7 +1296,7 @@ namespace Emby.Xtream.Plugin.Api
                     .Take(5)
                     .ToArray();
 
-                var keywords = new[] { "XtreamTuner", "Xtream", "LiveTv" };
+                var keywords = new[] { "XC2EMBY", "XtreamTuner", "LiveTv" };
 
                 foreach (var logFile in logFiles)
                 {

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Threading;
@@ -15,7 +16,7 @@ using MediaBrowser.Model.LiveTv;
 using MediaBrowser.Model.MediaInfo;
 using STJ = System.Text.Json;
 
-#pragma warning disable CS0612 // SupportsProbing and AnalyzeDurationMs are obsolete but still functional
+#pragma warning disable CS0612 // SupportsProbing is obsolete but still functional in Emby 4.8
 namespace Emby.Xtream.Plugin.Service
 {
     public class XtreamTunerHost : BaseTunerHost
@@ -41,7 +42,6 @@ namespace Emby.Xtream.Plugin.Service
         private List<ChannelInfo> _cachedChannels;
         private DateTime _cacheTime = DateTime.MinValue;
         private volatile bool _isRefreshing;
-
         public int CachedChannelCount => _cachedChannels?.Count ?? 0;
 
         public XtreamTunerHost(IServerApplicationHost applicationHost)
@@ -55,7 +55,7 @@ namespace Emby.Xtream.Plugin.Service
 
         public IServerApplicationHost ApplicationHost => _applicationHost;
 
-        public override string Name => "Xtream Tuner";
+        public override string Name => "XC2EMBY";
         public override string Type => TunerType;
         public override bool IsSupported => true;
         public override string SetupUrl => null;
@@ -64,10 +64,11 @@ namespace Emby.Xtream.Plugin.Service
 
         public override TunerHostInfo GetDefaultConfiguration()
         {
+            var count = Math.Max(1, Plugin.InstanceOrNull?.Configuration?.TunerCount ?? 1);
             return new TunerHostInfo
             {
                 Type = Type,
-                TunerCount = 1
+                TunerCount = count,
             };
         }
 
@@ -97,11 +98,13 @@ namespace Emby.Xtream.Plugin.Service
             // them IsSeries causes Emby to cross-link unrelated live programs as
             // "Other Airings" of each other.
             var isSeries = !isMovie && !isSports && !p.IsLive && episodeTitle != null;
+            var seriesKey = NormalizeGuideKey(title);
 
             return new ProgramInfo
             {
                 Id = string.Format(CultureInfo.InvariantCulture, "xtream_epg_{0}_{1}", streamId, p.StartTimestamp),
                 ChannelId = tunerChannelId,
+                ShowId = BuildShowId(tunerChannelId, seriesKey),
                 StartDate = DateTimeOffset.FromUnixTimeSeconds(p.StartTimestamp).UtcDateTime,
                 EndDate = DateTimeOffset.FromUnixTimeSeconds(p.StopTimestamp).UtcDateTime,
                 Name = string.IsNullOrEmpty(title) ? "Unknown" : title,
@@ -120,14 +123,30 @@ namespace Emby.Xtream.Plugin.Service
                     c.IndexOf("children", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
                     c.IndexOf("kids", System.StringComparison.OrdinalIgnoreCase) >= 0),
                 IsSeries = isSeries,
-                // Always set SeriesId to the show title (even for non-series programs).
-                // Emby's "Other Showings" queries WHERE SeriesPresentationUniqueKey = <key>.
-                // If key is NULL, Emby uses IS NULL which matches ALL null-key programs, causing
-                // completely unrelated shows (SIGN OFF, GLORY Kickboxing) to appear as Other
-                // Showings of every news/live program. A non-null title-based key scopes each
-                // show to its own airings only.
-                SeriesId = !string.IsNullOrEmpty(title) ? title.ToLowerInvariant() : null,
+                // Keep SeriesId non-null so Emby can build series timers; ShowId above
+                // separately feeds the non-series "Other Showings" query.
+                SeriesId = seriesKey,
             };
+        }
+
+        private static string BuildShowId(string channelId, string showKey)
+        {
+            if (string.IsNullOrEmpty(showKey))
+                showKey = "unknown";
+
+            return string.Format(
+                CultureInfo.InvariantCulture,
+                "{0}::{1}",
+                channelId ?? string.Empty,
+                showKey);
+        }
+
+        private static string NormalizeGuideKey(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return null;
+
+            return string.Join(" ", value.Trim().ToLowerInvariant().Split(new[] { ' ', '\t', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries));
         }
 
         protected override async Task<List<ChannelInfo>> GetChannelsInternal(
@@ -176,18 +195,45 @@ namespace Emby.Xtream.Plugin.Service
 
                 var channelsFetch = FetchChannelsWithFallbackAsync(liveTvService, config);
 
-                // Only fetch categories if group-title tagging is enabled — saves one API call.
-                var categoriesFetch = config.IncludeGroupTitleInM3U
-                    ? FetchCategoryMapAsync(liveTvService)
-                    : Task.FromResult(new Dictionary<int, string>());
+                // Always fetch categories so we can set Tags on ChannelInfo.
+                // Tags drive Emby's guide-tagids filter — without them the guide is blank
+                // for users who have category filters saved from their M3U setup.
+                var categoriesFetch = FetchCategoryMapAsync(liveTvService);
 
-                await Task.WhenAll(channelsFetch, categoriesFetch).ConfigureAwait(false);
+                // Pre-load XMLTV channel IDs so we can normalize EpgChannelId values.
+                // The JSON API epg_channel_id sometimes has a numeric suffix (e.g. "CBSKCBS.us7")
+                // that the XMLTV feed omits ("CBSKCBS.us"). Without this, ListingsChannelId
+                // won't match any listing channel and the guide stays blank.
+                var xmltvIdsFetch = XtreamListingsProvider.Instance != null
+                    ? XtreamListingsProvider.Instance.GetXmltvChannelIdsAsync(CancellationToken.None)
+                    : Task.FromResult<HashSet<string>>(null);
+                var xmltvAliasesFetch = XtreamListingsProvider.Instance != null
+                    ? XtreamListingsProvider.Instance.GetXmltvChannelAliasesAsync(CancellationToken.None)
+                    : Task.FromResult(new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase));
+                var xmltvProgramCountsFetch = XtreamListingsProvider.Instance != null
+                    ? XtreamListingsProvider.Instance.GetXmltvProgramCountsAsync(CancellationToken.None)
+                    : Task.FromResult(new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase));
+
+                await Task.WhenAll(channelsFetch, categoriesFetch, xmltvIdsFetch, xmltvAliasesFetch, xmltvProgramCountsFetch).ConfigureAwait(false);
 
                 var channels = channelsFetch.Result;
                 var categoryMap = categoriesFetch.Result;
+                var xmltvIds = xmltvIdsFetch.Result;
+                var xmltvAliases = xmltvAliasesFetch.Result;
+                var xmltvProgramCounts = xmltvProgramCountsFetch.Result;
+                var listingsProviderId = XtreamServerEntryPoint.Instance?.GetListingsProviderId();
+
+                var excludedCategories = new HashSet<string>(
+                    config.ExcludedLiveCategories ?? new System.Collections.Generic.List<string>(),
+                    StringComparer.OrdinalIgnoreCase);
 
                 var newIdMap = new Dictionary<string, int>(channels.Count);
                 var result = new List<ChannelInfo>(channels.Count);
+                var listingsIdUseCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                var missingEpgId = 0;
+                var missingXmltvId = 0;
+                var noPrograms = 0;
+                var diagnosticSamples = new List<string>();
 
                 foreach (var channel in channels)
                 {
@@ -195,22 +241,64 @@ namespace Emby.Xtream.Plugin.Service
                         channel.Name, config.ChannelRemoveTerms, config.EnableChannelNameCleaning);
                     var streamIdStr = channel.StreamId.ToString(CultureInfo.InvariantCulture);
 
-                    string[] tags = null;
-                    if (config.IncludeGroupTitleInM3U
-                        && channel.CategoryId.HasValue
-                        && categoryMap.TryGetValue(channel.CategoryId.Value, out var groupTitle)
-                        && !string.IsNullOrEmpty(groupTitle))
-                    {
-                        tags = new[] { groupTitle };
-                    }
-
                     newIdMap[streamIdStr] = channel.StreamId;
 
-                    // ListingsChannelId links this tuner channel to XtreamListingsProvider.
-                    // It must match the XMLTV <channel id="..."> value (= EpgChannelId from Xtream).
-                    var listingsId = !string.IsNullOrEmpty(channel.EpgChannelId)
-                        ? channel.EpgChannelId
-                        : streamIdStr;
+                    // ListingsChannelId must match the XMLTV <channel id="..."> value.
+                    // The JSON API epg_channel_id may differ (e.g. "CBSKCBS.us7" vs "CBSKCBS.us"),
+                    // so we resolve it against the actual XMLTV channel list, stripping trailing
+                    // digits as a fallback.
+                    var rawListingsId = !string.IsNullOrWhiteSpace(channel.EpgChannelId)
+                        ? channel.EpgChannelId.Trim()
+                        : null;
+                    var resolvedListingsId = !string.IsNullOrEmpty(rawListingsId)
+                        ? XtreamListingsProvider.ResolveToXmltvId(rawListingsId, xmltvIds)
+                        : null;
+
+                    if (string.IsNullOrEmpty(rawListingsId))
+                    {
+                        missingEpgId++;
+                        AddGuideDiagnosticSample(diagnosticSamples, cleanName, streamIdStr, null, null, "missing epg_channel_id");
+                    }
+                    else if (!XmltvIdExists(resolvedListingsId, xmltvIds))
+                    {
+                        missingXmltvId++;
+                        AddGuideDiagnosticSample(diagnosticSamples, cleanName, streamIdStr, rawListingsId, resolvedListingsId, "epg_channel_id not in XMLTV");
+                    }
+
+                    var listingsId = XmltvIdExists(resolvedListingsId, xmltvIds)
+                        ? ResolveDuplicateListingsId(resolvedListingsId, xmltvIds, listingsIdUseCounts)
+                        : null;
+
+                    if (!string.IsNullOrEmpty(listingsId) &&
+                        xmltvProgramCounts != null &&
+                        (!xmltvProgramCounts.TryGetValue(listingsId, out var programCount) || programCount == 0))
+                    {
+                        noPrograms++;
+                        AddGuideDiagnosticSample(diagnosticSamples, cleanName, streamIdStr, rawListingsId, listingsId, "XMLTV channel has no programmes");
+                    }
+
+                    string[] alternateNames = null;
+                    if (!string.IsNullOrEmpty(listingsId) &&
+                        xmltvAliases != null &&
+                        xmltvAliases.TryGetValue(listingsId, out var aliases))
+                    {
+                        alternateNames = aliases
+                            .Where(n => !string.IsNullOrWhiteSpace(n) &&
+                                        !string.Equals(n, cleanName, StringComparison.OrdinalIgnoreCase))
+                            .Distinct(StringComparer.OrdinalIgnoreCase)
+                            .ToArray();
+                    }
+
+                    // Tags drive Emby's guide-tagids category filter. All categories are
+                    // included by default; only skip if the admin has explicitly excluded it.
+                    string[] tags = null;
+                    if (channel.CategoryId.HasValue &&
+                        categoryMap.TryGetValue(channel.CategoryId.Value, out var catName) &&
+                        !string.IsNullOrEmpty(catName) &&
+                        !excludedCategories.Contains(catName))
+                    {
+                        tags = new string[] { catName };
+                    }
 
                     result.Add(new ChannelInfo
                     {
@@ -221,8 +309,11 @@ namespace Emby.Xtream.Plugin.Service
                         ImageUrl = string.IsNullOrEmpty(channel.StreamIcon) ? null : channel.StreamIcon,
                         ChannelType = ChannelType.TV,
                         TunerHostId = tuner.Id,
-                        Tags = tags,
+                        ListingsProviderId = listingsProviderId,
                         ListingsChannelId = listingsId,
+                        ListingsChannelName = cleanName,
+                        AlternateNames = alternateNames,
+                        Tags = tags,
                     });
                 }
 
@@ -230,6 +321,12 @@ namespace Emby.Xtream.Plugin.Service
                 _cachedChannels = result;
                 _cacheTime = DateTime.UtcNow;
                 Logger.Info("Channel cache refreshed: {0} channels", result.Count);
+                Logger.Info("Guide mapping diagnostics: missing epg_channel_id={0}, epg_channel_id not in XMLTV={1}, XMLTV channel has no programmes={2}",
+                    missingEpgId, missingXmltvId, noPrograms);
+                foreach (var sample in diagnosticSamples)
+                    Logger.Info("Guide mapping diagnostic sample: {0}", sample);
+
+                WritePersistentChannelCache(tuner, result, config);
             }
             catch (Exception ex)
             {
@@ -239,6 +336,54 @@ namespace Emby.Xtream.Plugin.Service
             {
                 _isRefreshing = false;
             }
+        }
+
+        private static bool XmltvIdExists(string id, HashSet<string> xmltvIds)
+        {
+            return !string.IsNullOrEmpty(id) && (xmltvIds == null || xmltvIds.Contains(id));
+        }
+
+        private static void AddGuideDiagnosticSample(
+            List<string> samples,
+            string channelName,
+            string streamId,
+            string epgChannelId,
+            string resolvedId,
+            string reason)
+        {
+            if (samples == null || samples.Count >= 25)
+                return;
+
+            samples.Add(string.Format(
+                CultureInfo.InvariantCulture,
+                "{0} (stream {1}) epg_channel_id={2}, resolved={3}: {4}",
+                channelName ?? string.Empty,
+                streamId ?? string.Empty,
+                epgChannelId ?? "(empty)",
+                resolvedId ?? "(none)",
+                reason ?? string.Empty));
+        }
+
+        private static string ResolveDuplicateListingsId(
+            string listingsId,
+            HashSet<string> xmltvIds,
+            Dictionary<string, int> listingsIdUseCounts)
+        {
+            if (string.IsNullOrEmpty(listingsId) || listingsIdUseCounts == null)
+                return listingsId;
+
+            if (!listingsIdUseCounts.TryGetValue(listingsId, out var useCount))
+            {
+                listingsIdUseCounts[listingsId] = 1;
+                return listingsId;
+            }
+
+            listingsIdUseCounts[listingsId] = useCount + 1;
+            if (xmltvIds == null)
+                return listingsId;
+
+            var nextId = listingsId + (useCount + 1).ToString(CultureInfo.InvariantCulture);
+            return xmltvIds.Contains(nextId) ? nextId : listingsId;
         }
 
         private async Task<List<Client.Models.LiveStreamInfo>> FetchChannelsWithFallbackAsync(
@@ -324,12 +469,207 @@ namespace Emby.Xtream.Plugin.Service
             return Task.FromResult(liveStream);
         }
 
+        // Writes a persistent channel cache file in Emby's standard tuner cache format.
+        // Emby reads this file at startup to find which tuner owns each channel — without
+        // it, recording timers that fire before our in-memory cache is loaded get
+        // "Tuner not found" because the channel lookup is a synchronous file read.
+        private void WritePersistentChannelCache(TunerHostInfo tuner, List<ChannelInfo> channels, PluginConfiguration config)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(tuner?.Id))
+                    return;
+
+                var liveTvPath = ResolveEmbyLiveTvDataPath(createIfMissing: true);
+                if (string.IsNullOrWhiteSpace(liveTvPath))
+                {
+                    Logger.Warn("Unable to locate Emby Live TV data path; persistent tuner cache was not written");
+                    return;
+                }
+
+                var ua = config?.HttpUserAgent ?? string.Empty;
+                var headers = string.IsNullOrEmpty(ua)
+                    ? new Dictionary<string, string>()
+                    : new Dictionary<string, string> { ["User-Agent"] = ua };
+
+                var entries = new System.Text.StringBuilder();
+                entries.Append('[');
+                var first = true;
+                foreach (var c in channels)
+                {
+                    if (!first) entries.Append(',');
+                    first = false;
+
+                    int streamId;
+                    int.TryParse(c.TunerChannelId, System.Globalization.NumberStyles.None,
+                        System.Globalization.CultureInfo.InvariantCulture, out streamId);
+                    var streamUrl = streamId > 0 ? BuildStreamUrl(config, streamId) : string.Empty;
+
+                    entries.Append(STJ.JsonSerializer.Serialize(new
+                    {
+                        TvgId    = c.ListingsChannelId ?? string.Empty,
+                        EpgUrls  = new string[0],
+                        HttpRequestHeaders = headers,
+                        Name     = c.Name ?? string.Empty,
+                        AlternateNames = c.AlternateNames ?? new string[0],
+                        Number   = c.Number ?? string.Empty,
+                        Id       = c.Id ?? string.Empty,
+                        Path     = streamUrl,
+                        TunerChannelId = c.TunerChannelId ?? string.Empty,
+                        TunerHostId    = c.TunerHostId ?? string.Empty,
+                        ChannelType = "TV",
+                        ImageUrl    = c.ImageUrl ?? string.Empty,
+                        Tags        = c.Tags ?? new string[0],
+                        EpgShift    = "PT0S",
+                    }));
+                }
+                entries.Append(']');
+
+                var cacheFile = Path.Combine(liveTvPath, "tuner_" + tuner.Id + "_channels");
+                var tmp = cacheFile + ".tmp";
+                File.WriteAllText(tmp, entries.ToString());
+                if (File.Exists(cacheFile)) File.Delete(cacheFile);
+                File.Move(tmp, cacheFile);
+
+                Logger.Info("Wrote persistent channel cache: {0} channels → {1}", channels.Count, cacheFile);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("WritePersistentChannelCache failed: {0}", ex.Message);
+            }
+        }
+
         public new void ClearCaches()
         {
             _cachedChannels = null;
             _cacheTime = DateTime.MinValue;
             _tunerChannelIdToStreamId = new Dictionary<string, int>();
+            ClearPersistentEmbyChannelCaches();
             Logger.Info("Xtream tuner caches cleared");
+        }
+
+        private void ClearPersistentEmbyChannelCaches()
+        {
+            try
+            {
+                var liveTvPath = ResolveEmbyLiveTvDataPath(createIfMissing: false);
+                if (string.IsNullOrWhiteSpace(liveTvPath))
+                    return;
+
+                var tunerIds = XtreamServerEntryPoint.Instance?.GetTunerHostIds();
+                if (tunerIds == null || tunerIds.Count == 0)
+                    return;
+
+                var deleted = 0;
+                foreach (var file in Directory.EnumerateFiles(liveTvPath, "tuner_*_channels"))
+                {
+                    string contents;
+                    try
+                    {
+                        contents = File.ReadAllText(file);
+                    }
+                    catch
+                    {
+                        continue;
+                    }
+
+                    if (!tunerIds.Any(id =>
+                        !string.IsNullOrEmpty(id) &&
+                        contents.IndexOf("\"TunerHostId\":\"" + id + "\"", StringComparison.OrdinalIgnoreCase) >= 0))
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        File.Delete(file);
+                        deleted++;
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Warn("Failed to delete Emby tuner channel cache {0}: {1}", file, ex.Message);
+                    }
+                }
+
+                if (deleted > 0)
+                    Logger.Info("Deleted {0} Emby tuner channel cache file(s) for XC2EMBY", deleted);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("Failed to clear persistent Emby tuner channel caches: {0}", ex.Message);
+            }
+        }
+
+        private string ResolveEmbyLiveTvDataPath(bool createIfMissing)
+        {
+            var applicationPaths = Plugin.Instance?.ApplicationPaths;
+            if (applicationPaths == null)
+                return null;
+
+            var candidates = new List<string>();
+
+            AddLiveTvPathCandidate(candidates, applicationPaths.DataPath, "livetv");
+            AddLiveTvPathCandidate(candidates, applicationPaths.DataPath, "data", "livetv");
+
+            var programDataPath = GetApplicationPathProperty(applicationPaths, "ProgramDataPath");
+            AddLiveTvPathCandidate(candidates, programDataPath, "data", "livetv");
+            AddLiveTvPathCandidate(candidates, programDataPath, "livetv");
+
+            var logPath = GetApplicationPathProperty(applicationPaths, "LogDirectoryPath");
+            var programDataFromLogPath = string.IsNullOrWhiteSpace(logPath)
+                ? null
+                : Directory.GetParent(logPath)?.FullName;
+            AddLiveTvPathCandidate(candidates, programDataFromLogPath, "data", "livetv");
+            AddLiveTvPathCandidate(candidates, programDataFromLogPath, "livetv");
+
+            foreach (var candidate in candidates)
+            {
+                if (Directory.Exists(candidate))
+                    return candidate;
+            }
+
+            if (!createIfMissing)
+                return null;
+
+            foreach (var candidate in candidates)
+            {
+                var parent = Path.GetDirectoryName(candidate);
+                if (string.IsNullOrWhiteSpace(parent) || !Directory.Exists(parent))
+                    continue;
+
+                Directory.CreateDirectory(candidate);
+                return candidate;
+            }
+
+            return null;
+        }
+
+        private static void AddLiveTvPathCandidate(List<string> candidates, string root, params string[] parts)
+        {
+            if (string.IsNullOrWhiteSpace(root))
+                return;
+
+            var pathParts = new List<string> { root };
+            pathParts.AddRange(parts.Where(part => !string.IsNullOrWhiteSpace(part)));
+            var path = Path.Combine(pathParts.ToArray());
+
+            if (!candidates.Contains(path, StringComparer.OrdinalIgnoreCase))
+                candidates.Add(path);
+        }
+
+        private static string GetApplicationPathProperty(object applicationPaths, string propertyName)
+        {
+            try
+            {
+                return applicationPaths
+                    ?.GetType()
+                    .GetProperty(propertyName)
+                    ?.GetValue(applicationPaths) as string;
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private bool TryResolveStreamId(ChannelInfo tunerChannel, out int streamId)
@@ -360,9 +700,9 @@ namespace Emby.Xtream.Plugin.Service
         {
             var config   = Plugin.Instance.Configuration;
             var sourceId = "xtream_live_" + streamId.ToString(CultureInfo.InvariantCulture);
-            var cached   = StreamProbeService.GetCachedInfo(streamId);
-            var streams  = cached != null ? BuildMediaStreamsFromCache(cached) : new List<MediaStream>();
-            var hasCached = streams.Count > 0;
+            var isTsOutput = string.Equals(config.LiveTvOutputFormat, "ts", StringComparison.OrdinalIgnoreCase);
+            var cached = StreamProbeService.GetCachedInfo(streamId);
+            var streams = cached != null ? BuildMediaStreamsFromCache(cached) : new List<MediaStream>();
 
             // Direct play: the client connects straight to the IPTV URL — no ffmpeg pipeline,
             // no transcoder startup delay. Falls back to direct-stream/transcode automatically
@@ -374,28 +714,28 @@ namespace Emby.Xtream.Plugin.Service
                 Id                   = sourceId,
                 Path                 = streamUrl,
                 Protocol             = MediaProtocol.Http,
-                Container            = "mpegts",
+                Container            = isTsOutput ? "mpegts" : "hls",
                 IsRemote             = true,
                 IsInfiniteStream     = true,
                 SupportsDirectPlay   = directPlay,
                 SupportsDirectStream = true,
                 SupportsTranscoding  = true,
-                // RequiresOpening/Closing drive the XtreamLiveStream proxy pipeline.
-                // Not needed when direct-play is on and the client plays the URL itself.
-                RequiresOpening      = !directPlay,
-                RequiresClosing      = !directPlay,
+                // RequiresOpening/Closing must always be true so Emby calls GetChannelStream()
+                // and has a valid ILiveStream for recording. Direct play still works: Open() is
+                // a no-op and the client connects to Path directly when SupportsDirectPlay=true.
+                RequiresOpening      = true,
+                RequiresClosing      = true,
                 WallClockStart       = DateTime.UtcNow,
-                // Cached entries: skip Emby's pre-playback probe entirely — we already
-                // have codec data (including DisplayTitle) from our background ffprobe
-                // cache, so the OSD info panel will show correct values with zero wait.
-                // First tune (no cache): allow a quick 500 ms probe while the background
-                // ffprobe runs concurrently to populate the cache for next time.
-                SupportsProbing   = !hasCached,
-                AnalyzeDurationMs = hasCached ? 0 : 500,
-                MediaStreams       = streams,
+                // Probing disabled: when Emby probes it hard-codes an AudioStreamIndex in every
+                // subsequent HLS segment request. Live TS segments are sometimes audio-less
+                // (network glitch, GOP boundary), causing ffmpeg to fail with "Audio stream
+                // index '0' not found". Without probe info Emby uses permissive stream mapping
+                // that tolerates audio-less segments gracefully.
+                SupportsProbing = false,
+                MediaStreams = streams,
             };
 
-            if (hasCached)
+            if (cached != null && !string.IsNullOrEmpty(cached.AudioCodec))
                 mediaSource.DefaultAudioStreamIndex = 1;
 
             if (!string.IsNullOrEmpty(userAgent))
@@ -406,9 +746,8 @@ namespace Emby.Xtream.Plugin.Service
                 };
             }
 
-            // If no cache yet, fire background ffprobe so the next tune will be fast.
-            if (!hasCached)
-                StreamProbeService.StartBackgroundProbe(streamId, streamUrl, Logger);
+            // Fire background ffprobe so first tune populates codec metadata for later tunes.
+            StreamProbeService.StartBackgroundProbe(streamId, streamUrl, Logger);
 
             return mediaSource;
         }
