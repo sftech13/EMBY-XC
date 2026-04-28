@@ -35,6 +35,7 @@
 - [Metadata & NFO Files](#metadata--nfo-files)
 - [Orphan Cleanup](#orphan-cleanup)
 - [Update Checker](#update-checker)
+- [Development & Releases](#development--releases)
 - [Configuration Reference](#configuration-reference)
 - [API Reference](#api-reference)
 
@@ -90,7 +91,7 @@
 
 ## Installation
 
-### Step 1 — Get the DLL
+### Step 1 - Get the DLL
 
 **Option A: Download a release**
 
@@ -98,16 +99,23 @@ Download `XC2EMBY.Plugin.dll` from the [latest release](../../releases/latest). 
 
 **Option B: Build from source**
 
-Requires .NET SDK 6.0+:
+Requires .NET SDK 8.0+. The plugin targets .NET Standard 2.0 for Emby compatibility.
 
 ```bash
-git clone https://github.com/sftech13/EMBY-XC.git
-cd EMBY-XC
+git clone https://github.com/sftech13/emby-xtream.git
+cd emby-xtream
 dotnet build Emby.Xtream.Plugin/Emby.Xtream.Plugin.csproj -c Release
 # Output: artifacts/bin/Release/netstandard2.0/XC2EMBY.Plugin.dll
 ```
 
-### Step 2 — Install
+For a deployable release-style build:
+
+```bash
+dotnet publish Emby.Xtream.Plugin/Emby.Xtream.Plugin.csproj -c Release -o artifacts/publish --no-self-contained
+# Output: artifacts/publish/XC2EMBY.Plugin.dll
+```
+
+### Step 2 - Install
 
 Copy the DLL to your Emby plugins directory and restart Emby.
 
@@ -123,7 +131,7 @@ docker cp XC2EMBY.Plugin.dll emby:/config/plugins/
 docker restart emby
 ```
 
-### Step 3 — Open the Config Page
+### Step 3 - Open the Config Page
 
 Go to **Emby Dashboard → Plugins → XC2EMBY** to open the configuration page.
 
@@ -154,7 +162,7 @@ Click **Test Connection** to verify credentials before saving.
 
 #### STRM Library Path
 
-The base directory where Movies and Shows folders will be created. Example: `/media/xtream` → Movies go to `/media/xtream/Movies`, series go to `/media/xtream/Shows`.
+The base directory where Movies and TV Shows folders will be created. Example: `/media/xtream` -> movies go to `/media/xtream/Movies`, series go to `/media/xtream/TV Shows`.
 
 Use the **Browse** button to navigate the server filesystem. Click **Validate** (or tab away from the field) to confirm the path is writable.
 
@@ -401,14 +409,14 @@ Both Movies and Series support three folder layout modes.
 
 ### Single (flat)
 
-All content in one folder under Movies or Shows:
+All content in one folder under Movies or TV Shows:
 
 ```
 {StrmLibraryPath}/
   Movies/
     Movie Title (2023)/
       Movie Title (2023).strm
-  Shows/
+  TV Shows/
     Series Name/
       Season 01/
         Series Name - S01E01 - Episode Title.strm
@@ -426,7 +434,7 @@ One subfolder per provider category:
         Movie Title (2023).strm
     Comedy/
       ...
-  Shows/
+  TV Shows/
     Drama/
       Series Name/
         Season 01/
@@ -551,11 +559,32 @@ Smart skip and orphan cleanup work together:
 
 The Dashboard tab includes a built-in update checker that queries GitHub releases.
 
-- Checks the `sftech13/EMBY-XC` repository for new releases
+- Checks the `sftech13/emby-xtream` repository for new releases
 - **Beta Channel** — when enabled, also checks pre-releases in addition to stable releases
 - Shows available version, release notes link, and a one-click **Install Update** button
 - Install downloads the new DLL and replaces the installed file atomically, then prompts for an Emby restart
 - A notification banner is shown once per new version and suppressed after acknowledgement
+
+---
+
+## Development & Releases
+
+Generated build files are kept out of the source tree:
+
+| Purpose | Path |
+|---|---|
+| Normal build output | `artifacts/bin/<Configuration>/netstandard2.0/` |
+| MSBuild intermediate files | `artifacts/obj/` |
+| Release publish output | `artifacts/publish/` |
+
+GitHub Actions builds releases when a version tag is pushed:
+
+```bash
+git tag v1.0.6
+git push origin v1.0.6
+```
+
+The release workflow publishes `artifacts/publish/XC2EMBY.Plugin.dll` and creates a draft GitHub Release.
 
 ---
 
@@ -579,9 +608,11 @@ Complete list of all configuration fields.
 | `EnableLiveTv` | bool | `true` | Enable/disable the tuner host |
 | `LiveTvOutputFormat` | string | `"ts"` | `"ts"` or `"m3u8"` |
 | `EnableLiveTvDirectPlay` | bool | `true` | Allow client-side direct URL playback |
+| `TunerCount` | int | `1` | Number of tuner instances Emby can use |
 | `SelectedLiveCategoryIds` | int[] | `[]` | Live categories to include (empty = all) |
 | `IncludeAdultChannels` | bool | `false` | Include adult-flagged channels |
 | `IncludeGroupTitleInM3U` | bool | `true` | Add `group-title` tags to M3U |
+| `ExcludedLiveCategories` | string list | `[]` | Category names excluded from guide tag filtering |
 
 ### Guide / EPG
 
@@ -599,6 +630,7 @@ Complete list of all configuration fields.
 |---|---|---|---|
 | `SyncMovies` | bool | `false` | Enable movie sync |
 | `StrmLibraryPath` | string | `"/config/xtream"` | Base output path |
+| `MovieRootFolderName` | string | `"Movies"` | Root folder name under `StrmLibraryPath` |
 | `SelectedVodCategoryIds` | int[] | `[]` | VOD categories to sync (empty = all) |
 | `MovieFolderMode` | string | `"single"` | `"single"`, `"multiple"`, or `"custom"` |
 | `MovieFolderMappings` | string | `""` | Custom mappings (`FolderName=Cat1,Cat2`) |
@@ -610,6 +642,7 @@ Complete list of all configuration fields.
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `SyncSeries` | bool | `false` | Enable series sync |
+| `SeriesRootFolderName` | string | `"TV Shows"` | Root folder name under `StrmLibraryPath` |
 | `SelectedSeriesCategoryIds` | int[] | `[]` | Series categories to sync (empty = all) |
 | `SeriesFolderMode` | string | `"single"` | `"single"`, `"multiple"`, or `"custom"` |
 | `SeriesFolderMappings` | string | `""` | Custom mappings |
@@ -655,67 +688,67 @@ Complete list of all configuration fields.
 
 ## API Reference
 
-All endpoints require Emby authentication. Base path: `/XtreamTuner/`
+All endpoints require Emby authentication. Base path: `/XC2EMBY/`
 
 ### Playlist & EPG
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/XtreamTuner/LiveTv` | M3U playlist for external clients |
-| GET | `/XtreamTuner/Epg` | XMLTV EPG for external clients |
+| GET | `/XC2EMBY/LiveTv` | M3U playlist for external clients |
+| GET | `/XC2EMBY/Epg` | XMLTV EPG for external clients |
 
 ### Categories
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/XtreamTuner/Categories/Live` | Live channel categories |
-| GET | `/XtreamTuner/Categories/Vod` | VOD movie categories |
-| GET | `/XtreamTuner/Categories/Series` | Series categories |
+| GET | `/XC2EMBY/Categories/Live` | Live channel categories |
+| GET | `/XC2EMBY/Categories/Vod` | VOD movie categories |
+| GET | `/XC2EMBY/Categories/Series` | Series categories |
 
 ### Sync
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/XtreamTuner/Sync/Movies` | Full movie sync |
-| POST | `/XtreamTuner/Sync/Series` | Full series sync |
-| POST | `/XtreamTuner/Sync/Movies/Trial` | Trial movie sync (first 30, no writes) |
-| POST | `/XtreamTuner/Sync/Series/Trial` | Trial series sync (first 30, no writes) |
-| GET | `/XtreamTuner/Sync/Status` | Live sync progress |
-| GET | `/XtreamTuner/Sync/FailedItems` | Items that failed last sync |
-| POST | `/XtreamTuner/Sync/RetryFailed` | Retry failed items |
+| POST | `/XC2EMBY/Sync/Movies` | Full movie sync |
+| POST | `/XC2EMBY/Sync/Series` | Full series sync |
+| GET | `/XC2EMBY/Sync/Status` | Live sync progress |
+| GET | `/XC2EMBY/Sync/FailedItems` | Items that failed last sync |
+| POST | `/XC2EMBY/Sync/RetryFailed` | Retry failed items |
 
 ### Cache
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/XtreamTuner/RefreshCache` | Invalidate M3U, EPG, and channel caches |
-| POST | `/XtreamTuner/ClearCodecCache` | Clear ffprobe codec cache |
+| POST | `/XC2EMBY/RefreshCache` | Invalidate M3U, EPG, and channel caches |
+| POST | `/XC2EMBY/ClearCodecCache` | Clear ffprobe codec cache |
 
 ### Content Deletion
 
 | Method | Path | Description |
 |---|---|---|
-| DELETE | `/XtreamTuner/Content/Movies` | Delete all movie STRM files |
-| DELETE | `/XtreamTuner/Content/Series` | Delete all series STRM files |
+| DELETE | `/XC2EMBY/Content/Movies` | Delete all movie STRM files |
+| DELETE | `/XC2EMBY/Content/Series` | Delete all series STRM files |
 
 ### Testing & Validation
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/XtreamTuner/TestConnection` | Test Xtream server credentials |
-| POST | `/XtreamTuner/ValidateStrmPath` | Verify a path is writable |
-| GET | `/XtreamTuner/BrowsePath` | List subdirectories at a path |
-| GET | `/XtreamTuner/WritablePaths` | Enumerate writable mount points |
+| POST | `/XC2EMBY/TestConnection` | Test Xtream server credentials |
+| POST | `/XC2EMBY/ValidateStrmPath` | Verify a path is writable |
+| GET | `/XC2EMBY/BrowsePath` | List subdirectories at a path |
+| GET | `/XC2EMBY/WritablePaths` | Enumerate writable mount points |
+| GET | `/XC2EMBY/TestTmdbLookup` | Test TMDB fallback lookup for a movie name |
 
 ### Dashboard & Updates
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/XtreamTuner/Dashboard` | Sync history, library stats, next auto-sync time |
-| GET | `/XtreamTuner/CheckUpdate` | Check GitHub for new releases |
-| POST | `/XtreamTuner/InstallUpdate` | Download and install a new DLL |
-| POST | `/XtreamTuner/RestartEmby` | Restart Emby server |
-| GET | `/XtreamTuner/Logs` | Download sanitized log file |
+| GET | `/XC2EMBY/Dashboard` | Sync history, library stats, next auto-sync time |
+| GET | `/XC2EMBY/CheckUpdate` | Check GitHub for new releases |
+| GET | `/XC2EMBY/GuideDiagnostics` | Live TV channel-to-guide mapping diagnostics |
+| POST | `/XC2EMBY/InstallUpdate` | Download and install a new DLL |
+| POST | `/XC2EMBY/RestartEmby` | Restart Emby server |
+| GET | `/XC2EMBY/Logs` | Download sanitized log file |
 
 ---
 
