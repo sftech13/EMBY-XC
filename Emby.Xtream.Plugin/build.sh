@@ -2,7 +2,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OUT_DIR="$SCRIPT_DIR/out"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+OUT_DIR="$REPO_ROOT/artifacts/publish"
 DLL_NAME="XC2EMBY.Plugin.dll"
 
 # Derive version from git tags automatically:
@@ -32,6 +33,8 @@ echo ""
 echo "=== Building Emby.Xtream.Plugin ==="
 cd "$SCRIPT_DIR"
 
+rm -rf "$OUT_DIR"
+mkdir -p "$OUT_DIR"
 dotnet publish -c Release -o "$OUT_DIR" --no-self-contained -p:Version="$VERSION"
 
 echo ""

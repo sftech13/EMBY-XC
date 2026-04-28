@@ -104,7 +104,7 @@ Requires .NET SDK 6.0+:
 git clone https://github.com/sftech13/EMBY-XC.git
 cd EMBY-XC
 dotnet build Emby.Xtream.Plugin/Emby.Xtream.Plugin.csproj -c Release
-# Output: Emby.Xtream.Plugin/bin/Release/netstandard2.0/XC2EMBY.Plugin.dll
+# Output: artifacts/bin/Release/netstandard2.0/XC2EMBY.Plugin.dll
 ```
 
 ### Step 2 — Install

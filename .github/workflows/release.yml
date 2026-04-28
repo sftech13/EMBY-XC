@@ -23,8 +23,7 @@ jobs:
       - name: Build plugin
         run: |
           VERSION=${GITHUB_REF_NAME#v}
-          cd Emby.Xtream.Plugin
-          dotnet publish -c Release -o out --no-self-contained -p:Version=$VERSION
+          dotnet publish Emby.Xtream.Plugin/Emby.Xtream.Plugin.csproj -c Release -o artifacts/publish --no-self-contained -p:Version=$VERSION
 
       - name: Generate release notes
         id: notes
@@ -51,6 +50,6 @@ jobs:
       - name: Create draft release
         uses: softprops/action-gh-release@v2
         with:
-          files: Emby.Xtream.Plugin/out/Emby.Xtream.Plugin.dll
+          files: artifacts/publish/XC2EMBY.Plugin.dll
           body_path: release_notes.md
           draft: true
