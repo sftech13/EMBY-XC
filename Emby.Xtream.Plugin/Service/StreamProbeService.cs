@@ -197,7 +197,57 @@ namespace Emby.Xtream.Plugin.Service
                 output = readTask.IsCompleted ? readTask.Result : string.Empty;
             }
 
-            return ParseOutput(output);
+            var info = ParseOutput(output);
+            if (info != null && !string.IsNullOrEmpty(info.VideoCodec))
+            {
+                // ATSC A53 Part 4 CC is embedded in H264 SEI NAL units — not visible via
+                // -show_streams (reports closed_captions:0). Frame-level probe is required.
+                info.HasA53ClosedCaptions = await CheckA53CcAsync(url, ffprobe, logger)
+                    .ConfigureAwait(false);
+            }
+            return info;
+        }
+
+        private static async Task<bool> CheckA53CcAsync(string url, string ffprobe, ILogger logger)
+        {
+            // Read first 30 video frames' side_data to detect ATSC A53 CC.
+            var args = string.Format(
+                "-v quiet -print_format json -show_frames -select_streams v:0 -read_intervals \"%+#30\"" +
+                " -analyzeduration 3000000 -probesize 2000000 -i \"{0}\"",
+                url.Replace("\"", "\\\""));
+
+            string output;
+            using (var proc = new Process())
+            {
+                proc.StartInfo = new ProcessStartInfo
+                {
+                    FileName               = ffprobe,
+                    Arguments              = args,
+                    UseShellExecute        = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError  = true,
+                    CreateNoWindow         = true,
+                };
+
+                proc.Start();
+                var readTask = proc.StandardOutput.ReadToEndAsync();
+
+                await Task.WhenAny(readTask, Task.Delay(12000)).ConfigureAwait(false);
+
+                if (!proc.HasExited)
+                {
+                    try { proc.Kill(); } catch { }
+                }
+
+                output = readTask.IsCompleted ? readTask.Result : string.Empty;
+            }
+
+            var hasCC = !string.IsNullOrEmpty(output) &&
+                        output.IndexOf("ATSC A53 Part 4 Closed Captions",
+                            StringComparison.OrdinalIgnoreCase) >= 0;
+            if (hasCC)
+                logger?.Info("[XtreamProbe] Detected ATSC A53 CC in stream {0}", url);
+            return hasCC;
         }
 
         private static StreamCodecInfo ParseOutput(string json)
@@ -327,6 +377,9 @@ namespace Emby.Xtream.Plugin.Service
         public string AudioCodec    { get; set; }
         public int    AudioChannels { get; set; }
         public string AudioLanguage { get; set; }
+
+        /// <summary>True when ATSC A53 Part 4 CC was detected in H264 SEI frame side data.</summary>
+        public bool HasA53ClosedCaptions { get; set; }
 
         /// <summary>Unix seconds (UTC) when this entry was probed.</summary>
         public long CachedAt { get; set; }

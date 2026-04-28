@@ -726,12 +726,10 @@ namespace Emby.Xtream.Plugin.Service
                 RequiresOpening      = true,
                 RequiresClosing      = true,
                 WallClockStart       = DateTime.UtcNow,
-                // Probing disabled: when Emby probes it hard-codes an AudioStreamIndex in every
-                // subsequent HLS segment request. Live TS segments are sometimes audio-less
-                // (network glitch, GOP boundary), causing ffmpeg to fail with "Audio stream
-                // index '0' not found". Without probe info Emby uses permissive stream mapping
-                // that tolerates audio-less segments gracefully.
-                SupportsProbing = false,
+                // Probing enabled so Emby discovers EIA-608/708 closed-caption tracks embedded
+                // in the MPEG-TS stream. Without probing Emby never finds those tracks and
+                // generates -sn in the ffmpeg command, suppressing all captions.
+                SupportsProbing = true,
                 MediaStreams = streams,
             };
 
@@ -787,6 +785,26 @@ namespace Emby.Xtream.Plugin.Service
                 if (info.AudioChannels > 0) as_.Channels = info.AudioChannels;
                 as_.DisplayTitle = BuildAudioDisplayTitle(info.AudioCodec, info.AudioChannels);
                 streams.Add(as_);
+            }
+            // Emby represents ATSC A53 CC (H264 SEI video side data) as a Subtitle stream
+            // with Codec=eia_608 and Index=100. This is the exact format Emby uses when it
+            // probes MKV/TS files with embedded CC — matching it here triggers Emby's
+            // AppendClosedCaptionSplitter pipeline which extracts CC to WebVTT for HLS.
+            if (info.HasA53ClosedCaptions)
+            {
+                streams.Add(new MediaStream
+                {
+                    Type                   = MediaStreamType.Subtitle,
+                    Codec                  = "eia_608",
+                    Index                  = 100,
+                    Title                  = "Closed Captions 1",
+                    DisplayTitle           = "CC",
+                    IsDefault              = true,
+                    IsForced               = false,
+                    IsExternal             = false,
+                    SupportsExternalStream = true,
+                    Language               = "eng",
+                });
             }
             return streams;
         }
