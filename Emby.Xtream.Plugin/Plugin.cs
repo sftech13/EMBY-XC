@@ -274,7 +274,6 @@ namespace Emby.Xtream.Plugin
             target.StreamCodecCacheJson = source.StreamCodecCacheJson;
             target.EpgSource = source.EpgSource;
             target.CustomEpgUrl = source.CustomEpgUrl;
-            target.EnableEpg = source.EnableEpg;
             target.EpgCacheMinutes = source.EpgCacheMinutes;
             target.EpgDaysToFetch = source.EpgDaysToFetch;
             target.M3UCacheMinutes = source.M3UCacheMinutes;
