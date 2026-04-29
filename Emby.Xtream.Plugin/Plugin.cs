@@ -116,20 +116,6 @@ namespace Emby.Xtream.Plugin
                 },
                 new PluginPageInfo
                 {
-                    // Legacy page name retained so old URLs do not fail after the cache-busting
-                    // page revision changes.
-                    Name = "xtreamconfig",
-                    EmbeddedResourcePath = "Emby.Xtream.Plugin.Configuration.Web.config.html",
-                },
-                new PluginPageInfo
-                {
-                    // Alias: Emby derives the settings URL from Plugin.Name with spaces stripped.
-                    // "XC2EMBY" has no spaces so the alias matches the name; kept for compat.
-                    Name = "XC2EMBY",
-                    EmbeddedResourcePath = "Emby.Xtream.Plugin.Configuration.Web.config.html",
-                },
-                new PluginPageInfo
-                {
                     Name = "xtreamconfigjs",
                     EmbeddedResourcePath = "Emby.Xtream.Plugin.Configuration.Web.config.js",
                 },
