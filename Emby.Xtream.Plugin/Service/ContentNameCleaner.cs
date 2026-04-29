@@ -27,6 +27,15 @@ namespace Emby.Xtream.Plugin.Service
             @"^[A-Z]{2}\s+-\s+",
             RegexOptions.Compiled);
 
+        // Strips unambiguous quality/resolution prefix tags at the start of a title,
+        // with or without a following dash separator.
+        // e.g. "4K 28 Years Later" → "28 Years Later"
+        //      "FHD - Inception"   → "Inception"
+        //      "UHD Movie Name"    → "Movie Name"
+        private static readonly Regex QualityPrefixRegex = new Regex(
+            @"^(4K|FHD|UHD|HDR|SDR|HQ)\s*[-–]?\s+",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
         private static readonly Regex MultipleSpacesRegex = new Regex(
             @"\s{2,}",
             RegexOptions.Compiled);
@@ -48,24 +57,26 @@ namespace Emby.Xtream.Plugin.Service
             // Also remove any remaining ┃XX┃ tags in the middle/end of the string
             result = BoxTagAnywhereRegex.Replace(result, " ");
 
-            // Remove plain dash-style prefix labels like "EN - ", "4K-NF - ", "US - "
+            // Remove plain dash-style prefix labels like "EN - ", "US - "
             result = DashPrefixRegex.Replace(result, string.Empty);
 
-            // Remove user-specified terms (one per line)
+            // Remove leading quality/resolution tags like "4K ", "FHD - ", "UHD "
+            result = QualityPrefixRegex.Replace(result, string.Empty);
+
+            // Remove user-specified terms (one per line) as whole-word matches so that
+            // "4K" strips "4K 28 Years Later" but not "4Kresolution".
             if (!string.IsNullOrWhiteSpace(userRemoveTerms))
             {
                 var lines = userRemoveTerms.Split(LineSeparators, StringSplitOptions.RemoveEmptyEntries);
                 foreach (var line in lines)
                 {
                     var term = line.Trim();
-                    if (!string.IsNullOrEmpty(term))
-                    {
-                        int idx;
-                        while ((idx = result.IndexOf(term, StringComparison.OrdinalIgnoreCase)) >= 0)
-                        {
-                            result = result.Remove(idx, term.Length);
-                        }
-                    }
+                    if (string.IsNullOrEmpty(term)) continue;
+
+                    // Build a pattern that matches the term only when surrounded by
+                    // non-alphanumeric characters (or string start/end).
+                    var pattern = @"(?<![A-Za-z0-9])" + Regex.Escape(term) + @"(?![A-Za-z0-9])";
+                    result = Regex.Replace(result, pattern, " ", RegexOptions.IgnoreCase);
                 }
             }
 

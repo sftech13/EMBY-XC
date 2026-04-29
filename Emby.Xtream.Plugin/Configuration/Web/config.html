@@ -251,10 +251,12 @@
                     }
                     .category-count-badge.zero-selected { color: #e67e22; opacity: 1; }
 
-                    /* ---- Settings, Live TV, Movies & Series section cards ---- */
+                    /* ---- Settings, Live TV, Movies, Documentaries & Series section cards ---- */
                     .tabGeneric .verticalSection,
                     .tabLiveTv .verticalSection,
                     .tabMovies .verticalSection,
+                    .tabDocumentaries .verticalSection,
+                    .tabDocuSeries .verticalSection,
                     .tabSeries .verticalSection {
                         background: rgba(128,128,128,0.04);
                         border: 1px solid rgba(128,128,128,0.15);
@@ -265,6 +267,8 @@
                     .tabGeneric .verticalSection h2.sectionTitle,
                     .tabLiveTv .verticalSection h2.sectionTitle,
                     .tabMovies .verticalSection h2.sectionTitle,
+                    .tabDocumentaries .verticalSection h2.sectionTitle,
+                    .tabDocuSeries .verticalSection h2.sectionTitle,
                     .tabSeries .verticalSection h2.sectionTitle {
                         margin: 0 0 0.9em 0;
                         padding-bottom: 0.6em;
@@ -276,6 +280,26 @@
                         opacity: 0.9;
                     }
                     .tabGeneric hr { display: none; }
+
+                    /* ---- Browse modal ---- */
+                    .strmBrowserModal {
+                        --browser-bg:  var(--paper-color, var(--background, #1f1f1f));
+                        --browser-fg:  var(--text-primary-color, var(--foreground, #e0e0e0));
+                        --browser-sep: rgba(128,128,128,0.15);
+                        color: var(--browser-fg);
+                    }
+                    .strmBrowserPanel {
+                        background: var(--browser-bg);
+                        border: 1px solid var(--browser-sep) !important;
+                    }
+                    .strmBrowserPanel .txtBrowserCurrentPath {
+                        background: rgba(128,128,128,0.08);
+                        border: 1px solid rgba(128,128,128,0.2);
+                        color: var(--browser-fg);
+                    }
+                    .strmBrowserPanel .browserList .browserRow:hover {
+                        background: rgba(128,128,128,0.1);
+                    }
                 </style>
 
                 <div class="configTabs" style="display:flex; gap:0; margin-bottom:1.5em; border-bottom:2px solid rgba(128,128,128,0.15);">
@@ -283,21 +307,29 @@
                             style="padding:0.6em 1.5em; background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-2px; cursor:pointer; color:inherit; font-size:1em; opacity:0.7;">
                         Dashboard
                     </button>
-                    <button type="button" class="tabBtn tabBtnGeneric" data-tab="generic" onclick="var f=this.closest('.xtreamConfigForm'),p=f.querySelectorAll('.tabPanel'),b=f.querySelectorAll('.tabBtn'),i;for(i=0;i<p.length;i++)p[i].style.display='none';for(i=0;i<b.length;i++){b[i].style.opacity='0.7';b[i].style.borderBottomColor='transparent';}f.querySelector('.tabGeneric').style.display='block';this.style.opacity='1';this.style.setProperty('border-bottom-color','var(--xt-accent)');"
+                    <button type="button" class="tabBtn tabBtnLiveTv" data-tab="liveTv" onclick="var f=this.closest('.xtreamConfigForm'),p=f.querySelectorAll('.tabPanel'),b=f.querySelectorAll('.tabBtn'),i;for(i=0;i<p.length;i++)p[i].style.display='none';for(i=0;i<b.length;i++){b[i].style.opacity='0.7';b[i].style.borderBottomColor='transparent';}f.querySelector('.tabLiveTv').style.display='block';this.style.opacity='1';this.style.setProperty('border-bottom-color','var(--xt-accent)');"
                             style="padding:0.6em 1.5em; background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-2px; cursor:pointer; color:inherit; font-size:1em; opacity:0.7;">
-                        Settings
+                        Live TV
                     </button>
                     <button type="button" class="tabBtn tabBtnMovies" data-tab="movies" onclick="var f=this.closest('.xtreamConfigForm'),p=f.querySelectorAll('.tabPanel'),b=f.querySelectorAll('.tabBtn'),i;for(i=0;i<p.length;i++)p[i].style.display='none';for(i=0;i<b.length;i++){b[i].style.opacity='0.7';b[i].style.borderBottomColor='transparent';}f.querySelector('.tabMovies').style.display='block';this.style.opacity='1';this.style.setProperty('border-bottom-color','var(--xt-accent)');"
                             style="padding:0.6em 1.5em; background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-2px; cursor:pointer; color:inherit; font-size:1em; opacity:0.7;">
                         Movies
                     </button>
+                    <button type="button" class="tabBtn tabBtnDocumentaries" data-tab="documentaries" onclick="var f=this.closest('.xtreamConfigForm'),p=f.querySelectorAll('.tabPanel'),b=f.querySelectorAll('.tabBtn'),i;for(i=0;i<p.length;i++)p[i].style.display='none';for(i=0;i<b.length;i++){b[i].style.opacity='0.7';b[i].style.borderBottomColor='transparent';}f.querySelector('.tabDocumentaries').style.display='block';this.style.opacity='1';this.style.setProperty('border-bottom-color','var(--xt-accent)');"
+                            style="padding:0.6em 1.5em; background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-2px; cursor:pointer; color:inherit; font-size:1em; opacity:0.7;">
+                        Documentary
+                    </button>
                     <button type="button" class="tabBtn tabBtnSeries" data-tab="series" onclick="var f=this.closest('.xtreamConfigForm'),p=f.querySelectorAll('.tabPanel'),b=f.querySelectorAll('.tabBtn'),i;for(i=0;i<p.length;i++)p[i].style.display='none';for(i=0;i<b.length;i++){b[i].style.opacity='0.7';b[i].style.borderBottomColor='transparent';}f.querySelector('.tabSeries').style.display='block';this.style.opacity='1';this.style.setProperty('border-bottom-color','var(--xt-accent)');"
                             style="padding:0.6em 1.5em; background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-2px; cursor:pointer; color:inherit; font-size:1em; opacity:0.7;">
-                        Series
+                        TV Shows
                     </button>
-                    <button type="button" class="tabBtn tabBtnLiveTv" data-tab="liveTv" onclick="var f=this.closest('.xtreamConfigForm'),p=f.querySelectorAll('.tabPanel'),b=f.querySelectorAll('.tabBtn'),i;for(i=0;i<p.length;i++)p[i].style.display='none';for(i=0;i<b.length;i++){b[i].style.opacity='0.7';b[i].style.borderBottomColor='transparent';}f.querySelector('.tabLiveTv').style.display='block';this.style.opacity='1';this.style.setProperty('border-bottom-color','var(--xt-accent)');"
+                    <button type="button" class="tabBtn tabBtnDocuSeries" data-tab="docuSeries" onclick="var f=this.closest('.xtreamConfigForm'),p=f.querySelectorAll('.tabPanel'),b=f.querySelectorAll('.tabBtn'),i;for(i=0;i<p.length;i++)p[i].style.display='none';for(i=0;i<b.length;i++){b[i].style.opacity='0.7';b[i].style.borderBottomColor='transparent';}f.querySelector('.tabDocuSeries').style.display='block';this.style.opacity='1';this.style.setProperty('border-bottom-color','var(--xt-accent)');"
                             style="padding:0.6em 1.5em; background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-2px; cursor:pointer; color:inherit; font-size:1em; opacity:0.7;">
-                        Live TV
+                        Docu Series
+                    </button>
+                    <button type="button" class="tabBtn tabBtnGeneric" data-tab="generic" onclick="var f=this.closest('.xtreamConfigForm'),p=f.querySelectorAll('.tabPanel'),b=f.querySelectorAll('.tabBtn'),i;for(i=0;i<p.length;i++)p[i].style.display='none';for(i=0;i<b.length;i++){b[i].style.opacity='0.7';b[i].style.borderBottomColor='transparent';}f.querySelector('.tabGeneric').style.display='block';this.style.opacity='1';this.style.setProperty('border-bottom-color','var(--xt-accent)');"
+                            style="padding:0.6em 1.5em; background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-2px; cursor:pointer; color:inherit; font-size:1em; opacity:0.7;">
+                        Settings
                     </button>
                 </div>
 
@@ -318,7 +350,7 @@
                         <button type="button" class="btnGoToSettings raised button-secondary" is="emby-button">Open Settings &#x2192;</button>
                     </div>
                     <div class="dashboardEmptyStateNoCategories" style="display:none; text-align:center; padding:1.5em 1em; opacity:0.7;">
-                        <div style="font-size:1.05em;">No content selected — choose categories in Movies, Series, or Live TV</div>
+                        <div style="font-size:1.05em;">No content selected — choose categories in Live TV, Movies, Documentary, TV Shows, or Docu Series</div>
                     </div>
 
                     <!-- Live Progress (hidden when not syncing) -->
@@ -357,7 +389,7 @@
                         <h3>Quick Actions</h3>
                         <div style="display:flex; align-items:center; gap:0.5em; flex-wrap:wrap;">
                             <button class="btnDashboardSyncAll raised button-submit" is="emby-button" type="button">
-                                <span>Sync Movies &amp; Series</span>
+                                <span>Sync Enabled Libraries</span>
                             </button>
                             <button class="btnDownloadLog raised button-secondary" is="emby-button" type="button">
                                 <span>Download Sanitized Log</span>
@@ -437,18 +469,56 @@
                         Root directory where STRM files are written (default: /config/xtream).
                         Movies and series go into subfolders under this root.
                     </div>
-                    <div class="inputContainer">
-                        <input class="txtMovieRootFolderName" type="text" is="emby-input"
-                               label="Movies Subfolder" />
-                        <div class="fieldDescription">
-                            Folder name under the STRM library root for movie syncs. Default: Movies
+                    <div>
+                        <div style="display:flex; gap:0.5em; align-items:flex-end;">
+                            <div class="inputContainer" style="flex:1; min-width:0; margin-bottom:0;">
+                                <input class="txtMovieRootFolderName" type="text" is="emby-input"
+                                       label="Movies Folder" />
+                            </div>
+                            <button class="btnBrowseMovieRoot raised button-secondary" is="emby-button" type="button"
+                                    style="flex-shrink:0; margin-bottom:4px;" title="Browse">Browse</button>
+                        </div>
+                        <div class="fieldDescription" style="margin-top:0.25em;">
+                            Folder for movie syncs. Enter a name (e.g. Movies) or browse to a full path. Default: Movies
                         </div>
                     </div>
-                    <div class="inputContainer">
-                        <input class="txtSeriesRootFolderName" type="text" is="emby-input"
-                               label="Series Subfolder" />
-                        <div class="fieldDescription">
-                            Folder name under the STRM library root for series syncs. Default: TV Shows
+                    <div>
+                        <div style="display:flex; gap:0.5em; align-items:flex-end;">
+                            <div class="inputContainer" style="flex:1; min-width:0; margin-bottom:0;">
+                                <input class="txtDocumentaryRootFolderName" type="text" is="emby-input"
+                                       label="Documentaries Folder" />
+                            </div>
+                            <button class="btnBrowseDocumentaryRoot raised button-secondary" is="emby-button" type="button"
+                                    style="flex-shrink:0; margin-bottom:4px;" title="Browse">Browse</button>
+                        </div>
+                        <div class="fieldDescription" style="margin-top:0.25em;">
+                            Folder for documentary movie syncs. Default: Documentaries
+                        </div>
+                    </div>
+                    <div>
+                        <div style="display:flex; gap:0.5em; align-items:flex-end;">
+                            <div class="inputContainer" style="flex:1; min-width:0; margin-bottom:0;">
+                                <input class="txtSeriesRootFolderName" type="text" is="emby-input"
+                                       label="TV Shows Folder" />
+                            </div>
+                            <button class="btnBrowseSeriesRoot raised button-secondary" is="emby-button" type="button"
+                                    style="flex-shrink:0; margin-bottom:4px;" title="Browse">Browse</button>
+                        </div>
+                        <div class="fieldDescription" style="margin-top:0.25em;">
+                            Folder for TV show syncs. Default: TV Shows
+                        </div>
+                    </div>
+                    <div>
+                        <div style="display:flex; gap:0.5em; align-items:flex-end;">
+                            <div class="inputContainer" style="flex:1; min-width:0; margin-bottom:0;">
+                                <input class="txtDocuSeriesRootFolderName" type="text" is="emby-input"
+                                       label="Docu Series Folder" />
+                            </div>
+                            <button class="btnBrowseDocuSeriesRoot raised button-secondary" is="emby-button" type="button"
+                                    style="flex-shrink:0; margin-bottom:4px;" title="Browse">Browse</button>
+                        </div>
+                        <div class="fieldDescription" style="margin-top:0.25em;">
+                            Folder for documentary series syncs. Default: Docu Series
                         </div>
                     </div>
                     <div class="strmPathValidationResult" style="margin-top:0.25em; margin-bottom:0.75em; font-size:0.9em;"></div>
@@ -503,7 +573,7 @@
                             <span>Enable Auto-Sync</span>
                         </label>
                         <div class="fieldDescription checkboxFieldDescription">
-                            Automatically sync movies and/or series. Movies must be enabled above; series likewise.
+                            Automatically sync enabled movie, documentary, TV show, and docu series libraries.
                         </div>
                     </div>
                     <div class="autoSyncSettings">
@@ -688,15 +758,18 @@
                     <span>+ Add Folder</span>
                 </button>
 
-                        <div style="margin-top:1em;">
-                            <button class="btnSyncMovies raised button-submit block" is="emby-button" type="button">
+                        <div style="margin-top:1em; display:flex; gap:0.5em; flex-wrap:wrap;">
+                            <button class="btnSyncMovies raised button-submit" is="emby-button" type="button">
                                 <span>Sync Movies Now</span>
                             </button>
-                            <div class="syncMoviesResult" style="margin-top:0.5em;"></div>
+                            <button class="btnForceResyncMovies raised button-secondary" is="emby-button" type="button" title="Resets the sync timestamp so all movies are re-evaluated, even ones already synced.">
+                                <span>Force Full Re-sync</span>
+                            </button>
                         </div>
+                        <div class="syncMoviesResult" style="margin-top:0.5em;"></div>
 
                         <div class="danger-zone">
-                            <div class="danger-zone-header" onclick="var z=this.parentNode;z.classList.toggle('open');var a=this.querySelector('.danger-zone-arrow');if(a)a.textContent=z.classList.contains('open')?'\u25BC':'\u25B6';">
+                            <div class="danger-zone-header">
                                 <span>Danger Zone</span>
                                 <span class="danger-zone-arrow">&#9654;</span>
                             </div>
@@ -712,18 +785,20 @@
 
                 </div><!-- end tabMovies -->
 
+                <!-- ===== Documentary ===== -->
+                <div class="tabPanel tabDocumentaries" style="display:none;"></div>
 
-                <!-- ===== Series ===== -->
+                <!-- ===== TV Shows ===== -->
                 <div class="tabPanel tabSeries" style="display:none;">
 
                 <div class="verticalSection">
                     <div class="checkboxContainer checkboxContainer-withDescription">
                         <label>
                             <input class="chkSyncSeries" type="checkbox" is="emby-checkbox" />
-                            <span>Enable Series / TV Shows</span>
+                            <span>Enable TV Shows</span>
                         </label>
                         <div class="fieldDescription checkboxFieldDescription">
-                            Generate STRM files for series/TV shows with season and episode structure.
+                            Generate STRM files for TV shows with season and episode structure.
                         </div>
                     </div>
                 </div>
@@ -801,22 +876,25 @@
                     <span>+ Add Folder</span>
                 </button>
 
-                        <div style="margin-top:1em;">
-                            <button class="btnSyncSeries raised button-submit block" is="emby-button" type="button">
-                                <span>Sync Series Now</span>
+                        <div style="margin-top:1em; display:flex; gap:0.5em; flex-wrap:wrap;">
+                            <button class="btnSyncSeries raised button-submit" is="emby-button" type="button">
+                                <span>Sync TV Shows Now</span>
                             </button>
-                            <div class="syncSeriesResult" style="margin-top:0.5em;"></div>
+                            <button class="btnForceResyncSeries raised button-secondary" is="emby-button" type="button" title="Resets the sync timestamp so all series are re-evaluated, even ones already synced.">
+                                <span>Force Full Re-sync</span>
+                            </button>
                         </div>
+                        <div class="syncSeriesResult" style="margin-top:0.5em;"></div>
 
                         <div class="danger-zone">
-                            <div class="danger-zone-header" onclick="var z=this.parentNode;z.classList.toggle('open');var a=this.querySelector('.danger-zone-arrow');if(a)a.textContent=z.classList.contains('open')?'\u25BC':'\u25B6';">
+                            <div class="danger-zone-header">
                                 <span>Danger Zone</span>
                                 <span class="danger-zone-arrow">&#9654;</span>
                             </div>
                             <div class="danger-zone-content">
                                 <button class="btnDeleteSeries raised block" is="emby-button" type="button"
                                         style="background:#c0392b;">
-                                    <span>Delete All Series</span>
+                                    <span>Delete All TV Shows</span>
                                 </button>
                                 <div class="deleteSeriesResult" style="margin-top:0.5em;"></div>
                             </div>
@@ -824,6 +902,9 @@
                     </div>
 
                 </div><!-- end tabSeries -->
+
+                <!-- ===== Docu Series ===== -->
+                <div class="tabPanel tabDocuSeries" style="display:none;"></div>
 
                 <!-- ===== Live TV ===== -->
                 <div class="tabPanel tabLiveTv" style="display:none;">
@@ -962,18 +1043,18 @@
                 </div><!-- end tabLiveTv -->
 
                 <!-- STRM Folder Browser Modal -->
-                <div class="strmBrowserModal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; z-index:9999; background:rgba(0,0,0,0.78); align-items:center; justify-content:center;">
-                    <div style="background:#1f1f1f; border:1px solid rgba(255,255,255,0.1); border-radius:8px; width:580px; max-width:94vw; max-height:85vh; display:flex; flex-direction:column; box-shadow:0 12px 40px rgba(0,0,0,0.6);">
-                        <div style="display:flex; align-items:center; justify-content:space-between; padding:0.9em 1.5em; border-bottom:1px solid rgba(255,255,255,0.08);">
+                <div class="strmBrowserModal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; z-index:9999; background:rgba(0,0,0,0.65); align-items:center; justify-content:center;">
+                    <div class="strmBrowserPanel" style="border-radius:8px; width:580px; max-width:94vw; max-height:85vh; display:flex; flex-direction:column; box-shadow:0 12px 40px rgba(0,0,0,0.5);">
+                        <div style="display:flex; align-items:center; justify-content:space-between; padding:0.9em 1.5em; border-bottom:1px solid var(--browser-sep);">
                             <h3 style="margin:0; font-size:1em; font-weight:600;">Browse Folder</h3>
                             <button class="btnCloseBrowser" type="button" style="background:none; border:none; cursor:pointer; font-size:1.2em; opacity:0.5; color:inherit; padding:0.2em 0.5em; line-height:1;" title="Close">&#x2715;</button>
                         </div>
-                        <div style="padding:0.6em 1.5em; border-bottom:1px solid rgba(255,255,255,0.06);">
+                        <div style="padding:0.6em 1.5em; border-bottom:1px solid var(--browser-sep);">
                             <input class="txtBrowserCurrentPath" type="text" placeholder="/"
-                                   style="width:100%; box-sizing:border-box; background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.12); border-radius:4px; padding:0.45em 0.75em; color:inherit; font-size:0.85em; font-family:monospace;" />
+                                   style="width:100%; box-sizing:border-box; border-radius:4px; padding:0.45em 0.75em; font-size:0.85em; font-family:monospace;" />
                         </div>
                         <div class="browserList" style="flex:1; overflow-y:auto; min-height:180px; max-height:420px;"></div>
-                        <div style="display:flex; justify-content:flex-end; gap:0.5em; padding:0.9em 1.5em; border-top:1px solid rgba(255,255,255,0.08);">
+                        <div style="display:flex; justify-content:flex-end; gap:0.5em; padding:0.9em 1.5em; border-top:1px solid var(--browser-sep);">
                             <button class="btnBrowserCancel raised button-secondary" is="emby-button" type="button">Cancel</button>
                             <button class="btnBrowserOk raised button-submit" is="emby-button" type="button">OK</button>
                         </div>

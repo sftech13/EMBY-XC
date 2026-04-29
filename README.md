@@ -25,7 +25,9 @@
   - [Settings Tab](#settings-tab)
   - [Live TV Tab](#live-tv-tab)
   - [Movies Tab](#movies-tab)
-  - [Series Tab](#series-tab)
+  - [Documentary Tab](#documentary-tab)
+  - [TV Shows Tab](#tv-shows-tab)
+  - [Docu Series Tab](#docu-series-tab)
 - [Dashboard](#dashboard)
 - [Auto-Sync](#auto-sync)
 - [Channel Name Cleaning](#channel-name-cleaning)
@@ -69,16 +71,23 @@
 - Smart delta sync — only processes items added since the last run
 - Optional TMDb folder naming (`Movie Title [tmdbid=123]`) with fallback lookup through Emby
 - Optional Kodi-compatible `.nfo` sidecar files
-- Trial sync previews the first 30 items before committing
 - One-click deletion of all synced content from the Movies tab
 
-### Series / TV Shows
+### Documentary Movies
+- Uses the same VOD movie sync engine as Movies, with its own enable switch, category selection, folder mappings, root folder, delete action, and delta timestamp
+- Lets you dedicate documentary provider groups to a separate Emby library path such as `Documentaries`
+
+### TV Shows
 - Syncs Xtream series into `Show/Season XX/Episode.strm` folder structure
 - Same three folder modes as movies, plus TVDb/TMDb folder naming
 - Episode hash detection skips unchanged series even when the provider bumps timestamps
 - TVDb ID manual overrides per series name
 - Optional TVDb and TMDB fallback lookups through Emby's provider stack
 - Optional `tvshow.nfo` sidecar files
+
+### Docu Series
+- Uses the same series sync engine as TV Shows, with separate enable switch, category selection, folder mappings, root folder, delete action, delta timestamp, and episode hash cache
+- Lets documentary series live in their own root folder such as `Docu Series`
 
 ### Dashboard & Administration
 - Built-in dashboard: sync history (last 10 runs), live progress, library stats, auto-sync schedule
@@ -143,7 +152,7 @@ Download the new DLL from [Releases](../../releases/latest), replace the existin
 
 ## Configuration Guide
 
-The config page has five tabs: **Dashboard**, **Settings**, **Movies**, **Series**, and **Live TV**.
+The config page tabs are ordered as: **Dashboard**, **Live TV**, **Movies**, **Documentary**, **TV Shows**, **Docu Series**, and **Settings**.
 
 ---
 
@@ -245,12 +254,17 @@ Optional cleaning applied to movie titles before they are used as folder and fil
 
 #### Sync Controls
 
-- **Try Sync** — trial run: processes the first 30 movies and shows a preview list of `Title → path` without writing any timestamps, cleanup, or NFO files. Use this to validate your folder configuration.
 - **Sync Now** — full sync: processes all selected categories, writes files, updates the delta sync timestamp, and runs orphan cleanup if enabled.
 
 ---
 
-### Series Tab
+### Documentary Tab
+
+Identical layout to the Movies tab, but stores its own VOD category selection, folder mappings, sync timestamp, and output root. Use this for movie-style documentary categories that should land in a dedicated documentary library.
+
+---
+
+### TV Shows Tab
 
 Identical layout to the Movies tab with these additions:
 
@@ -268,6 +282,12 @@ Identical layout to the Movies tab with these additions:
 2. Provider-supplied TMDB ID
 3. Auto TVDb lookup (if fallback lookup enabled)
 4. Plain title (no ID found)
+
+---
+
+### Docu Series Tab
+
+Identical layout to the TV Shows tab, but stores its own series category selection, folder mappings, sync timestamp, episode hash cache, and output root. Use this for documentary series categories that should land in a dedicated docu-series library.
 
 ---
 
@@ -580,11 +600,14 @@ Generated build files are kept out of the source tree:
 GitHub Actions builds releases when a version tag is pushed:
 
 ```bash
-git tag v1.0.6
-git push origin v1.0.6
+git tag v1.1.0-beta.1
+git push origin v1.1.0-beta.1
+
+git tag v1.1.0
+git push origin v1.1.0
 ```
 
-The release workflow publishes `artifacts/publish/XC2EMBY.Plugin.dll` and creates a draft GitHub Release.
+Use beta tags with letters, such as `v1.1.0-beta.1`, for test builds. Use plain numeric tags, such as `v1.1.0`, for releases. The release workflow publishes `artifacts/publish/XC2EMBY.Plugin.dll` and creates a draft GitHub Release.
 
 ---
 
@@ -637,7 +660,17 @@ Complete list of all configuration fields.
 | `EnableTmdbFolderNaming` | bool | `false` | Add `[tmdbid=...]` to movie folders |
 | `EnableTmdbFallbackLookup` | bool | `false` | Look up missing TMDB IDs via Emby |
 
-### Series
+### Documentary Movies
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `SyncDocumentaries` | bool | `false` | Enable documentary movie sync |
+| `DocumentaryRootFolderName` | string | `"Documentaries"` | Root folder name under `StrmLibraryPath` |
+| `SelectedDocumentaryCategoryIds` | int[] | `[]` | VOD categories to sync as documentaries |
+| `DocumentaryFolderMode` | string | `"single"` | `"single"`, `"multiple"`, or `"custom"` |
+| `DocumentaryFolderMappings` | string | `""` | Custom mappings |
+
+### TV Shows
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -649,6 +682,16 @@ Complete list of all configuration fields.
 | `EnableSeriesIdFolderNaming` | bool | `false` | Add `[tvdbid=...]` or `[tmdbid=...]` to series folders |
 | `EnableSeriesMetadataLookup` | bool | `false` | Look up missing TVDb IDs via Emby |
 | `TvdbFolderIdOverrides` | string | `""` | Manual overrides (`SeriesName=12345`) |
+
+### Docu Series
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `SyncDocuSeries` | bool | `false` | Enable documentary series sync |
+| `DocuSeriesRootFolderName` | string | `"Docu Series"` | Root folder name under `StrmLibraryPath` |
+| `SelectedDocuSeriesCategoryIds` | int[] | `[]` | Series categories to sync as docu series |
+| `DocuSeriesFolderMode` | string | `"single"` | `"single"`, `"multiple"`, or `"custom"` |
+| `DocuSeriesFolderMappings` | string | `""` | Custom mappings |
 
 ### Shared Sync
 
@@ -710,7 +753,9 @@ All endpoints require Emby authentication. Base path: `/XC2EMBY/`
 | Method | Path | Description |
 |---|---|---|
 | POST | `/XC2EMBY/Sync/Movies` | Full movie sync |
-| POST | `/XC2EMBY/Sync/Series` | Full series sync |
+| POST | `/XC2EMBY/Sync/Documentaries` | Full documentary movie sync |
+| POST | `/XC2EMBY/Sync/Series` | Full TV show sync |
+| POST | `/XC2EMBY/Sync/DocuSeries` | Full docu series sync |
 | GET | `/XC2EMBY/Sync/Status` | Live sync progress |
 | GET | `/XC2EMBY/Sync/FailedItems` | Items that failed last sync |
 | POST | `/XC2EMBY/Sync/RetryFailed` | Retry failed items |
@@ -727,7 +772,9 @@ All endpoints require Emby authentication. Base path: `/XC2EMBY/`
 | Method | Path | Description |
 |---|---|---|
 | DELETE | `/XC2EMBY/Content/Movies` | Delete all movie STRM files |
-| DELETE | `/XC2EMBY/Content/Series` | Delete all series STRM files |
+| DELETE | `/XC2EMBY/Content/Documentaries` | Delete all documentary STRM files |
+| DELETE | `/XC2EMBY/Content/Series` | Delete all TV show STRM files |
+| DELETE | `/XC2EMBY/Content/DocuSeries` | Delete all docu series STRM files |
 
 ### Testing & Validation
 

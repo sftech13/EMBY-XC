@@ -51,12 +51,26 @@ namespace Emby.Xtream.Plugin
         public string MovieFolderMode { get; set; } = "single";
         public string MovieFolderMappings { get; set; } = string.Empty;
 
+        // Documentary Movies
+        public bool SyncDocumentaries { get; set; }
+        public string DocumentaryRootFolderName { get; set; } = "Documentaries";
+        public int[] SelectedDocumentaryCategoryIds { get; set; } = new int[0];
+        public string DocumentaryFolderMode { get; set; } = "single";
+        public string DocumentaryFolderMappings { get; set; } = string.Empty;
+
         // Series / TV Shows
         public bool SyncSeries { get; set; }
         public string SeriesRootFolderName { get; set; } = "TV Shows";
         public int[] SelectedSeriesCategoryIds { get; set; } = new int[0];
         public string SeriesFolderMode { get; set; } = "single";
         public string SeriesFolderMappings { get; set; } = string.Empty;
+
+        // Documentary Series
+        public bool SyncDocuSeries { get; set; }
+        public string DocuSeriesRootFolderName { get; set; } = "Docu Series";
+        public int[] SelectedDocuSeriesCategoryIds { get; set; } = new int[0];
+        public string DocuSeriesFolderMode { get; set; } = "single";
+        public string DocuSeriesFolderMappings { get; set; } = string.Empty;
 
         // Content name cleaning
         public bool EnableContentNameCleaning { get; set; }
@@ -100,7 +114,9 @@ namespace Emby.Xtream.Plugin
         // Sync state (persisted across restarts)
         public string LastChannelListHash { get; set; } = string.Empty;
         public long LastMovieSyncTimestamp { get; set; }
+        public long LastDocumentarySyncTimestamp { get; set; }
         public long LastSeriesSyncTimestamp { get; set; }
+        public long LastDocuSeriesSyncTimestamp { get; set; }
         public int StrmNamingVersion { get; set; }  // default 0; bumped when naming logic changes to force re-sync
         public string SyncHistoryJson { get; set; } = string.Empty;
 
@@ -109,6 +125,7 @@ namespace Emby.Xtream.Plugin
         /// Used to skip per-episode file I/O when the episode list hasn't changed.
         /// </summary>
         public string SeriesEpisodeHashesJson { get; set; } = string.Empty;
+        public string DocuSeriesEpisodeHashesJson { get; set; } = string.Empty;
     }
 
     public enum EpgSourceMode

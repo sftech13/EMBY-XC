@@ -25,7 +25,15 @@ jobs:
       - name: Build plugin
         run: |
           VERSION=${GITHUB_REF_NAME#v}
-          dotnet publish Emby.Xtream.Plugin/Emby.Xtream.Plugin.csproj -c Release -o artifacts/publish --no-self-contained -p:Version=$VERSION
+          VERSION_PREFIX=${VERSION%%-*}
+          VERSION_SUFFIX=""
+          if [[ "$VERSION" == *-* ]]; then
+            VERSION_SUFFIX=${VERSION#*-}
+          fi
+          dotnet publish Emby.Xtream.Plugin/Emby.Xtream.Plugin.csproj -c Release -o artifacts/publish --no-self-contained \
+            -p:VersionPrefix=$VERSION_PREFIX \
+            -p:VersionSuffix=$VERSION_SUFFIX \
+            -p:Version=$VERSION
 
       - name: Generate release notes
         id: notes

@@ -13,6 +13,8 @@ function (BaseView, loading) {
     function View(view, params) {
         BaseView.apply(this, arguments);
 
+        initializeDocumentaryPanels(view);
+
         // Fix spacing between path validation result and Smart Skip checkbox.
         // Direct style assignment overrides any inline styles from cached HTML.
         (function () {
@@ -28,8 +30,12 @@ function (BaseView, loading) {
         this.selectedCategoryIds = [];
         this.loadedVodCategories = [];
         this.selectedVodCategoryIds = [];
+        this.loadedDocumentaryCategories = [];
+        this.selectedDocumentaryCategoryIds = [];
         this.loadedSeriesCategories = [];
         this.selectedSeriesCategoryIds = [];
+        this.loadedDocuSeriesCategories = [];
+        this.selectedDocuSeriesCategoryIds = [];
         var self = this;
 
         view.querySelector('.xtreamConfigForm').addEventListener('submit', function (e) {
@@ -53,16 +59,32 @@ function (BaseView, loading) {
             updateVodMovieVisibility(view);
         });
 
+        view.querySelector('.chkSyncDocumentaries').addEventListener('change', function () {
+            updateDocumentaryVisibility(view);
+        });
+
         view.querySelector('.chkSyncSeries').addEventListener('change', function () {
             updateSeriesVisibility(view);
+        });
+
+        view.querySelector('.chkSyncDocuSeries').addEventListener('change', function () {
+            updateDocuSeriesVisibility(view);
         });
 
         view.querySelector('.selMovieFolderMode').addEventListener('change', function () {
             updateFoldersVisibility(view, 'movie');
         });
 
+        view.querySelector('.selDocumentaryFolderMode').addEventListener('change', function () {
+            updateFoldersVisibility(view, 'documentary');
+        });
+
         view.querySelector('.selSeriesFolderMode').addEventListener('change', function () {
             updateFoldersVisibility(view, 'series');
+        });
+
+        view.querySelector('.selDocuSeriesFolderMode').addEventListener('change', function () {
+            updateFoldersVisibility(view, 'docuSeries');
         });
 
         view.querySelector('.chkAutoSyncEnabled').addEventListener('change', function () {
@@ -77,8 +99,16 @@ function (BaseView, loading) {
             addFolderEntry(view, 'movie', '', '', self.loadedVodCategories);
         });
 
+        view.querySelector('.btnAddDocumentaryFolder').addEventListener('click', function () {
+            addFolderEntry(view, 'documentary', '', '', self.loadedDocumentaryCategories);
+        });
+
         view.querySelector('.btnAddSeriesFolder').addEventListener('click', function () {
             addFolderEntry(view, 'series', '', '', self.loadedSeriesCategories);
+        });
+
+        view.querySelector('.btnAddDocuSeriesFolder').addEventListener('click', function () {
+            addFolderEntry(view, 'docuSeries', '', '', self.loadedDocuSeriesCategories);
         });
 
         view.querySelector('.txtStrmLibraryPath').addEventListener('blur', function () {
@@ -86,7 +116,19 @@ function (BaseView, loading) {
         });
 
         view.querySelector('.btnBrowseStrmPath').addEventListener('click', function () {
-            openBrowser(view);
+            openBrowser(view, '.txtStrmLibraryPath');
+        });
+        view.querySelector('.btnBrowseMovieRoot').addEventListener('click', function () {
+            openBrowser(view, '.txtMovieRootFolderName');
+        });
+        view.querySelector('.btnBrowseDocumentaryRoot').addEventListener('click', function () {
+            openBrowser(view, '.txtDocumentaryRootFolderName');
+        });
+        view.querySelector('.btnBrowseSeriesRoot').addEventListener('click', function () {
+            openBrowser(view, '.txtSeriesRootFolderName');
+        });
+        view.querySelector('.btnBrowseDocuSeriesRoot').addEventListener('click', function () {
+            openBrowser(view, '.txtDocuSeriesRootFolderName');
         });
 
         view.querySelector('.btnCloseBrowser').addEventListener('click', function () {
@@ -98,10 +140,12 @@ function (BaseView, loading) {
         });
 
         view.querySelector('.btnBrowserOk').addEventListener('click', function () {
-            var path = (view.querySelector('.txtBrowserCurrentPath').value || '').trim();
+            var modal = view.querySelector('.strmBrowserModal');
+            var path = (modal.querySelector('.txtBrowserCurrentPath').value || '').trim();
+            var targetSel = modal.getAttribute('data-target-field') || '.txtStrmLibraryPath';
             if (path) {
-                view.querySelector('.txtStrmLibraryPath').value = path;
-                validateStrmPath(view);
+                view.querySelector(targetSel).value = path;
+                if (targetSel === '.txtStrmLibraryPath') validateStrmPath(view);
             }
             closeBrowser(view);
         });
@@ -162,6 +206,26 @@ function (BaseView, loading) {
             });
         });
 
+        view.querySelector('.btnLoadDocumentaryCategories').addEventListener('click', function () {
+            saveConfig(self, function () {
+                loadDocumentaryCategories(self);
+            });
+        });
+
+        view.querySelector('.btnSelectAllDocumentaryCategories').addEventListener('click', function () {
+            toggleAllDocumentaryCategories(view, true);
+        });
+
+        view.querySelector('.btnDeselectAllDocumentaryCategories').addEventListener('click', function () {
+            toggleAllDocumentaryCategories(view, false);
+        });
+
+        view.querySelector('.btnLoadDocumentaryCategoriesMulti').addEventListener('click', function () {
+            saveConfig(self, function () {
+                loadDocumentaryCategoriesMulti(self);
+            });
+        });
+
         // Series category buttons (single mode)
         view.querySelector('.btnLoadSeriesCategories').addEventListener('click', function () {
             saveConfig(self, function () {
@@ -184,23 +248,74 @@ function (BaseView, loading) {
             });
         });
 
+        view.querySelector('.btnLoadDocuSeriesCategories').addEventListener('click', function () {
+            saveConfig(self, function () {
+                loadDocuSeriesCategories(self);
+            });
+        });
+
+        view.querySelector('.btnSelectAllDocuSeriesCategories').addEventListener('click', function () {
+            toggleAllDocuSeriesCategories(view, true);
+        });
+
+        view.querySelector('.btnDeselectAllDocuSeriesCategories').addEventListener('click', function () {
+            toggleAllDocuSeriesCategories(view, false);
+        });
+
+        view.querySelector('.btnLoadDocuSeriesCategoriesMulti').addEventListener('click', function () {
+            saveConfig(self, function () {
+                loadDocuSeriesCategoriesMulti(self);
+            });
+        });
+
         // Sync buttons
         view.querySelector('.btnSyncMovies').addEventListener('click', function () {
-            syncMovies(view);
+            syncMovies(view, false);
+        });
+
+        view.querySelector('.btnForceResyncMovies').addEventListener('click', function () {
+            syncMovies(view, true);
+        });
+
+        view.querySelector('.btnSyncDocumentaries').addEventListener('click', function () {
+            syncDocumentaries(view, false);
+        });
+
+        view.querySelector('.btnForceResyncDocumentaries').addEventListener('click', function () {
+            syncDocumentaries(view, true);
         });
 
         view.querySelector('.btnSyncSeries').addEventListener('click', function () {
-            syncSeries(view);
+            syncSeries(view, false);
         });
 
+        view.querySelector('.btnForceResyncSeries').addEventListener('click', function () {
+            syncSeries(view, true);
+        });
+
+        view.querySelector('.btnSyncDocuSeries').addEventListener('click', function () {
+            syncDocuSeries(view, false);
+        });
+
+        view.querySelector('.btnForceResyncDocuSeries').addEventListener('click', function () {
+            syncDocuSeries(view, true);
+        });
 
         // Delete content buttons
         view.querySelector('.btnDeleteMovies').addEventListener('click', function () {
             deleteContent(view, 'Movies');
         });
 
+        view.querySelector('.btnDeleteDocumentaries').addEventListener('click', function () {
+            deleteContent(view, 'Documentaries');
+        });
+
         view.querySelector('.btnDeleteSeries').addEventListener('click', function () {
             deleteContent(view, 'Series');
+        });
+
+        view.querySelector('.btnDeleteDocuSeries').addEventListener('click', function () {
+            deleteContent(view, 'DocuSeries');
         });
 
         view.querySelector('.chkCleanupOrphans').addEventListener('change', function () {
@@ -234,7 +349,9 @@ function (BaseView, loading) {
 
         // Category search filters
         setupCategorySearch(view, '.vodCategorySearch', '.vodCategoriesList');
+        setupCategorySearch(view, '.documentaryCategorySearch', '.documentaryCategoriesList');
         setupCategorySearch(view, '.seriesCategorySearch', '.seriesCategoriesList');
+        setupCategorySearch(view, '.docuSeriesCategorySearch', '.docuSeriesCategoriesList');
         setupCategorySearch(view, '.liveCategorySearch', '.categoriesList');
 
         // Category checkbox change — live count badge updates
@@ -243,9 +360,19 @@ function (BaseView, loading) {
                 updateCategoryCountBadge(view, 'vod');
             }
         });
+        view.querySelector('.documentaryCategoriesContainer').addEventListener('change', function (e) {
+            if (e.target.classList.contains('documentaryCategoryCheckbox')) {
+                updateCategoryCountBadge(view, 'documentary');
+            }
+        });
         view.querySelector('.seriesCategoriesContainer').addEventListener('change', function (e) {
             if (e.target.classList.contains('seriesCategoryCheckbox')) {
                 updateCategoryCountBadge(view, 'series');
+            }
+        });
+        view.querySelector('.docuSeriesCategoriesContainer').addEventListener('change', function (e) {
+            if (e.target.classList.contains('docuSeriesCategoryCheckbox')) {
+                updateCategoryCountBadge(view, 'docuSeries');
             }
         });
         view.querySelector('.categoriesContainer').addEventListener('change', function (e) {
@@ -256,7 +383,9 @@ function (BaseView, loading) {
 
         // Folder mode visual cards
         initFolderModeCards(view, 'movie');
+        initFolderModeCards(view, 'documentary');
         initFolderModeCards(view, 'series');
+        initFolderModeCards(view, 'docuSeries');
 
         // Empty-state "Go to Settings" button
         var btnGoToSettings = view.querySelector('.btnGoToSettings');
@@ -279,8 +408,14 @@ function (BaseView, loading) {
                 if (tab === 'movies' && self.loadedVodCategories.length === 0) {
                     loadVodCategories(self);
                 }
+                if (tab === 'documentaries' && self.loadedDocumentaryCategories.length === 0) {
+                    loadDocumentaryCategories(self);
+                }
                 if (tab === 'series' && self.loadedSeriesCategories.length === 0) {
                     loadSeriesCategories(self);
+                }
+                if (tab === 'docuSeries' && self.loadedDocuSeriesCategories.length === 0) {
+                    loadDocuSeriesCategories(self);
                 }
                 if (tab === 'liveTv' && self.loadedCategories.length === 0) {
                     loadCategories(self);
@@ -288,6 +423,83 @@ function (BaseView, loading) {
             });
         }
         switchTab(view, 'dashboard');
+    }
+
+    function initializeDocumentaryPanels(view) {
+        var movieSource = view.querySelector('.tabMovies');
+        var docTarget = view.querySelector('.tabDocumentaries');
+        if (movieSource && docTarget && !docTarget.innerHTML.trim()) {
+            docTarget.innerHTML = movieSource.innerHTML
+                .replace(/chkSyncMovies/g, 'chkSyncDocumentaries')
+                .replace(/vodMovieSettings/g, 'documentarySettings')
+                .replace(/selMovieFolderMode/g, 'selDocumentaryFolderMode')
+                .replace(/movieFolderModeCards/g, 'documentaryFolderModeCards')
+                .replace(/movieSingleContainer/g, 'documentarySingleContainer')
+                .replace(/btnLoadVodCategoriesMulti/g, 'btnLoadDocumentaryCategoriesMulti')
+                .replace(/btnLoadVodCategories/g, 'btnLoadDocumentaryCategories')
+                .replace(/vodCategoriesMultiStatus/g, 'documentaryCategoriesMultiStatus')
+                .replace(/vodCategoriesStatus/g, 'documentaryCategoriesStatus')
+                .replace(/btnSelectAllVodCategories/g, 'btnSelectAllDocumentaryCategories')
+                .replace(/btnDeselectAllVodCategories/g, 'btnDeselectAllDocumentaryCategories')
+                .replace(/vodCategorySearch/g, 'documentaryCategorySearch')
+                .replace(/vodCategoryCountBadge/g, 'documentaryCategoryCountBadge')
+                .replace(/vodCategoriesContainer/g, 'documentaryCategoriesContainer')
+                .replace(/vodCategoriesLoading/g, 'documentaryCategoriesLoading')
+                .replace(/vodCategoriesList/g, 'documentaryCategoriesList')
+                .replace(/movieFoldersContainer/g, 'documentaryFoldersContainer')
+                .replace(/movieFoldersList/g, 'documentaryFoldersList')
+                .replace(/movieMultiFolderEmptyHint/g, 'documentaryMultiFolderEmptyHint')
+                .replace(/btnAddMovieFolder/g, 'btnAddDocumentaryFolder')
+                .replace(/btnSyncMovies/g, 'btnSyncDocumentaries')
+                .replace(/syncMoviesResult/g, 'syncDocumentariesResult')
+                .replace(/btnDeleteMovies/g, 'btnDeleteDocumentaries')
+                .replace(/deleteMoviesResult/g, 'deleteDocumentariesResult')
+                .replace(/vodCategoryCheckbox/g, 'documentaryCategoryCheckbox')
+                .replace(/VOD Movies/g, 'Documentary Movies')
+                .replace(/VOD movies/g, 'documentary movies')
+                .replace(/movies/g, 'documentaries')
+                .replace(/Movies/g, 'Documentaries')
+                .replace(/Documentary Documentaries/g, 'Documentaries')
+                .replace(/documentary documentaries/g, 'documentaries');
+        }
+
+        var seriesSource = view.querySelector('.tabSeries');
+        var docuTarget = view.querySelector('.tabDocuSeries');
+        if (seriesSource && docuTarget && !docuTarget.innerHTML.trim()) {
+            docuTarget.innerHTML = seriesSource.innerHTML
+                .replace(/chkSyncSeries/g, 'chkSyncDocuSeries')
+                .replace(/seriesSettings/g, 'docuSeriesSettings')
+                .replace(/selSeriesFolderMode/g, 'selDocuSeriesFolderMode')
+                .replace(/seriesFolderModeCards/g, 'docuSeriesFolderModeCards')
+                .replace(/seriesSingleContainer/g, 'docuSeriesSingleContainer')
+                .replace(/btnLoadSeriesCategoriesMulti/g, 'btnLoadDocuSeriesCategoriesMulti')
+                .replace(/btnLoadSeriesCategories/g, 'btnLoadDocuSeriesCategories')
+                .replace(/seriesCategoriesMultiStatus/g, 'docuSeriesCategoriesMultiStatus')
+                .replace(/seriesCategoriesStatus/g, 'docuSeriesCategoriesStatus')
+                .replace(/btnSelectAllSeriesCategories/g, 'btnSelectAllDocuSeriesCategories')
+                .replace(/btnDeselectAllSeriesCategories/g, 'btnDeselectAllDocuSeriesCategories')
+                .replace(/seriesCategorySearch/g, 'docuSeriesCategorySearch')
+                .replace(/seriesCategoryCountBadge/g, 'docuSeriesCategoryCountBadge')
+                .replace(/seriesCategoriesContainer/g, 'docuSeriesCategoriesContainer')
+                .replace(/seriesCategoriesLoading/g, 'docuSeriesCategoriesLoading')
+                .replace(/seriesCategoriesList/g, 'docuSeriesCategoriesList')
+                .replace(/seriesFoldersContainer/g, 'docuSeriesFoldersContainer')
+                .replace(/seriesFoldersList/g, 'docuSeriesFoldersList')
+                .replace(/seriesMultiFolderEmptyHint/g, 'docuSeriesMultiFolderEmptyHint')
+                .replace(/btnAddSeriesFolder/g, 'btnAddDocuSeriesFolder')
+                .replace(/btnForceResyncSeries/g, 'btnForceResyncDocuSeries')
+                .replace(/btnSyncSeries/g, 'btnSyncDocuSeries')
+                .replace(/syncSeriesResult/g, 'syncDocuSeriesResult')
+                .replace(/btnDeleteSeries/g, 'btnDeleteDocuSeries')
+                .replace(/deleteSeriesResult/g, 'deleteDocuSeriesResult')
+                .replace(/seriesCategoryCheckbox/g, 'docuSeriesCategoryCheckbox')
+                .replace(/Series \/ TV Shows/g, 'Docu Series')
+                .replace(/series\/TV shows/g, 'documentary series')
+                .replace(/series categories/g, 'docu series categories')
+                .replace(/TV Shows/g, 'Docu Series')
+                .replace(/Docu Docu Series/g, 'Docu Series')
+                .replace(/docu docu series/g, 'docu series');
+        }
     }
 
     Object.assign(View.prototype, BaseView.prototype);
@@ -368,6 +580,14 @@ function (BaseView, loading) {
             loadFolderEntries(view, 'movie', config.MovieFolderMappings || '', cachedVodCats);
             instance.selectedVodCategoryIds = config.SelectedVodCategoryIds || [];
 
+            // Documentary Movies
+            setChecked(view.querySelector('.chkSyncDocumentaries'), !!config.SyncDocumentaries);
+            var documentaryMode = config.DocumentaryFolderMode || 'single';
+            if (documentaryMode === 'multiple') documentaryMode = 'custom';
+            view.querySelector('.selDocumentaryFolderMode').value = documentaryMode;
+            loadFolderEntries(view, 'documentary', config.DocumentaryFolderMappings || '', cachedVodCats);
+            instance.selectedDocumentaryCategoryIds = config.SelectedDocumentaryCategoryIds || [];
+
             // Series
             setChecked(view.querySelector('.chkSyncSeries'), !!config.SyncSeries);
             var seriesMode = config.SeriesFolderMode || 'single';
@@ -376,10 +596,20 @@ function (BaseView, loading) {
             loadFolderEntries(view, 'series', config.SeriesFolderMappings || '', cachedSeriesCats);
             instance.selectedSeriesCategoryIds = config.SelectedSeriesCategoryIds || [];
 
+            // Docu Series
+            setChecked(view.querySelector('.chkSyncDocuSeries'), !!config.SyncDocuSeries);
+            var docuSeriesMode = config.DocuSeriesFolderMode || 'single';
+            if (docuSeriesMode === 'multiple') docuSeriesMode = 'custom';
+            view.querySelector('.selDocuSeriesFolderMode').value = docuSeriesMode;
+            loadFolderEntries(view, 'docuSeries', config.DocuSeriesFolderMappings || '', cachedSeriesCats);
+            instance.selectedDocuSeriesCategoryIds = config.SelectedDocuSeriesCategoryIds || [];
+
             // Sync settings
             view.querySelector('.txtStrmLibraryPath').value = config.StrmLibraryPath || '/config/xtream';
             view.querySelector('.txtMovieRootFolderName').value = config.MovieRootFolderName || 'Movies';
+            view.querySelector('.txtDocumentaryRootFolderName').value = config.DocumentaryRootFolderName || 'Documentaries';
             view.querySelector('.txtSeriesRootFolderName').value = config.SeriesRootFolderName || 'TV Shows';
+            view.querySelector('.txtDocuSeriesRootFolderName').value = config.DocuSeriesRootFolderName || 'Docu Series';
             validateStrmPath(view);
             setChecked(view.querySelector('.chkSmartSkipExisting'), config.SmartSkipExisting !== false);
             view.querySelector('.txtSyncParallelism').value = config.SyncParallelism || 3;
@@ -406,13 +636,19 @@ function (BaseView, loading) {
             updateNameCleaningVisibility(view);
             updateEpgVisibility(view);
             updateVodMovieVisibility(view);
+            updateDocumentaryVisibility(view);
             updateSeriesVisibility(view);
+            updateDocuSeriesVisibility(view);
             updateFoldersVisibility(view, 'movie');
+            updateFoldersVisibility(view, 'documentary');
             updateFoldersVisibility(view, 'series');
+            updateFoldersVisibility(view, 'docuSeries');
 
             // Sync folder mode card visuals to loaded select values
             syncFolderModeCards(view, 'movie');
+            syncFolderModeCards(view, 'documentary');
             syncFolderModeCards(view, 'series');
+            syncFolderModeCards(view, 'docuSeries');
 
             // Health bar, auto-sync line, empty-state
             renderHealthBar(view, config);
@@ -468,16 +704,30 @@ function (BaseView, loading) {
             config.MovieFolderMappings = serializeFolderEntries(view, 'movie');
             config.SelectedVodCategoryIds = getSelectedVodCategoryIds(instance);
 
+            // Documentary Movies
+            config.SyncDocumentaries = view.querySelector('.chkSyncDocumentaries').checked;
+            config.DocumentaryFolderMode = view.querySelector('.selDocumentaryFolderMode').value;
+            config.DocumentaryFolderMappings = serializeFolderEntries(view, 'documentary');
+            config.SelectedDocumentaryCategoryIds = getSelectedDocumentaryCategoryIds(instance);
+
             // Series
             config.SyncSeries = view.querySelector('.chkSyncSeries').checked;
             config.SeriesFolderMode = view.querySelector('.selSeriesFolderMode').value;
             config.SeriesFolderMappings = serializeFolderEntries(view, 'series');
             config.SelectedSeriesCategoryIds = getSelectedSeriesCategoryIds(instance);
 
+            // Docu Series
+            config.SyncDocuSeries = view.querySelector('.chkSyncDocuSeries').checked;
+            config.DocuSeriesFolderMode = view.querySelector('.selDocuSeriesFolderMode').value;
+            config.DocuSeriesFolderMappings = serializeFolderEntries(view, 'docuSeries');
+            config.SelectedDocuSeriesCategoryIds = getSelectedDocuSeriesCategoryIds(instance);
+
             // Sync settings
             config.StrmLibraryPath = view.querySelector('.txtStrmLibraryPath').value.replace(/\/+$/, '') || '/config/xtream';
             config.MovieRootFolderName = (view.querySelector('.txtMovieRootFolderName').value || 'Movies').trim() || 'Movies';
+            config.DocumentaryRootFolderName = (view.querySelector('.txtDocumentaryRootFolderName').value || 'Documentaries').trim() || 'Documentaries';
             config.SeriesRootFolderName = (view.querySelector('.txtSeriesRootFolderName').value || 'TV Shows').trim() || 'TV Shows';
+            config.DocuSeriesRootFolderName = (view.querySelector('.txtDocuSeriesRootFolderName').value || 'Docu Series').trim() || 'Docu Series';
             config.SmartSkipExisting = view.querySelector('.chkSmartSkipExisting').checked;
             config.SyncParallelism = parseInt(view.querySelector('.txtSyncParallelism').value, 10) || 3;
             config.CleanupOrphans = view.querySelector('.chkCleanupOrphans').checked;
@@ -528,8 +778,8 @@ function (BaseView, loading) {
             btns[i].style.borderBottomColor = 'transparent';
         }
 
-        var panelMap = { dashboard: '.tabDashboard', generic: '.tabGeneric', movies: '.tabMovies', series: '.tabSeries', liveTv: '.tabLiveTv' };
-        var btnMap = { dashboard: '.tabBtnDashboard', generic: '.tabBtnGeneric', movies: '.tabBtnMovies', series: '.tabBtnSeries', liveTv: '.tabBtnLiveTv' };
+        var panelMap = { dashboard: '.tabDashboard', generic: '.tabGeneric', movies: '.tabMovies', documentaries: '.tabDocumentaries', series: '.tabSeries', docuSeries: '.tabDocuSeries', liveTv: '.tabLiveTv' };
+        var btnMap = { dashboard: '.tabBtnDashboard', generic: '.tabBtnGeneric', movies: '.tabBtnMovies', documentaries: '.tabBtnDocumentaries', series: '.tabBtnSeries', docuSeries: '.tabBtnDocuSeries', liveTv: '.tabBtnLiveTv' };
 
         var panel = view.querySelector(panelMap[tabName]);
         if (panel) panel.style.display = 'block';
@@ -566,41 +816,47 @@ function (BaseView, loading) {
         view.querySelector('.vodMovieSettings').style.display = enabled ? '' : 'none';
     }
 
+    function updateDocumentaryVisibility(view) {
+        var enabled = view.querySelector('.chkSyncDocumentaries').checked;
+        view.querySelector('.documentarySettings').style.display = enabled ? '' : 'none';
+    }
+
     function updateSeriesVisibility(view) {
         var enabled = view.querySelector('.chkSyncSeries').checked;
         view.querySelector('.seriesSettings').style.display = enabled ? '' : 'none';
     }
 
+    function updateDocuSeriesVisibility(view) {
+        var enabled = view.querySelector('.chkSyncDocuSeries').checked;
+        view.querySelector('.docuSeriesSettings').style.display = enabled ? '' : 'none';
+    }
+
     function updateFoldersVisibility(view, type) {
-        var selClass    = type === 'movie' ? '.selMovieFolderMode'      : '.selSeriesFolderMode';
-        var singleClass = type === 'movie' ? '.movieSingleContainer'    : '.seriesSingleContainer';
-        var multiClass  = type === 'movie' ? '.movieFoldersContainer'   : '.seriesFoldersContainer';
-        var listClass   = type === 'movie' ? '.movieFoldersList'        : '.seriesFoldersList';
-        var addBtnClass = type === 'movie' ? '.btnAddMovieFolder'       : '.btnAddSeriesFolder';
-        var mode = view.querySelector(selClass).value;
+        var ui = folderUi(type);
+        var mode = view.querySelector(ui.select).value;
         var isMulti = mode === 'custom';
-        view.querySelector(singleClass).style.display  = isMulti ? 'none'  : 'block';
-        view.querySelector(multiClass).style.display   = isMulti ? 'block' : 'none';
-        view.querySelector(listClass).style.display    = isMulti ? ''      : 'none';
-        view.querySelector(addBtnClass).style.display  = isMulti ? ''      : 'none';
+        view.querySelector(ui.single).style.display  = isMulti ? 'none'  : 'block';
+        view.querySelector(ui.multi).style.display   = isMulti ? 'block' : 'none';
+        view.querySelector(ui.list).style.display    = isMulti ? ''      : 'none';
+        view.querySelector(ui.addBtn).style.display  = isMulti ? ''      : 'none';
         updateMultiFolderEmptyHints(view);
     }
 
     function updateMultiFolderEmptyHints(view) {
         function one(type) {
-            var selClass = type === 'movie' ? '.selMovieFolderMode' : '.selSeriesFolderMode';
-            var listClass = type === 'movie' ? '.movieFoldersList' : '.seriesFoldersList';
-            var hintClass = type === 'movie' ? '.movieMultiFolderEmptyHint' : '.seriesMultiFolderEmptyHint';
-            var mode = view.querySelector(selClass).value;
-            var list = view.querySelector(listClass);
-            var hint = view.querySelector(hintClass);
+            var ui = folderUi(type);
+            var mode = view.querySelector(ui.select).value;
+            var list = view.querySelector(ui.list);
+            var hint = view.querySelector(ui.hint);
             if (!hint || !list) return;
             var isMulti = mode === 'custom';
             var hasCards = list.querySelectorAll('.folderCard').length > 0;
             hint.style.display = (isMulti && !hasCards) ? 'block' : 'none';
         }
         one('movie');
+        one('documentary');
         one('series');
+        one('docuSeries');
     }
 
     function updateAutoSyncVisibility(v) {
@@ -643,9 +899,35 @@ function (BaseView, loading) {
 
     // ---- Folder card management (for Multiple Folders mode) ----
 
+    function folderUi(type) {
+        var map = {
+            movie: {
+                select: '.selMovieFolderMode', single: '.movieSingleContainer', multi: '.movieFoldersContainer',
+                list: '.movieFoldersList', addBtn: '.btnAddMovieFolder', hint: '.movieMultiFolderEmptyHint',
+                cards: '.movieFolderModeCards'
+            },
+            documentary: {
+                select: '.selDocumentaryFolderMode', single: '.documentarySingleContainer', multi: '.documentaryFoldersContainer',
+                list: '.documentaryFoldersList', addBtn: '.btnAddDocumentaryFolder', hint: '.documentaryMultiFolderEmptyHint',
+                cards: '.documentaryFolderModeCards'
+            },
+            series: {
+                select: '.selSeriesFolderMode', single: '.seriesSingleContainer', multi: '.seriesFoldersContainer',
+                list: '.seriesFoldersList', addBtn: '.btnAddSeriesFolder', hint: '.seriesMultiFolderEmptyHint',
+                cards: '.seriesFolderModeCards'
+            },
+            docuSeries: {
+                select: '.selDocuSeriesFolderMode', single: '.docuSeriesSingleContainer', multi: '.docuSeriesFoldersContainer',
+                list: '.docuSeriesFoldersList', addBtn: '.btnAddDocuSeriesFolder', hint: '.docuSeriesMultiFolderEmptyHint',
+                cards: '.docuSeriesFolderModeCards'
+            }
+        };
+        return map[type];
+    }
+
     function addFolderEntry(view, type, name, checkedIdsStr, categories) {
-        var listClass = type === 'movie' ? '.movieFoldersList' : '.seriesFoldersList';
-        var list = view.querySelector(listClass);
+        var ui = folderUi(type);
+        var list = view.querySelector(ui.list);
 
         var card = document.createElement('div');
         card.className = 'folderCard';
@@ -719,8 +1001,8 @@ function (BaseView, loading) {
     }
 
     function clearFolderCardCategories(view, type) {
-        var listClass = type === 'movie' ? '.movieFoldersList' : '.seriesFoldersList';
-        var cards = view.querySelectorAll(listClass + ' .folderCard');
+        var ui = folderUi(type);
+        var cards = view.querySelectorAll(ui.list + ' .folderCard');
         for (var i = 0; i < cards.length; i++) {
             var catContainer = cards[i].querySelector('.folderCardCategories');
             catContainer.innerHTML = '<div style="opacity:0.5; padding:0.5em;">No categories available from server.</div>';
@@ -728,8 +1010,8 @@ function (BaseView, loading) {
     }
 
     function populateFolderCheckboxes(view, type, categories) {
-        var listClass = type === 'movie' ? '.movieFoldersList' : '.seriesFoldersList';
-        var cards = view.querySelectorAll(listClass + ' .folderCard');
+        var ui = folderUi(type);
+        var cards = view.querySelectorAll(ui.list + ' .folderCard');
         for (var i = 0; i < cards.length; i++) {
             var card = cards[i];
             var checkedIdsStr = card.getAttribute('data-checked-ids') || '';
@@ -739,8 +1021,8 @@ function (BaseView, loading) {
     }
 
     function loadFolderEntries(view, type, mappingsText, categories) {
-        var listClass = type === 'movie' ? '.movieFoldersList' : '.seriesFoldersList';
-        view.querySelector(listClass).innerHTML = '';
+        var ui = folderUi(type);
+        view.querySelector(ui.list).innerHTML = '';
 
         if (!mappingsText) return;
 
@@ -757,8 +1039,8 @@ function (BaseView, loading) {
     }
 
     function serializeFolderEntries(view, type) {
-        var listClass = type === 'movie' ? '.movieFoldersList' : '.seriesFoldersList';
-        var cards = view.querySelectorAll(listClass + ' .folderCard');
+        var ui = folderUi(type);
+        var cards = view.querySelectorAll(ui.list + ' .folderCard');
         var lines = [];
         for (var i = 0; i < cards.length; i++) {
             var name = cards[i].querySelector('.folderCardName').value.trim();
@@ -851,9 +1133,11 @@ function (BaseView, loading) {
 
     // ---- Folder browser ----
 
-    function openBrowser(view) {
+    function openBrowser(view, targetFieldSel) {
         var modal = view.querySelector('.strmBrowserModal');
+        modal.setAttribute('data-target-field', targetFieldSel || '.txtStrmLibraryPath');
         modal.style.display = 'flex';
+        // Always start navigation at the STRM library root regardless of which field triggered
         var startPath = (view.querySelector('.txtStrmLibraryPath').value || '').trim() || null;
         browserNavigate(view, startPath);
     }
@@ -915,6 +1199,7 @@ function (BaseView, loading) {
 
     function createBrowserRow(icon, label, onClick) {
         var row = document.createElement('div');
+        row.className = 'browserRow';
         row.style.cssText = 'display:flex; align-items:center; gap:0.8em; padding:0.6em 1.5em; cursor:pointer; border-bottom:1px solid rgba(128,128,128,0.07); user-select:none;';
         var iconEl = document.createElement('span');
         iconEl.textContent = icon;
@@ -924,8 +1209,6 @@ function (BaseView, loading) {
         labelEl.style.cssText = 'font-size:0.9em; font-family:monospace;';
         row.appendChild(iconEl);
         row.appendChild(labelEl);
-        row.addEventListener('mouseenter', function () { this.style.background = 'rgba(128,128,128,0.1)'; });
-        row.addEventListener('mouseleave', function () { this.style.background = ''; });
         row.addEventListener('click', onClick);
         return row;
     }
@@ -972,14 +1255,27 @@ function (BaseView, loading) {
                     updateCategoryCountBadge(view, 'vod');
 
                     populateFolderCheckboxes(view, 'movie', vodCats);
+                    instance.loadedDocumentaryCategories = vodCats;
+                    renderCategoryList(view, '.documentaryCategoriesList', vodCats, 'documentaryCategoryCheckbox', instance.selectedDocumentaryCategoryIds);
+                    view.querySelector('.btnSelectAllDocumentaryCategories').disabled = false;
+                    view.querySelector('.btnDeselectAllDocumentaryCategories').disabled = false;
+                    var docStatusEl = view.querySelector('.documentaryCategoriesStatus');
+                    if (docStatusEl) docStatusEl.textContent = '';
+                    updateCategoryCountBadge(view, 'documentary');
+                    populateFolderCheckboxes(view, 'documentary', vodCats);
                 }
             } catch (e) { /* ignore parse errors */ }
         }
         if (!vodLoaded) {
             clearFolderCardCategories(view, 'movie');
+            clearFolderCardCategories(view, 'documentary');
             var vodListEl = view.querySelector('.vodCategoriesList');
             if (vodListEl && !vodListEl.innerHTML.trim()) {
                 vodListEl.innerHTML = '<div style="opacity:0.5;">Click "Refresh Categories" to load.</div>';
+            }
+            var docListEl = view.querySelector('.documentaryCategoriesList');
+            if (docListEl && !docListEl.innerHTML.trim()) {
+                docListEl.innerHTML = '<div style="opacity:0.5;">Click "Refresh Categories" to load.</div>';
             }
         }
 
@@ -999,14 +1295,27 @@ function (BaseView, loading) {
                     updateCategoryCountBadge(view, 'series');
 
                     populateFolderCheckboxes(view, 'series', seriesCats);
+                    instance.loadedDocuSeriesCategories = seriesCats;
+                    renderCategoryList(view, '.docuSeriesCategoriesList', seriesCats, 'docuSeriesCategoryCheckbox', instance.selectedDocuSeriesCategoryIds);
+                    view.querySelector('.btnSelectAllDocuSeriesCategories').disabled = false;
+                    view.querySelector('.btnDeselectAllDocuSeriesCategories').disabled = false;
+                    var docuStatusEl = view.querySelector('.docuSeriesCategoriesStatus');
+                    if (docuStatusEl) docuStatusEl.textContent = '';
+                    updateCategoryCountBadge(view, 'docuSeries');
+                    populateFolderCheckboxes(view, 'docuSeries', seriesCats);
                 }
             } catch (e) { /* ignore parse errors */ }
         }
         if (!seriesLoaded) {
             clearFolderCardCategories(view, 'series');
+            clearFolderCardCategories(view, 'docuSeries');
             var seriesListEl = view.querySelector('.seriesCategoriesList');
             if (seriesListEl && !seriesListEl.innerHTML.trim()) {
                 seriesListEl.innerHTML = '<div style="opacity:0.5;">Click "Refresh Categories" to load.</div>';
+            }
+            var docuListEl = view.querySelector('.docuSeriesCategoriesList');
+            if (docuListEl && !docuListEl.innerHTML.trim()) {
+                docuListEl.innerHTML = '<div style="opacity:0.5;">Click "Refresh Categories" to load.</div>';
             }
         }
 
@@ -1230,6 +1539,135 @@ function (BaseView, loading) {
         return ids;
     }
 
+    // ---- Documentary Categories ----
+
+    function loadDocumentaryCategories(instance) {
+        var view = instance.view;
+        loadVodLikeCategories(instance, {
+            list: '.documentaryCategoriesList',
+            loading: '.documentaryCategoriesLoading',
+            status: '.documentaryCategoriesStatus',
+            checkboxClass: 'documentaryCategoryCheckbox',
+            selectedIds: instance.selectedDocumentaryCategoryIds,
+            selectAll: '.btnSelectAllDocumentaryCategories',
+            deselectAll: '.btnDeselectAllDocumentaryCategories',
+            countType: 'documentary',
+            folderType: 'documentary',
+            loadedSetter: function (categories) { instance.loadedDocumentaryCategories = categories; },
+            emptyMessage: 'No documentary categories found. Check your Xtream connection settings.',
+            failMessage: 'Failed to load documentary categories. Save your connection settings first, then try again.'
+        });
+    }
+
+    function loadDocumentaryCategoriesMulti(instance) {
+        loadVodLikeCategoriesMulti(instance, {
+            status: '.documentaryCategoriesMultiStatus',
+            folderType: 'documentary',
+            loadedSetter: function (categories) { instance.loadedDocumentaryCategories = categories || []; },
+            emptyMessage: 'No documentary categories found.'
+        });
+    }
+
+    function toggleAllDocumentaryCategories(view, checked) {
+        var checkboxes = view.querySelectorAll('.documentaryCategoryCheckbox');
+        for (var i = 0; i < checkboxes.length; i++) {
+            checkboxes[i].checked = checked;
+        }
+        updateCategoryCountBadge(view, 'documentary');
+    }
+
+    function getSelectedDocumentaryCategoryIds(instance) {
+        return getSelectedVodLikeCategoryIds(instance, '.selDocumentaryFolderMode', '.documentaryFoldersList', '.documentaryCategoryCheckbox', instance.selectedDocumentaryCategoryIds);
+    }
+
+    function loadVodLikeCategories(instance, options) {
+        var view = instance.view;
+        var listEl = view.querySelector(options.list);
+        var loadingEl = view.querySelector(options.loading);
+        var statusEl = view.querySelector(options.status);
+
+        loadingEl.style.display = 'block';
+        listEl.innerHTML = '';
+
+        ApiClient.getJSON(ApiClient.getUrl('XC2EMBY/Categories/Vod')).then(function (categories) {
+            loadingEl.style.display = 'none';
+            options.loadedSetter(categories);
+
+            if (!categories || categories.length === 0) {
+                listEl.innerHTML = '<div style="opacity:0.5;">' + options.emptyMessage + '</div>';
+                return;
+            }
+
+            if (statusEl) statusEl.textContent = '';
+            renderCategoryList(view, options.list, categories, options.checkboxClass, options.selectedIds);
+            view.querySelector(options.selectAll).disabled = false;
+            view.querySelector(options.deselectAll).disabled = false;
+            updateCategoryCountBadge(view, options.countType);
+            populateFolderCheckboxes(view, options.folderType, categories);
+        }).catch(function () {
+            loadingEl.style.display = 'none';
+            listEl.innerHTML = '<div style="color:#cc0000;">' + options.failMessage + '</div>';
+        });
+    }
+
+    function loadVodLikeCategoriesMulti(instance, options) {
+        var view = instance.view;
+        var statusEl = view.querySelector(options.status);
+        statusEl.textContent = 'Loading...';
+        statusEl.style.opacity = '0.5';
+
+        ApiClient.getJSON(ApiClient.getUrl('XC2EMBY/Categories/Vod')).then(function (categories) {
+            options.loadedSetter(categories);
+
+            if (!categories || categories.length === 0) {
+                statusEl.textContent = options.emptyMessage;
+                statusEl.style.color = '#cc0000'; statusEl.style.opacity = '1';
+                clearFolderCardCategories(view, options.folderType);
+                return;
+            }
+
+            statusEl.textContent = 'Loaded ' + categories.length + ' categories';
+            statusEl.style.color = accentColor; statusEl.style.opacity = '1';
+            populateFolderCheckboxes(view, options.folderType, categories);
+        }).catch(function () {
+            statusEl.textContent = 'Failed to load categories. Save connection settings first.';
+            statusEl.style.color = '#cc0000'; statusEl.style.opacity = '1';
+        });
+    }
+
+    function getSelectedVodLikeCategoryIds(instance, modeSelector, folderListSelector, checkboxSelector, fallbackIds) {
+        var view = instance.view;
+        var mode = view.querySelector(modeSelector).value;
+
+        if (mode === 'custom') {
+            var allCheckboxes = view.querySelectorAll(folderListSelector + ' .folderCategoryCheckbox');
+            if (allCheckboxes.length === 0) {
+                return fallbackIds;
+            }
+            var ids = [];
+            var seen = {};
+            for (var i = 0; i < allCheckboxes.length; i++) {
+                if (allCheckboxes[i].checked) {
+                    var id = parseInt(allCheckboxes[i].getAttribute('data-category-id'), 10);
+                    if (!seen[id]) {
+                        ids.push(id);
+                        seen[id] = true;
+                    }
+                }
+            }
+            return ids;
+        }
+
+        var checkboxes = view.querySelectorAll(checkboxSelector);
+        var selected = [];
+        for (var j = 0; j < checkboxes.length; j++) {
+            if (checkboxes[j].checked) {
+                selected.push(parseInt(checkboxes[j].getAttribute('data-category-id'), 10));
+            }
+        }
+        return checkboxes.length === 0 ? fallbackIds : selected;
+    }
+
     // ---- Series Categories (single mode) ----
 
     function loadSeriesCategories(instance) {
@@ -1349,6 +1787,105 @@ function (BaseView, loading) {
         return ids;
     }
 
+    // ---- Docu Series Categories ----
+
+    function loadDocuSeriesCategories(instance) {
+        loadSeriesLikeCategories(instance, {
+            list: '.docuSeriesCategoriesList',
+            loading: '.docuSeriesCategoriesLoading',
+            status: '.docuSeriesCategoriesStatus',
+            checkboxClass: 'docuSeriesCategoryCheckbox',
+            selectedIds: instance.selectedDocuSeriesCategoryIds,
+            selectAll: '.btnSelectAllDocuSeriesCategories',
+            deselectAll: '.btnDeselectAllDocuSeriesCategories',
+            countType: 'docuSeries',
+            folderType: 'docuSeries',
+            loadedSetter: function (categories) { instance.loadedDocuSeriesCategories = categories; },
+            emptyMessage: 'No docu series categories found. Check your Xtream connection settings.',
+            failMessage: 'Failed to load docu series categories. Save your connection settings first, then try again.'
+        });
+    }
+
+    function loadDocuSeriesCategoriesMulti(instance) {
+        loadSeriesLikeCategoriesMulti(instance, {
+            status: '.docuSeriesCategoriesMultiStatus',
+            folderType: 'docuSeries',
+            loadedSetter: function (categories) { instance.loadedDocuSeriesCategories = categories || []; },
+            emptyMessage: 'No docu series categories found.'
+        });
+    }
+
+    function toggleAllDocuSeriesCategories(view, checked) {
+        var checkboxes = view.querySelectorAll('.docuSeriesCategoryCheckbox');
+        for (var i = 0; i < checkboxes.length; i++) {
+            checkboxes[i].checked = checked;
+        }
+        updateCategoryCountBadge(view, 'docuSeries');
+    }
+
+    function getSelectedDocuSeriesCategoryIds(instance) {
+        return getSelectedSeriesLikeCategoryIds(instance, '.selDocuSeriesFolderMode', '.docuSeriesFoldersList', '.docuSeriesCategoryCheckbox', instance.selectedDocuSeriesCategoryIds);
+    }
+
+    function loadSeriesLikeCategories(instance, options) {
+        var view = instance.view;
+        var listEl = view.querySelector(options.list);
+        var loadingEl = view.querySelector(options.loading);
+        var statusEl = view.querySelector(options.status);
+
+        loadingEl.style.display = 'block';
+        listEl.innerHTML = '';
+
+        ApiClient.getJSON(ApiClient.getUrl('XC2EMBY/Categories/Series')).then(function (categories) {
+            loadingEl.style.display = 'none';
+            options.loadedSetter(categories);
+
+            if (!categories || categories.length === 0) {
+                listEl.innerHTML = '<div style="opacity:0.5;">' + options.emptyMessage + '</div>';
+                return;
+            }
+
+            if (statusEl) statusEl.textContent = '';
+            renderCategoryList(view, options.list, categories, options.checkboxClass, options.selectedIds);
+            view.querySelector(options.selectAll).disabled = false;
+            view.querySelector(options.deselectAll).disabled = false;
+            updateCategoryCountBadge(view, options.countType);
+            populateFolderCheckboxes(view, options.folderType, categories);
+        }).catch(function () {
+            loadingEl.style.display = 'none';
+            listEl.innerHTML = '<div style="color:#cc0000;">' + options.failMessage + '</div>';
+        });
+    }
+
+    function loadSeriesLikeCategoriesMulti(instance, options) {
+        var view = instance.view;
+        var statusEl = view.querySelector(options.status);
+        statusEl.textContent = 'Loading...';
+        statusEl.style.opacity = '0.5';
+
+        ApiClient.getJSON(ApiClient.getUrl('XC2EMBY/Categories/Series')).then(function (categories) {
+            options.loadedSetter(categories);
+
+            if (!categories || categories.length === 0) {
+                statusEl.textContent = options.emptyMessage;
+                statusEl.style.color = '#cc0000'; statusEl.style.opacity = '1';
+                clearFolderCardCategories(view, options.folderType);
+                return;
+            }
+
+            statusEl.textContent = 'Loaded ' + categories.length + ' categories';
+            statusEl.style.color = accentColor; statusEl.style.opacity = '1';
+            populateFolderCheckboxes(view, options.folderType, categories);
+        }).catch(function () {
+            statusEl.textContent = 'Failed to load categories. Save connection settings first.';
+            statusEl.style.color = '#cc0000'; statusEl.style.opacity = '1';
+        });
+    }
+
+    function getSelectedSeriesLikeCategoryIds(instance, modeSelector, folderListSelector, checkboxSelector, fallbackIds) {
+        return getSelectedVodLikeCategoryIds(instance, modeSelector, folderListSelector, checkboxSelector, fallbackIds);
+    }
+
     // ---- Sync operations ----
 
     function renderProgressBar(resultEl, progress) {
@@ -1372,13 +1909,20 @@ function (BaseView, loading) {
     }
 
     function pollSyncProgress(view, type) {
-        var resultClass = type === 'Movies' ? '.syncMoviesResult' : '.syncSeriesResult';
+        var resultMap = {
+            Movies: '.syncMoviesResult',
+            Documentaries: '.syncDocumentariesResult',
+            Series: '.syncSeriesResult',
+            DocuSeries: '.syncDocuSeriesResult'
+        };
+        var progressKey = type === 'Documentaries' ? 'Movies' : (type === 'DocuSeries' ? 'Series' : type);
+        var resultClass = resultMap[type];
         var resultEl = view.querySelector(resultClass);
         var apiUrl = ApiClient.getUrl('XC2EMBY/Sync/Status');
 
         var intervalId = setInterval(function () {
             ApiClient.getJSON(apiUrl).then(function (status) {
-                var progress = status[type];
+                var progress = status[progressKey];
                 if (!progress) return;
                 if (progress.IsRunning) {
                     renderProgressBar(resultEl, progress);
@@ -1386,19 +1930,20 @@ function (BaseView, loading) {
             }).catch(function () {
                 // Ignore poll errors; the POST completion will handle cleanup
             });
-        }, 500);
+        }, 150);
 
         return intervalId;
     }
 
-    function syncMovies(view) {
+    function syncMovies(view, force) {
         var resultEl = view.querySelector('.syncMoviesResult');
         var btn = view.querySelector('.btnSyncMovies');
         btn.disabled = true;
-        resultEl.innerHTML = '<span style="opacity:0.5;">Starting movie sync...</span>';
+        view.querySelector('.btnForceResyncMovies').disabled = true;
+        resultEl.innerHTML = '<span style="opacity:0.5;">' + (force ? 'Starting full re-sync...' : 'Starting movie sync...') + '</span>';
 
         var pollId = pollSyncProgress(view, 'Movies');
-        var apiUrl = ApiClient.getUrl('XC2EMBY/Sync/Movies');
+        var apiUrl = ApiClient.getUrl('XC2EMBY/Sync/Movies') + (force ? '?Force=true' : '');
 
         ApiClient.ajax({
             type: 'POST',
@@ -1407,6 +1952,7 @@ function (BaseView, loading) {
         }).then(function (result) {
             clearInterval(pollId);
             btn.disabled = false;
+            view.querySelector('.btnForceResyncMovies').disabled = false;
             var msg = result.Success
                 ? result.Message + ' (Total: ' + result.Total + ', Skipped: ' + result.Skipped + ', Failed: ' + result.Failed + ')'
                 : result.Message;
@@ -1414,18 +1960,33 @@ function (BaseView, loading) {
         }).catch(function () {
             clearInterval(pollId);
             btn.disabled = false;
+            view.querySelector('.btnForceResyncMovies').disabled = false;
             setPillResult(resultEl, false, 'Movie sync request failed. Check server logs for details.');
         });
     }
 
-    function syncSeries(view) {
+    function syncDocumentaries(view, force) {
+        syncContent(view, {
+            result: '.syncDocumentariesResult',
+            button: '.btnSyncDocumentaries',
+            forceButton: '.btnForceResyncDocumentaries',
+            progressType: 'Documentaries',
+            url: 'XC2EMBY/Sync/Documentaries',
+            starting: force ? 'Starting full re-sync...' : 'Starting documentary sync...',
+            fail: 'Documentary sync request failed. Check server logs for details.',
+            force: force
+        });
+    }
+
+    function syncSeries(view, force) {
         var resultEl = view.querySelector('.syncSeriesResult');
         var btn = view.querySelector('.btnSyncSeries');
         btn.disabled = true;
-        resultEl.innerHTML = '<span style="opacity:0.5;">Starting series sync...</span>';
+        view.querySelector('.btnForceResyncSeries').disabled = true;
+        resultEl.innerHTML = '<span style="opacity:0.5;">' + (force ? 'Starting full re-sync...' : 'Starting series sync...') + '</span>';
 
         var pollId = pollSyncProgress(view, 'Series');
-        var apiUrl = ApiClient.getUrl('XC2EMBY/Sync/Series');
+        var apiUrl = ApiClient.getUrl('XC2EMBY/Sync/Series') + (force ? '?Force=true' : '');
 
         ApiClient.ajax({
             type: 'POST',
@@ -1434,6 +1995,7 @@ function (BaseView, loading) {
         }).then(function (result) {
             clearInterval(pollId);
             btn.disabled = false;
+            view.querySelector('.btnForceResyncSeries').disabled = false;
             var msg = result.Success
                 ? result.Message + ' (Total: ' + result.Total + ', Skipped: ' + result.Skipped + ', Failed: ' + result.Failed + ')'
                 : result.Message;
@@ -1441,14 +2003,65 @@ function (BaseView, loading) {
         }).catch(function () {
             clearInterval(pollId);
             btn.disabled = false;
+            view.querySelector('.btnForceResyncSeries').disabled = false;
             setPillResult(resultEl, false, 'Series sync request failed. Check server logs for details.');
         });
     }
 
+    function syncDocuSeries(view, force) {
+        syncContent(view, {
+            result: '.syncDocuSeriesResult',
+            button: '.btnSyncDocuSeries',
+            forceButton: '.btnForceResyncDocuSeries',
+            progressType: 'DocuSeries',
+            url: 'XC2EMBY/Sync/DocuSeries',
+            starting: force ? 'Starting full re-sync...' : 'Starting docu series sync...',
+            fail: 'Docu Series sync request failed. Check server logs for details.',
+            force: force
+        });
+    }
+
+    function syncContent(view, options) {
+        var resultEl = view.querySelector(options.result);
+        var btn = view.querySelector(options.button);
+        var forceBtn = options.forceButton ? view.querySelector(options.forceButton) : null;
+        btn.disabled = true;
+        if (forceBtn) forceBtn.disabled = true;
+        resultEl.innerHTML = '<span style="opacity:0.5;">' + options.starting + '</span>';
+
+        var pollId = pollSyncProgress(view, options.progressType);
+        var apiUrl = ApiClient.getUrl(options.url) + (options.force ? '?Force=true' : '');
+        ApiClient.ajax({
+            type: 'POST',
+            url: apiUrl,
+            dataType: 'json'
+        }).then(function (result) {
+            clearInterval(pollId);
+            btn.disabled = false;
+            if (forceBtn) forceBtn.disabled = false;
+            var msg = result.Success
+                ? result.Message + ' (Total: ' + result.Total + ', Skipped: ' + result.Skipped + ', Failed: ' + result.Failed + ')'
+                : result.Message;
+            setPillResult(resultEl, result.Success, msg);
+        }).catch(function () {
+            clearInterval(pollId);
+            btn.disabled = false;
+            if (forceBtn) forceBtn.disabled = false;
+            setPillResult(resultEl, false, options.fail);
+        });
+    }
+
     function deleteContent(view, type) {
-        var label = type === 'Movies' ? 'movies' : 'series';
-        var resultClass = type === 'Movies' ? '.deleteMoviesResult' : '.deleteSeriesResult';
-        var btnClass = type === 'Movies' ? '.btnDeleteMovies' : '.btnDeleteSeries';
+        var map = {
+            Movies: { label: 'movies', result: '.deleteMoviesResult', button: '.btnDeleteMovies', url: 'Movies' },
+            Documentaries: { label: 'documentaries', result: '.deleteDocumentariesResult', button: '.btnDeleteDocumentaries', url: 'Documentaries' },
+            Series: { label: 'TV shows', result: '.deleteSeriesResult', button: '.btnDeleteSeries', url: 'Series' },
+            DocuSeries: { label: 'docu series', result: '.deleteDocuSeriesResult', button: '.btnDeleteDocuSeries', url: 'DocuSeries' }
+        };
+        var entry = map[type];
+        var label = entry.label;
+        var resultClass = entry.result;
+        var btnClass = entry.button;
         var resultEl = view.querySelector(resultClass);
         var btn = view.querySelector(btnClass);
 
@@ -1470,7 +2083,7 @@ function (BaseView, loading) {
 
             ApiClient.ajax({
                 type: 'DELETE',
-                url: ApiClient.getUrl('XC2EMBY/Content/' + type),
+                url: ApiClient.getUrl('XC2EMBY/Content/' + entry.url),
                 dataType: 'json'
             }).then(function (result) {
                 btn.disabled = false;
@@ -1761,13 +2374,17 @@ function (BaseView, loading) {
             '</div>';
         }
 
-        // 3-column grid: Movies spans all 3 columns (row 1), series tiles fill one each (row 2)
+        // Compact grid across the four library buckets plus Live TV.
         var html = '<div style="display:grid; grid-template-columns: repeat(3, 1fr); gap: 0.5em;">';
-        html += libTile(stats.MovieCount || 0, 'Movies', null, 'grid-column: 1 / -1;');
+        html += libTile(stats.MovieCount || 0, 'Movies');
+        html += libTile(stats.DocumentaryCount || 0, 'Documentaries');
+        html += libTile(stats.LiveTvChannels || 0, 'Live TV');
         html += libTile(stats.SeriesCount || 0, 'Shows');
         html += libTile(stats.SeasonCount || 0, 'Seasons');
         html += libTile(stats.EpisodeCount || 0, 'Episodes');
-        html += libTile(stats.LiveTvChannels || 0, 'Live TV');
+        html += libTile(stats.DocuSeriesCount || 0, 'Docu Series');
+        html += libTile(stats.DocuSeasonCount || 0, 'Docu Seasons');
+        html += libTile(stats.DocuEpisodeCount || 0, 'Docu Episodes');
         html += '</div>';
 
         container.innerHTML = html;
@@ -1905,59 +2522,41 @@ function (BaseView, loading) {
         resultEl.innerHTML = '<span style="opacity:0.5;">Starting sync...</span>';
 
         ApiClient.getPluginConfiguration(pluginId).then(function (config) {
-            var doMovies = config.SyncMovies;
-            var doSeries = config.SyncSeries;
+            var jobs = [];
+            if (config.SyncMovies) jobs.push({ label: 'Movies', url: 'XC2EMBY/Sync/Movies' });
+            if (config.SyncDocumentaries) jobs.push({ label: 'Documentaries', url: 'XC2EMBY/Sync/Documentaries' });
+            if (config.SyncSeries) jobs.push({ label: 'TV Shows', url: 'XC2EMBY/Sync/Series' });
+            if (config.SyncDocuSeries) jobs.push({ label: 'Docu Series', url: 'XC2EMBY/Sync/DocuSeries' });
 
-            if (!doMovies && !doSeries) {
+            if (jobs.length === 0) {
                 btn.disabled = false;
-                setPillResult(resultEl, false, 'Nothing to sync. Enable Movies or Series sync in Settings first.');
+                setPillResult(resultEl, false, 'Nothing to sync. Enable a sync section first.');
                 return;
             }
 
             startDashboardProgressPolling(view);
 
-            var movieUrl = ApiClient.getUrl('XC2EMBY/Sync/Movies');
-            var seriesUrl = ApiClient.getUrl('XC2EMBY/Sync/Series');
-            var movieMsg = '';
-
-            var moviePromise = doMovies
-                ? ApiClient.ajax({ type: 'POST', url: movieUrl, dataType: 'json' })
-                : Promise.resolve(null);
-
-            moviePromise.then(function (movieResult) {
-                if (movieResult) {
-                    movieMsg = movieResult.Success
-                        ? 'Movies: ' + movieResult.Total + ' total, ' + movieResult.Skipped + ' skipped, ' + movieResult.Failed + ' failed'
-                        : 'Movies failed: ' + movieResult.Message;
-                }
-
-                if (doSeries) {
-                    var prefix = movieMsg ? escapeHtml(movieMsg) + ' \u2014 ' : '';
-                    resultEl.innerHTML = '<span style="opacity:0.5;">' + prefix + 'Starting series sync...</span>';
-
-                    return ApiClient.ajax({ type: 'POST', url: seriesUrl, dataType: 'json' }).then(function (seriesResult) {
-                        stopDashboardProgressPolling();
-                        view.querySelector('.dashboardLiveProgress').style.display = 'none';
-                        btn.disabled = false;
-
-                        var seriesMsg = seriesResult.Success
-                            ? 'Series: ' + seriesResult.Total + ' total, ' + seriesResult.Skipped + ' skipped, ' + seriesResult.Failed + ' failed'
-                            : 'Series failed: ' + seriesResult.Message;
-
-                        var parts = [];
-                        if (movieMsg) parts.push(movieMsg);
-                        parts.push(seriesMsg);
-                        var overallSuccess = (!movieResult || movieResult.Success) && seriesResult.Success;
-                        setPillResult(resultEl, overallSuccess, parts.join(' | '));
-                        loadDashboard(view);
+            var parts = [];
+            var overallSuccess = true;
+            var chain = Promise.resolve();
+            jobs.forEach(function (job) {
+                chain = chain.then(function () {
+                    resultEl.innerHTML = '<span style="opacity:0.5;">' + escapeHtml(parts.join(' | ')) + (parts.length ? ' \u2014 ' : '') + 'Starting ' + escapeHtml(job.label) + ' sync...</span>';
+                    return ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl(job.url), dataType: 'json' }).then(function (result) {
+                        overallSuccess = overallSuccess && result.Success;
+                        parts.push(result.Success
+                            ? job.label + ': ' + result.Total + ' total, ' + result.Skipped + ' skipped, ' + result.Failed + ' failed'
+                            : job.label + ' failed: ' + result.Message);
                     });
-                } else {
-                    stopDashboardProgressPolling();
-                    view.querySelector('.dashboardLiveProgress').style.display = 'none';
-                    btn.disabled = false;
-                    setPillResult(resultEl, !!(movieResult && movieResult.Success), movieMsg);
-                    loadDashboard(view);
-                }
+                });
+            });
+
+            chain.then(function () {
+                stopDashboardProgressPolling();
+                view.querySelector('.dashboardLiveProgress').style.display = 'none';
+                btn.disabled = false;
+                setPillResult(resultEl, overallSuccess, parts.join(' | '));
+                loadDashboard(view);
             }).catch(function () {
                 stopDashboardProgressPolling();
                 view.querySelector('.dashboardLiveProgress').style.display = 'none';
@@ -2011,7 +2610,9 @@ function (BaseView, loading) {
     function updateCategoryCountBadge(view, type) {
         var map = {
             vod:    { badge: '.vodCategoryCountBadge',    checkbox: '.vodCategoryCheckbox' },
+            documentary: { badge: '.documentaryCategoryCountBadge', checkbox: '.documentaryCategoryCheckbox' },
             series: { badge: '.seriesCategoryCountBadge', checkbox: '.seriesCategoryCheckbox' },
+            docuSeries: { badge: '.docuSeriesCategoryCountBadge', checkbox: '.docuSeriesCategoryCheckbox' },
             live:   { badge: '.liveCategoryCountBadge',   checkbox: '.categoryCheckbox' }
         };
         var entry = map[type];
@@ -2088,7 +2689,7 @@ function (BaseView, loading) {
         if (!unconfigured || !grid) return;
 
         var isConfigured = !!(config.BaseUrl && config.Username);
-        var hasContent   = !!(config.SyncMovies || config.SyncSeries || config.EnableLiveTv);
+        var hasContent   = !!(config.SyncMovies || config.SyncDocumentaries || config.SyncSeries || config.SyncDocuSeries || config.EnableLiveTv);
 
         if (!isConfigured) {
             unconfigured.style.display = '';
@@ -2183,10 +2784,9 @@ function (BaseView, loading) {
     }
 
     function initFolderModeCards(view, type) {
-        var containerClass = type === 'movie' ? '.movieFolderModeCards' : '.seriesFolderModeCards';
-        var selectClass    = type === 'movie' ? '.selMovieFolderMode'   : '.selSeriesFolderMode';
-        var container = view.querySelector(containerClass);
-        var select    = view.querySelector(selectClass);
+        var ui = folderUi(type);
+        var container = view.querySelector(ui.cards);
+        var select    = view.querySelector(ui.select);
         if (!container || !select) return;
 
         var cards = container.querySelectorAll('.folder-mode-card');
@@ -2218,10 +2818,9 @@ function (BaseView, loading) {
     }
 
     function syncFolderModeCards(view, type) {
-        var containerClass = type === 'movie' ? '.movieFolderModeCards' : '.seriesFolderModeCards';
-        var selectClass    = type === 'movie' ? '.selMovieFolderMode'   : '.selSeriesFolderMode';
-        var container = view.querySelector(containerClass);
-        var select    = view.querySelector(selectClass);
+        var ui = folderUi(type);
+        var container = view.querySelector(ui.cards);
+        var select    = view.querySelector(ui.select);
         if (!container || !select) return;
         var val   = select.value;
         var cards = container.querySelectorAll('.folder-mode-card');

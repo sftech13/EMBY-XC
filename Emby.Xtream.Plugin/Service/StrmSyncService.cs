@@ -207,13 +207,33 @@ namespace Emby.Xtream.Plugin.Service
         internal static string GetMovieRootFolderName(PluginConfiguration config)
         {
             var value = config?.MovieRootFolderName;
-            return string.IsNullOrWhiteSpace(value) ? "Movies" : SanitizeFileName(value.Trim());
+            if (string.IsNullOrWhiteSpace(value)) return "Movies";
+            value = value.Trim();
+            return Path.IsPathRooted(value) ? value : SanitizeFileName(value);
         }
 
         internal static string GetSeriesRootFolderName(PluginConfiguration config)
         {
             var value = config?.SeriesRootFolderName;
-            return string.IsNullOrWhiteSpace(value) ? "TV Shows" : SanitizeFileName(value.Trim());
+            if (string.IsNullOrWhiteSpace(value)) return "TV Shows";
+            value = value.Trim();
+            return Path.IsPathRooted(value) ? value : SanitizeFileName(value);
+        }
+
+        internal static string GetDocumentaryRootFolderName(PluginConfiguration config)
+        {
+            var value = config?.DocumentaryRootFolderName;
+            if (string.IsNullOrWhiteSpace(value)) return "Documentaries";
+            value = value.Trim();
+            return Path.IsPathRooted(value) ? value : SanitizeFileName(value);
+        }
+
+        internal static string GetDocuSeriesRootFolderName(PluginConfiguration config)
+        {
+            var value = config?.DocuSeriesRootFolderName;
+            if (string.IsNullOrWhiteSpace(value)) return "Docu Series";
+            value = value.Trim();
+            return Path.IsPathRooted(value) ? value : SanitizeFileName(value);
         }
 
         public SyncProgress MovieProgress => _movieProgress;
@@ -271,8 +291,11 @@ namespace Emby.Xtream.Plugin.Service
 
             config.StrmNamingVersion = CurrentStrmNamingVersion;
             config.LastMovieSyncTimestamp = 0;
+            config.LastDocumentarySyncTimestamp = 0;
             config.LastSeriesSyncTimestamp = 0;
+            config.LastDocuSeriesSyncTimestamp = 0;
             config.SeriesEpisodeHashesJson = string.Empty;
+            config.DocuSeriesEpisodeHashesJson = string.Empty;
             saveConfig?.Invoke();
             return true;
         }
@@ -886,10 +909,13 @@ namespace Emby.Xtream.Plugin.Service
                                     ? " - " + SanitizeFileName(rawEpisodeTitle)
                                     : string.Empty;
 
-                                var fileName = string.Format(
+                                var fileNameBase = string.Format(
                                     CultureInfo.InvariantCulture,
-                                    "{0} - S{1:D2}E{2:D2}{3}.strm",
+                                    "{0} - S{1:D2}E{2:D2}{3}",
                                     seriesName, seasonNum, episodeNum, episodeTitle);
+                                if (fileNameBase.Length > 240)
+                                    fileNameBase = fileNameBase.Substring(0, 240);
+                                var fileName = fileNameBase + ".strm";
 
                                 var strmPath = Path.Combine(seasonDir, fileName);
 

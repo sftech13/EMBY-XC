@@ -14,7 +14,7 @@ namespace Emby.Xtream.Plugin.Service
         public SyncMoviesTask(ILogManager logManager)
             => _logger = logManager.GetLogger("XtreamTuner.SyncMoviesTask");
 
-        public string Name        => "XC2EMBY \u2013 Sync Movies";
+        public string Name        => "XC2EMBY - Sync Movies";
         public string Description => "Sync VOD movie STRM files from your Xtream server.";
         public string Category    => "XC2EMBY";
         public string Key         => "XtreamTunerSyncMovies";

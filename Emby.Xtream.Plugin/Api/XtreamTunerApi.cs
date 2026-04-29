@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -53,14 +54,28 @@ namespace Emby.Xtream.Plugin.Api
     [Route("/XC2EMBY/Sync/Movies", "POST", Summary = "Triggers VOD movie STRM sync")]
     public class SyncMovies : IReturn<SyncResult>
     {
+        public bool Force { get; set; }
+    }
+
+    [Route("/XC2EMBY/Sync/Documentaries", "POST", Summary = "Triggers documentary movie STRM sync")]
+    public class SyncDocumentaries : IReturn<SyncResult>
+    {
+        public bool Force { get; set; }
     }
 
     [Route("/XC2EMBY/Sync/Series", "POST", Summary = "Triggers series STRM sync")]
     public class SyncSeries : IReturn<SyncResult>
     {
+        public bool Force { get; set; }
     }
 
-[Route("/XC2EMBY/Sync/Status", "GET", Summary = "Gets current sync progress")]
+    [Route("/XC2EMBY/Sync/DocuSeries", "POST", Summary = "Triggers documentary series STRM sync")]
+    public class SyncDocuSeries : IReturn<SyncResult>
+    {
+        public bool Force { get; set; }
+    }
+
+    [Route("/XC2EMBY/Sync/Status", "GET", Summary = "Gets current sync progress")]
     public class GetSyncStatus : IReturn<SyncStatusResult>
     {
     }
@@ -75,8 +90,18 @@ namespace Emby.Xtream.Plugin.Api
     {
     }
 
+    [Route("/XC2EMBY/Content/Documentaries", "DELETE", Summary = "Deletes all documentary movie STRM content")]
+    public class DeleteDocumentaryContent : IReturn<DeleteContentResult>
+    {
+    }
+
     [Route("/XC2EMBY/Content/Series", "DELETE", Summary = "Deletes all series STRM content")]
     public class DeleteSeriesContent : IReturn<DeleteContentResult>
+    {
+    }
+
+    [Route("/XC2EMBY/Content/DocuSeries", "DELETE", Summary = "Deletes all documentary series STRM content")]
+    public class DeleteDocuSeriesContent : IReturn<DeleteContentResult>
     {
     }
 
@@ -214,10 +239,16 @@ namespace Emby.Xtream.Plugin.Api
     {
         public int MovieFolders   { get; set; }
         public int MovieCount     { get; set; }
+        public int DocumentaryFolders { get; set; }
+        public int DocumentaryCount { get; set; }
         public int SeriesFolders  { get; set; }
         public int SeriesCount    { get; set; }
         public int SeasonCount    { get; set; }
         public int EpisodeCount   { get; set; }
+        public int DocuSeriesFolders { get; set; }
+        public int DocuSeriesCount { get; set; }
+        public int DocuSeasonCount { get; set; }
+        public int DocuEpisodeCount { get; set; }
         public int LiveTvChannels { get; set; }
     }
 
@@ -420,6 +451,12 @@ namespace Emby.Xtream.Plugin.Api
                 return result;
             }
 
+            if (request.Force)
+            {
+                config.LastMovieSyncTimestamp = 0;
+                Plugin.Instance.SaveConfiguration();
+            }
+
             try
             {
                 await syncService.SyncMoviesAsync(
@@ -455,6 +492,74 @@ namespace Emby.Xtream.Plugin.Api
             return result;
         }
 
+        public async Task<object> Post(SyncDocumentaries request)
+        {
+            var config = Plugin.Instance.Configuration;
+            var syncService = Plugin.Instance.StrmSyncService;
+            var result = new SyncResult();
+
+            if (!config.SyncDocumentaries)
+            {
+                result.Success = false;
+                result.Message = "Documentary sync is not enabled. Enable it in Documentary first.";
+                return result;
+            }
+
+            if (syncService.MovieProgress.IsRunning)
+            {
+                result.Success = false;
+                result.Message = "A movie/documentary sync is already running.";
+                return result;
+            }
+
+            if (request.Force)
+            {
+                config.LastDocumentarySyncTimestamp = 0;
+                Plugin.Instance.SaveConfiguration();
+            }
+
+            try
+            {
+                var docConfig = BuildDocumentaryMovieConfig(config);
+                await syncService.SyncMoviesAsync(
+                    docConfig,
+                    CancellationToken.None,
+                    () =>
+                    {
+                        config.LastDocumentarySyncTimestamp = docConfig.LastMovieSyncTimestamp;
+                        config.StrmNamingVersion = docConfig.StrmNamingVersion;
+                        Plugin.Instance.SaveConfiguration();
+                    }).ConfigureAwait(false);
+
+                config.LastDocumentarySyncTimestamp = docConfig.LastMovieSyncTimestamp;
+                config.StrmNamingVersion = docConfig.StrmNamingVersion;
+                Plugin.Instance.SaveConfiguration();
+
+                var progress = syncService.MovieProgress;
+                if (!string.IsNullOrEmpty(progress.AbortReason))
+                {
+                    result.Success = false;
+                    result.Message = progress.AbortReason;
+                }
+                else
+                {
+                    result.Success = true;
+                    result.Message = "Documentary sync completed.";
+                }
+                result.Total = progress.Total;
+                result.Completed = progress.Completed;
+                result.Skipped = progress.Skipped;
+                result.Failed = progress.Failed;
+            }
+            catch (Exception ex)
+            {
+                result.Success = false;
+                result.Message = "Documentary sync failed: " + ex.Message;
+            }
+
+            return result;
+        }
+
         public async Task<object> Post(SyncSeries request)
         {
             var config = Plugin.Instance.Configuration;
@@ -473,6 +578,12 @@ namespace Emby.Xtream.Plugin.Api
                 result.Success = false;
                 result.Message = "Series sync is already running.";
                 return result;
+            }
+
+            if (request.Force)
+            {
+                config.LastSeriesSyncTimestamp = 0;
+                Plugin.Instance.SaveConfiguration();
             }
 
             try
@@ -505,6 +616,76 @@ namespace Emby.Xtream.Plugin.Api
             {
                 result.Success = false;
                 result.Message = "Series sync failed: " + ex.Message;
+            }
+
+            return result;
+        }
+
+        public async Task<object> Post(SyncDocuSeries request)
+        {
+            var config = Plugin.Instance.Configuration;
+            var syncService = Plugin.Instance.StrmSyncService;
+            var result = new SyncResult();
+
+            if (!config.SyncDocuSeries)
+            {
+                result.Success = false;
+                result.Message = "Docu Series sync is not enabled. Enable it in Docu Series first.";
+                return result;
+            }
+
+            if (syncService.SeriesProgress.IsRunning)
+            {
+                result.Success = false;
+                result.Message = "A TV show/docu series sync is already running.";
+                return result;
+            }
+
+            if (request.Force)
+            {
+                config.LastDocuSeriesSyncTimestamp = 0;
+                Plugin.Instance.SaveConfiguration();
+            }
+
+            try
+            {
+                var docuConfig = BuildDocuSeriesConfig(config);
+                await syncService.SyncSeriesAsync(
+                    docuConfig,
+                    CancellationToken.None,
+                    () =>
+                    {
+                        config.LastDocuSeriesSyncTimestamp = docuConfig.LastSeriesSyncTimestamp;
+                        config.DocuSeriesEpisodeHashesJson = docuConfig.SeriesEpisodeHashesJson;
+                        config.StrmNamingVersion = docuConfig.StrmNamingVersion;
+                        Plugin.Instance.SaveConfiguration();
+                    }).ConfigureAwait(false);
+
+                config.LastDocuSeriesSyncTimestamp = docuConfig.LastSeriesSyncTimestamp;
+                config.DocuSeriesEpisodeHashesJson = docuConfig.SeriesEpisodeHashesJson;
+                config.StrmNamingVersion = docuConfig.StrmNamingVersion;
+                Plugin.Instance.SaveConfiguration();
+
+                var progress = syncService.SeriesProgress;
+                if (!string.IsNullOrEmpty(progress.AbortReason))
+                {
+                    result.Success = false;
+                    result.Message = progress.AbortReason;
+                }
+                else
+                {
+                    result.Success = true;
+                    result.Message = "Docu Series sync completed.";
+                }
+                result.Total = progress.Total;
+                result.Completed = progress.Completed;
+                result.Skipped = progress.Skipped;
+                result.Failed = progress.Failed;
+            }
+            catch (Exception ex)
+            {
+                result.Success = false;
+                result.Message = "Docu Series sync failed: " + ex.Message;
             }
 
             return result;
@@ -572,10 +753,16 @@ namespace Emby.Xtream.Plugin.Api
 
             var movieFolders = 0;
             var movieCount = 0;
+            var documentaryFolders = 0;
+            var documentaryCount = 0;
             var seriesFolders = 0;
             var seriesCount = 0;
             var seasonCount = 0;
             var episodeCount = 0;
+            var docuSeriesFolders = 0;
+            var docuSeriesCount = 0;
+            var docuSeasonCount = 0;
+            var docuEpisodeCount = 0;
             var liveTvChannels = 0;
 
             try
@@ -585,6 +772,17 @@ namespace Emby.Xtream.Plugin.Api
                 {
                     movieFolders = Directory.GetDirectories(moviesRoot, "*", SearchOption.TopDirectoryOnly).Length;
                     movieCount = Directory.GetFiles(moviesRoot, "*.strm", SearchOption.AllDirectories).Length;
+                }
+            }
+            catch { }
+
+            try
+            {
+                var docsRoot = Path.Combine(config.StrmLibraryPath, StrmSyncService.GetDocumentaryRootFolderName(config));
+                if (Directory.Exists(docsRoot))
+                {
+                    documentaryFolders = Directory.GetDirectories(docsRoot, "*", SearchOption.TopDirectoryOnly).Length;
+                    documentaryCount = Directory.GetFiles(docsRoot, "*.strm", SearchOption.AllDirectories).Length;
                 }
             }
             catch { }
@@ -614,6 +812,31 @@ namespace Emby.Xtream.Plugin.Api
                         catch { }
                     }
                     episodeCount = Directory.GetFiles(seriesRoot, "*.strm", SearchOption.AllDirectories).Length;
+                }
+            }
+            catch { }
+
+            try
+            {
+                var docuRoot = Path.Combine(config.StrmLibraryPath, StrmSyncService.GetDocuSeriesRootFolderName(config));
+                if (Directory.Exists(docuRoot))
+                {
+                    var isFlat = string.Equals(config.DocuSeriesFolderMode, "single", StringComparison.OrdinalIgnoreCase);
+                    var topDirs = Directory.GetDirectories(docuRoot, "*", SearchOption.TopDirectoryOnly);
+                    docuSeriesFolders = topDirs.Length;
+                    var seriesDirList = isFlat
+                        ? topDirs
+                        : topDirs.SelectMany(cat => { try { return Directory.GetDirectories(cat, "*", SearchOption.TopDirectoryOnly); } catch { return new string[0]; } }).ToArray();
+                    docuSeriesCount = seriesDirList.Length;
+                    foreach (var seriesDir in seriesDirList)
+                    {
+                        try
+                        {
+                            docuSeasonCount += Directory.GetDirectories(seriesDir, "*", SearchOption.TopDirectoryOnly).Length;
+                        }
+                        catch { }
+                    }
+                    docuEpisodeCount = Directory.GetFiles(docuRoot, "*.strm", SearchOption.AllDirectories).Length;
                 }
             }
             catch { }
@@ -661,7 +884,7 @@ namespace Emby.Xtream.Plugin.Api
 
             return new DashboardResult
             {
-                PluginVersion = typeof(Plugin).Assembly.GetName().Version?.ToString() ?? "0.0.0",
+                PluginVersion = GetPluginDisplayVersion(),
                 LastSync = history.Count > 0 ? history[0] : null,
                 History = history,
                 IsRunning = syncService.MovieProgress.IsRunning || syncService.SeriesProgress.IsRunning,
@@ -671,10 +894,16 @@ namespace Emby.Xtream.Plugin.Api
                 {
                     MovieFolders   = movieFolders,
                     MovieCount     = movieCount,
+                    DocumentaryFolders = documentaryFolders,
+                    DocumentaryCount = documentaryCount,
                     SeriesFolders  = seriesFolders,
                     SeriesCount    = seriesCount,
                     SeasonCount    = seasonCount,
                     EpisodeCount   = episodeCount,
+                    DocuSeriesFolders = docuSeriesFolders,
+                    DocuSeriesCount = docuSeriesCount,
+                    DocuSeasonCount = docuSeasonCount,
+                    DocuEpisodeCount = docuEpisodeCount,
                     LiveTvChannels = liveTvChannels,
                 },
             };
@@ -764,9 +993,79 @@ namespace Emby.Xtream.Plugin.Api
             return DeleteContentFolder(StrmSyncService.GetMovieRootFolderName(Plugin.Instance.Configuration));
         }
 
+        private static string GetPluginDisplayVersion()
+        {
+            return typeof(Plugin).Assembly
+                .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+                ?? typeof(Plugin).Assembly.GetName().Version?.ToString()
+                ?? "0.0.0";
+        }
+
+        public object Delete(DeleteDocumentaryContent request)
+        {
+            return DeleteContentFolder(StrmSyncService.GetDocumentaryRootFolderName(Plugin.Instance.Configuration));
+        }
+
         public object Delete(DeleteSeriesContent request)
         {
             return DeleteContentFolder(StrmSyncService.GetSeriesRootFolderName(Plugin.Instance.Configuration));
+        }
+
+        public object Delete(DeleteDocuSeriesContent request)
+        {
+            return DeleteContentFolder(StrmSyncService.GetDocuSeriesRootFolderName(Plugin.Instance.Configuration));
+        }
+
+        private static PluginConfiguration BuildDocumentaryMovieConfig(PluginConfiguration source)
+        {
+            var config = BuildSharedSyncConfig(source);
+            config.SyncMovies = source.SyncDocumentaries;
+            config.MovieRootFolderName = source.DocumentaryRootFolderName;
+            config.SelectedVodCategoryIds = source.SelectedDocumentaryCategoryIds ?? new int[0];
+            config.MovieFolderMode = source.DocumentaryFolderMode;
+            config.MovieFolderMappings = source.DocumentaryFolderMappings;
+            config.LastMovieSyncTimestamp = source.LastDocumentarySyncTimestamp;
+            return config;
+        }
+
+        private static PluginConfiguration BuildDocuSeriesConfig(PluginConfiguration source)
+        {
+            var config = BuildSharedSyncConfig(source);
+            config.SyncSeries = source.SyncDocuSeries;
+            config.SeriesRootFolderName = source.DocuSeriesRootFolderName;
+            config.SelectedSeriesCategoryIds = source.SelectedDocuSeriesCategoryIds ?? new int[0];
+            config.SeriesFolderMode = source.DocuSeriesFolderMode;
+            config.SeriesFolderMappings = source.DocuSeriesFolderMappings;
+            config.LastSeriesSyncTimestamp = source.LastDocuSeriesSyncTimestamp;
+            config.SeriesEpisodeHashesJson = source.DocuSeriesEpisodeHashesJson;
+            return config;
+        }
+
+        private static PluginConfiguration BuildSharedSyncConfig(PluginConfiguration source)
+        {
+            return new PluginConfiguration
+            {
+                BaseUrl = source.BaseUrl,
+                Username = source.Username,
+                Password = source.Password,
+                HttpUserAgent = source.HttpUserAgent,
+                StrmLibraryPath = source.StrmLibraryPath,
+                EnableContentNameCleaning = source.EnableContentNameCleaning,
+                ContentRemoveTerms = source.ContentRemoveTerms,
+                EnableTmdbFolderNaming = source.EnableTmdbFolderNaming,
+                EnableTmdbFallbackLookup = source.EnableTmdbFallbackLookup,
+                EnableSeriesIdFolderNaming = source.EnableSeriesIdFolderNaming,
+                EnableSeriesMetadataLookup = source.EnableSeriesMetadataLookup,
+                TvdbFolderIdOverrides = source.TvdbFolderIdOverrides,
+                EnableNfoFiles = source.EnableNfoFiles,
+                CachedVodCategories = source.CachedVodCategories,
+                CachedSeriesCategories = source.CachedSeriesCategories,
+                SmartSkipExisting = source.SmartSkipExisting,
+                SyncParallelism = source.SyncParallelism,
+                CleanupOrphans = source.CleanupOrphans,
+                OrphanSafetyThreshold = source.OrphanSafetyThreshold,
+                StrmNamingVersion = source.StrmNamingVersion,
+            };
         }
 
         private DeleteContentResult DeleteContentFolder(string folderName)

@@ -1,5 +1,6 @@
 using System;
 using System.Net.Http;
+using System.Reflection;
 using System.Threading.Tasks;
 
 namespace Emby.Xtream.Plugin.Service
@@ -70,7 +71,10 @@ namespace Emby.Xtream.Plugin.Service
                 }
             }
 
-            var currentVersion = typeof(Plugin).Assembly.GetName().Version?.ToString() ?? "0.0.0";
+            var currentVersion = typeof(Plugin).Assembly
+                .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+                ?? typeof(Plugin).Assembly.GetName().Version?.ToString()
+                ?? "0.0.0";
 
             UpdateCheckResult result;
             try
@@ -175,6 +179,8 @@ namespace Emby.Xtream.Plugin.Service
         {
             // Version.Parse requires at least major.minor; pad if needed
             if (version == null) return "0.0";
+            var dashIdx = version.IndexOf('-');
+            if (dashIdx >= 0) version = version.Substring(0, dashIdx);
             var parts = version.Split('.');
             if (parts.Length == 1) return version + ".0";
             return version;

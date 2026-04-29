@@ -25,6 +25,12 @@ fi
 
 echo "=== Version: $VERSION (from git: $GIT_DESC) ==="
 
+VERSION_PREFIX="${VERSION%%-*}"
+VERSION_SUFFIX=""
+if [[ "$VERSION" == *-* ]]; then
+    VERSION_SUFFIX="${VERSION#*-}"
+fi
+
 echo ""
 echo "=== Running Tests ==="
 dotnet test "$SCRIPT_DIR/../Emby.Xtream.Plugin.Tests/" --no-restore -v minimal
@@ -35,7 +41,10 @@ cd "$SCRIPT_DIR"
 
 rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR"
-dotnet publish -c Release -o "$OUT_DIR" --no-self-contained -p:Version="$VERSION"
+dotnet publish -c Release -o "$OUT_DIR" --no-self-contained \
+    -p:VersionPrefix="$VERSION_PREFIX" \
+    -p:VersionSuffix="$VERSION_SUFFIX" \
+    -p:Version="$VERSION"
 
 echo ""
 echo "=== Build output ==="

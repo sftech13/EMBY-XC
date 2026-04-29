@@ -5,7 +5,14 @@
     <LangVersion>7.3</LangVersion>
     <AssemblyName>XC2EMBY.Plugin</AssemblyName>
     <RootNamespace>Emby.Xtream.Plugin</RootNamespace>
-    <Version>1.0.5</Version>
+    <VersionPrefix>1.1.0</VersionPrefix>
+    <VersionSuffix>beta.3</VersionSuffix>
+    <Version Condition="'$(VersionSuffix)' == ''">$(VersionPrefix)</Version>
+    <Version Condition="'$(VersionSuffix)' != ''">$(VersionPrefix)-$(VersionSuffix)</Version>
+    <AssemblyVersion>$(VersionPrefix).0</AssemblyVersion>
+    <FileVersion>$(VersionPrefix).0</FileVersion>
+    <InformationalVersion>$(Version)</InformationalVersion>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
   </PropertyGroup>

@@ -288,11 +288,21 @@ namespace Emby.Xtream.Plugin
             target.SelectedVodCategoryIds = source.SelectedVodCategoryIds ?? new int[0];
             target.MovieFolderMode = source.MovieFolderMode;
             target.MovieFolderMappings = source.MovieFolderMappings;
+            target.SyncDocumentaries = source.SyncDocumentaries;
+            target.DocumentaryRootFolderName = string.IsNullOrWhiteSpace(source.DocumentaryRootFolderName) ? target.DocumentaryRootFolderName : source.DocumentaryRootFolderName;
+            target.SelectedDocumentaryCategoryIds = source.SelectedDocumentaryCategoryIds ?? new int[0];
+            target.DocumentaryFolderMode = source.DocumentaryFolderMode;
+            target.DocumentaryFolderMappings = source.DocumentaryFolderMappings;
             target.SyncSeries = source.SyncSeries;
             target.SeriesRootFolderName = string.IsNullOrWhiteSpace(source.SeriesRootFolderName) ? target.SeriesRootFolderName : source.SeriesRootFolderName;
             target.SelectedSeriesCategoryIds = source.SelectedSeriesCategoryIds ?? new int[0];
             target.SeriesFolderMode = source.SeriesFolderMode;
             target.SeriesFolderMappings = source.SeriesFolderMappings;
+            target.SyncDocuSeries = source.SyncDocuSeries;
+            target.DocuSeriesRootFolderName = string.IsNullOrWhiteSpace(source.DocuSeriesRootFolderName) ? target.DocuSeriesRootFolderName : source.DocuSeriesRootFolderName;
+            target.SelectedDocuSeriesCategoryIds = source.SelectedDocuSeriesCategoryIds ?? new int[0];
+            target.DocuSeriesFolderMode = source.DocuSeriesFolderMode;
+            target.DocuSeriesFolderMappings = source.DocuSeriesFolderMappings;
             target.EnableContentNameCleaning = source.EnableContentNameCleaning;
             target.ContentRemoveTerms = source.ContentRemoveTerms;
             target.EnableTmdbFolderNaming = source.EnableTmdbFolderNaming;
@@ -316,10 +326,13 @@ namespace Emby.Xtream.Plugin
             target.AutoSyncDailyTime = source.AutoSyncDailyTime;
             target.LastChannelListHash = source.LastChannelListHash;
             target.LastMovieSyncTimestamp = source.LastMovieSyncTimestamp;
+            target.LastDocumentarySyncTimestamp = source.LastDocumentarySyncTimestamp;
             target.LastSeriesSyncTimestamp = source.LastSeriesSyncTimestamp;
+            target.LastDocuSeriesSyncTimestamp = source.LastDocuSeriesSyncTimestamp;
             target.StrmNamingVersion = source.StrmNamingVersion;
             target.SyncHistoryJson = source.SyncHistoryJson;
             target.SeriesEpisodeHashesJson = source.SeriesEpisodeHashesJson;
+            target.DocuSeriesEpisodeHashesJson = source.DocuSeriesEpisodeHashesJson;
         }
     }
 }
