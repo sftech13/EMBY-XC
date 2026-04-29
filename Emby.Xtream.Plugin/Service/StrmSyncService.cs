@@ -389,6 +389,8 @@ namespace Emby.Xtream.Plugin.Service
                         if (string.IsNullOrWhiteSpace(movieName))
                         {
                             Interlocked.Increment(ref _movieProgress.Failed);
+                            Interlocked.Increment(ref _movieProgress.Completed);
+                            ReportTaskProgress(_movieProgress, taskProgress);
                             return;
                         }
 
@@ -428,6 +430,8 @@ namespace Emby.Xtream.Plugin.Service
                         if (string.IsNullOrWhiteSpace(folderName))
                         {
                             Interlocked.Increment(ref _movieProgress.Failed);
+                            Interlocked.Increment(ref _movieProgress.Completed);
+                            ReportTaskProgress(_movieProgress, taskProgress);
                             return;
                         }
 

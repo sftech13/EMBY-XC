@@ -1908,7 +1908,7 @@ function (BaseView, loading) {
             '</div>';
     }
 
-    function pollSyncProgress(view, type) {
+    function fetchAndRenderSyncProgress(view, type) {
         var resultMap = {
             Movies: '.syncMoviesResult',
             Documentaries: '.syncDocumentariesResult',
@@ -1916,18 +1916,31 @@ function (BaseView, loading) {
             DocuSeries: '.syncDocuSeriesResult'
         };
         var progressKey = type === 'Documentaries' ? 'Movies' : (type === 'DocuSeries' ? 'Series' : type);
+        var resultEl = view.querySelector(resultMap[type]);
+        return ApiClient.getJSON(ApiClient.getUrl('XC2EMBY/Sync/Status')).then(function (status) {
+            var progress = status[progressKey];
+            if (!progress) return;
+            if (progress.IsRunning || progress.Total > 0) {
+                renderProgressBar(resultEl, progress);
+            }
+        });
+    }
+
+    function pollSyncProgress(view, type) {
+        var resultMap = {
+            Movies: '.syncMoviesResult',
+            Documentaries: '.syncDocumentariesResult',
+            Series: '.syncSeriesResult',
+            DocuSeries: '.syncDocuSeriesResult'
+        };
         var resultClass = resultMap[type];
         var resultEl = view.querySelector(resultClass);
-        var apiUrl = ApiClient.getUrl('XC2EMBY/Sync/Status');
+        renderProgressBar(resultEl, { Phase: 'Starting sync', Total: 0, Completed: 0, Skipped: 0, Failed: 0 });
+
+        fetchAndRenderSyncProgress(view, type).catch(function () { });
 
         var intervalId = setInterval(function () {
-            ApiClient.getJSON(apiUrl).then(function (status) {
-                var progress = status[progressKey];
-                if (!progress) return;
-                if (progress.IsRunning) {
-                    renderProgressBar(resultEl, progress);
-                }
-            }).catch(function () {
+            fetchAndRenderSyncProgress(view, type).catch(function () {
                 // Ignore poll errors; the POST completion will handle cleanup
             });
         }, 150);
