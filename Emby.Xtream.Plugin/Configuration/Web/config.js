@@ -270,35 +270,35 @@ function (BaseView, loading) {
 
         // Sync buttons
         view.querySelector('.btnSyncMovies').addEventListener('click', function () {
-            syncMovies(view, false);
-        });
-
-        view.querySelector('.btnForceResyncMovies').addEventListener('click', function () {
-            syncMovies(view, true);
+            syncMovies(view);
         });
 
         view.querySelector('.btnSyncDocumentaries').addEventListener('click', function () {
-            syncDocumentaries(view, false);
-        });
-
-        view.querySelector('.btnForceResyncDocumentaries').addEventListener('click', function () {
-            syncDocumentaries(view, true);
+            syncDocumentaries(view);
         });
 
         view.querySelector('.btnSyncSeries').addEventListener('click', function () {
-            syncSeries(view, false);
-        });
-
-        view.querySelector('.btnForceResyncSeries').addEventListener('click', function () {
-            syncSeries(view, true);
+            syncSeries(view);
         });
 
         view.querySelector('.btnSyncDocuSeries').addEventListener('click', function () {
-            syncDocuSeries(view, false);
+            syncDocuSeries(view);
         });
 
-        view.querySelector('.btnForceResyncDocuSeries').addEventListener('click', function () {
-            syncDocuSeries(view, true);
+        view.querySelector('.btnStopMovies').addEventListener('click', function () {
+            stopSync(view, '.syncMoviesResult');
+        });
+
+        view.querySelector('.btnStopDocumentaries').addEventListener('click', function () {
+            stopSync(view, '.syncDocumentariesResult');
+        });
+
+        view.querySelector('.btnStopSeries').addEventListener('click', function () {
+            stopSync(view, '.syncSeriesResult');
+        });
+
+        view.querySelector('.btnStopDocuSeries').addEventListener('click', function () {
+            stopSync(view, '.syncDocuSeriesResult');
         });
 
         // Delete content buttons
@@ -451,6 +451,7 @@ function (BaseView, loading) {
                 .replace(/movieMultiFolderEmptyHint/g, 'documentaryMultiFolderEmptyHint')
                 .replace(/btnAddMovieFolder/g, 'btnAddDocumentaryFolder')
                 .replace(/btnSyncMovies/g, 'btnSyncDocumentaries')
+                .replace(/btnStopMovies/g, 'btnStopDocumentaries')
                 .replace(/syncMoviesResult/g, 'syncDocumentariesResult')
                 .replace(/btnDeleteMovies/g, 'btnDeleteDocumentaries')
                 .replace(/deleteMoviesResult/g, 'deleteDocumentariesResult')
@@ -487,8 +488,8 @@ function (BaseView, loading) {
                 .replace(/seriesFoldersList/g, 'docuSeriesFoldersList')
                 .replace(/seriesMultiFolderEmptyHint/g, 'docuSeriesMultiFolderEmptyHint')
                 .replace(/btnAddSeriesFolder/g, 'btnAddDocuSeriesFolder')
-                .replace(/btnForceResyncSeries/g, 'btnForceResyncDocuSeries')
                 .replace(/btnSyncSeries/g, 'btnSyncDocuSeries')
+                .replace(/btnStopSeries/g, 'btnStopDocuSeries')
                 .replace(/syncSeriesResult/g, 'syncDocuSeriesResult')
                 .replace(/btnDeleteSeries/g, 'btnDeleteDocuSeries')
                 .replace(/deleteSeriesResult/g, 'deleteDocuSeriesResult')
@@ -1908,6 +1909,26 @@ function (BaseView, loading) {
             '</div>';
     }
 
+    function renderSyncResult(resultEl, result) {
+        var total = result.Total || 0;
+        var completed = result.Completed || total;
+        var progress = {
+            Phase: result.Message || 'Complete',
+            Total: total,
+            Completed: completed,
+            Skipped: result.Skipped || 0,
+            Failed: result.Failed || 0
+        };
+        renderProgressBar(resultEl, progress);
+
+        var cls = result.Success ? 'success' : 'error';
+        var icon = result.Success ? '\u2713' : '\u2717';
+        var msg = result.Success
+            ? result.Message + ' (Total: ' + total + ', Skipped: ' + (result.Skipped || 0) + ', Failed: ' + (result.Failed || 0) + ')'
+            : result.Message;
+        resultEl.innerHTML += '<span class="result-pill ' + cls + '">' + icon + '  ' + escapeHtml(msg) + '</span>';
+    }
+
     function fetchAndRenderSyncProgress(view, type) {
         var resultMap = {
             Movies: '.syncMoviesResult',
@@ -1948,119 +1969,108 @@ function (BaseView, loading) {
         return intervalId;
     }
 
-    function syncMovies(view, force) {
+    function syncMovies(view) {
         var resultEl = view.querySelector('.syncMoviesResult');
         var btn = view.querySelector('.btnSyncMovies');
         btn.disabled = true;
-        view.querySelector('.btnForceResyncMovies').disabled = true;
-        resultEl.innerHTML = '<span style="opacity:0.5;">' + (force ? 'Starting full re-sync...' : 'Starting movie sync...') + '</span>';
+        resultEl.innerHTML = '<span style="opacity:0.5;">Starting movie sync...</span>';
 
         var pollId = pollSyncProgress(view, 'Movies');
-        var apiUrl = ApiClient.getUrl('XC2EMBY/Sync/Movies') + (force ? '?Force=true' : '');
 
         ApiClient.ajax({
             type: 'POST',
-            url: apiUrl,
+            url: ApiClient.getUrl('XC2EMBY/Sync/Movies'),
             dataType: 'json'
         }).then(function (result) {
             clearInterval(pollId);
             btn.disabled = false;
-            view.querySelector('.btnForceResyncMovies').disabled = false;
-            var msg = result.Success
-                ? result.Message + ' (Total: ' + result.Total + ', Skipped: ' + result.Skipped + ', Failed: ' + result.Failed + ')'
-                : result.Message;
-            setPillResult(resultEl, result.Success, msg);
+            renderSyncResult(resultEl, result);
         }).catch(function () {
             clearInterval(pollId);
             btn.disabled = false;
-            view.querySelector('.btnForceResyncMovies').disabled = false;
             setPillResult(resultEl, false, 'Movie sync request failed. Check server logs for details.');
         });
     }
 
-    function syncDocumentaries(view, force) {
+    function syncDocumentaries(view) {
         syncContent(view, {
             result: '.syncDocumentariesResult',
             button: '.btnSyncDocumentaries',
-            forceButton: '.btnForceResyncDocumentaries',
             progressType: 'Documentaries',
             url: 'XC2EMBY/Sync/Documentaries',
-            starting: force ? 'Starting full re-sync...' : 'Starting documentary sync...',
-            fail: 'Documentary sync request failed. Check server logs for details.',
-            force: force
+            starting: 'Starting documentary sync...',
+            fail: 'Documentary sync request failed. Check server logs for details.'
         });
     }
 
-    function syncSeries(view, force) {
+    function syncSeries(view) {
         var resultEl = view.querySelector('.syncSeriesResult');
         var btn = view.querySelector('.btnSyncSeries');
         btn.disabled = true;
-        view.querySelector('.btnForceResyncSeries').disabled = true;
-        resultEl.innerHTML = '<span style="opacity:0.5;">' + (force ? 'Starting full re-sync...' : 'Starting series sync...') + '</span>';
+        resultEl.innerHTML = '<span style="opacity:0.5;">Starting series sync...</span>';
 
         var pollId = pollSyncProgress(view, 'Series');
-        var apiUrl = ApiClient.getUrl('XC2EMBY/Sync/Series') + (force ? '?Force=true' : '');
 
         ApiClient.ajax({
             type: 'POST',
-            url: apiUrl,
+            url: ApiClient.getUrl('XC2EMBY/Sync/Series'),
             dataType: 'json'
         }).then(function (result) {
             clearInterval(pollId);
             btn.disabled = false;
-            view.querySelector('.btnForceResyncSeries').disabled = false;
-            var msg = result.Success
-                ? result.Message + ' (Total: ' + result.Total + ', Skipped: ' + result.Skipped + ', Failed: ' + result.Failed + ')'
-                : result.Message;
-            setPillResult(resultEl, result.Success, msg);
+            renderSyncResult(resultEl, result);
         }).catch(function () {
             clearInterval(pollId);
             btn.disabled = false;
-            view.querySelector('.btnForceResyncSeries').disabled = false;
             setPillResult(resultEl, false, 'Series sync request failed. Check server logs for details.');
         });
     }
 
-    function syncDocuSeries(view, force) {
+    function syncDocuSeries(view) {
         syncContent(view, {
             result: '.syncDocuSeriesResult',
             button: '.btnSyncDocuSeries',
-            forceButton: '.btnForceResyncDocuSeries',
             progressType: 'DocuSeries',
             url: 'XC2EMBY/Sync/DocuSeries',
-            starting: force ? 'Starting full re-sync...' : 'Starting docu series sync...',
-            fail: 'Docu Series sync request failed. Check server logs for details.',
-            force: force
+            starting: 'Starting docu series sync...',
+            fail: 'Docu Series sync request failed. Check server logs for details.'
         });
     }
 
     function syncContent(view, options) {
         var resultEl = view.querySelector(options.result);
         var btn = view.querySelector(options.button);
-        var forceBtn = options.forceButton ? view.querySelector(options.forceButton) : null;
         btn.disabled = true;
-        if (forceBtn) forceBtn.disabled = true;
         resultEl.innerHTML = '<span style="opacity:0.5;">' + options.starting + '</span>';
 
         var pollId = pollSyncProgress(view, options.progressType);
-        var apiUrl = ApiClient.getUrl(options.url) + (options.force ? '?Force=true' : '');
         ApiClient.ajax({
             type: 'POST',
-            url: apiUrl,
+            url: ApiClient.getUrl(options.url),
             dataType: 'json'
         }).then(function (result) {
             clearInterval(pollId);
             btn.disabled = false;
-            if (forceBtn) forceBtn.disabled = false;
-            var msg = result.Success
-                ? result.Message + ' (Total: ' + result.Total + ', Skipped: ' + result.Skipped + ', Failed: ' + result.Failed + ')'
-                : result.Message;
-            setPillResult(resultEl, result.Success, msg);
+            renderSyncResult(resultEl, result);
         }).catch(function () {
             clearInterval(pollId);
             btn.disabled = false;
-            if (forceBtn) forceBtn.disabled = false;
             setPillResult(resultEl, false, options.fail);
+        });
+    }
+
+    function stopSync(view, resultSelector) {
+        var resultEl = view.querySelector(resultSelector);
+        resultEl.innerHTML = '<span style="opacity:0.5;">Stopping sync...</span>';
+
+        ApiClient.ajax({
+            type: 'POST',
+            url: ApiClient.getUrl('XC2EMBY/Sync/Stop'),
+            dataType: 'json'
+        }).then(function (result) {
+            setPillResult(resultEl, !!result.Success, result.Message || 'Stop requested.');
+        }).catch(function () {
+            setPillResult(resultEl, false, 'Stop request failed. Check server logs for details.');
         });
     }
 

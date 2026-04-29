@@ -54,25 +54,26 @@ namespace Emby.Xtream.Plugin.Api
     [Route("/XC2EMBY/Sync/Movies", "POST", Summary = "Triggers VOD movie STRM sync")]
     public class SyncMovies : IReturn<SyncResult>
     {
-        public bool Force { get; set; }
     }
 
     [Route("/XC2EMBY/Sync/Documentaries", "POST", Summary = "Triggers documentary movie STRM sync")]
     public class SyncDocumentaries : IReturn<SyncResult>
     {
-        public bool Force { get; set; }
     }
 
     [Route("/XC2EMBY/Sync/Series", "POST", Summary = "Triggers series STRM sync")]
     public class SyncSeries : IReturn<SyncResult>
     {
-        public bool Force { get; set; }
     }
 
     [Route("/XC2EMBY/Sync/DocuSeries", "POST", Summary = "Triggers documentary series STRM sync")]
     public class SyncDocuSeries : IReturn<SyncResult>
     {
-        public bool Force { get; set; }
+    }
+
+    [Route("/XC2EMBY/Sync/Stop", "POST", Summary = "Stops the active STRM sync")]
+    public class StopSync : IReturn<SyncResult>
+    {
     }
 
     [Route("/XC2EMBY/Sync/Status", "GET", Summary = "Gets current sync progress")]
@@ -451,12 +452,6 @@ namespace Emby.Xtream.Plugin.Api
                 return result;
             }
 
-            if (request.Force)
-            {
-                config.LastMovieSyncTimestamp = 0;
-                Plugin.Instance.SaveConfiguration();
-            }
-
             try
             {
                 await syncService.SyncMoviesAsync(
@@ -482,6 +477,16 @@ namespace Emby.Xtream.Plugin.Api
                     result.Skipped = progress.Skipped;
                     result.Failed = progress.Failed;
                 }
+            }
+            catch (OperationCanceledException)
+            {
+                var progress = syncService.MovieProgress;
+                result.Success = false;
+                result.Message = "Movie sync stopped.";
+                result.Total = progress.Total;
+                result.Completed = progress.Completed;
+                result.Skipped = progress.Skipped;
+                result.Failed = progress.Failed;
             }
             catch (Exception ex)
             {
@@ -510,12 +515,6 @@ namespace Emby.Xtream.Plugin.Api
                 result.Success = false;
                 result.Message = "A movie/documentary sync is already running.";
                 return result;
-            }
-
-            if (request.Force)
-            {
-                config.LastDocumentarySyncTimestamp = 0;
-                Plugin.Instance.SaveConfiguration();
             }
 
             try
@@ -551,6 +550,16 @@ namespace Emby.Xtream.Plugin.Api
                 result.Skipped = progress.Skipped;
                 result.Failed = progress.Failed;
             }
+            catch (OperationCanceledException)
+            {
+                var progress = syncService.MovieProgress;
+                result.Success = false;
+                result.Message = "Documentary sync stopped.";
+                result.Total = progress.Total;
+                result.Completed = progress.Completed;
+                result.Skipped = progress.Skipped;
+                result.Failed = progress.Failed;
+            }
             catch (Exception ex)
             {
                 result.Success = false;
@@ -580,12 +589,6 @@ namespace Emby.Xtream.Plugin.Api
                 return result;
             }
 
-            if (request.Force)
-            {
-                config.LastSeriesSyncTimestamp = 0;
-                Plugin.Instance.SaveConfiguration();
-            }
-
             try
             {
                 await syncService.SyncSeriesAsync(
@@ -611,6 +614,16 @@ namespace Emby.Xtream.Plugin.Api
                     result.Skipped = progress.Skipped;
                     result.Failed = progress.Failed;
                 }
+            }
+            catch (OperationCanceledException)
+            {
+                var progress = syncService.SeriesProgress;
+                result.Success = false;
+                result.Message = "Series sync stopped.";
+                result.Total = progress.Total;
+                result.Completed = progress.Completed;
+                result.Skipped = progress.Skipped;
+                result.Failed = progress.Failed;
             }
             catch (Exception ex)
             {
@@ -639,12 +652,6 @@ namespace Emby.Xtream.Plugin.Api
                 result.Success = false;
                 result.Message = "A TV show/docu series sync is already running.";
                 return result;
-            }
-
-            if (request.Force)
-            {
-                config.LastDocuSeriesSyncTimestamp = 0;
-                Plugin.Instance.SaveConfiguration();
             }
 
             try
@@ -682,10 +689,39 @@ namespace Emby.Xtream.Plugin.Api
                 result.Skipped = progress.Skipped;
                 result.Failed = progress.Failed;
             }
+            catch (OperationCanceledException)
+            {
+                var progress = syncService.SeriesProgress;
+                result.Success = false;
+                result.Message = "Docu Series sync stopped.";
+                result.Total = progress.Total;
+                result.Completed = progress.Completed;
+                result.Skipped = progress.Skipped;
+                result.Failed = progress.Failed;
+            }
             catch (Exception ex)
             {
                 result.Success = false;
                 result.Message = "Docu Series sync failed: " + ex.Message;
+            }
+
+            return result;
+        }
+
+        public object Post(StopSync request)
+        {
+            var syncService = Plugin.Instance.StrmSyncService;
+            var result = new SyncResult();
+
+            if (syncService.StopActiveSync())
+            {
+                result.Success = true;
+                result.Message = "Stop requested. The active sync will stop after the current file operation.";
+            }
+            else
+            {
+                result.Success = false;
+                result.Message = "No STRM sync is currently running.";
             }
 
             return result;
