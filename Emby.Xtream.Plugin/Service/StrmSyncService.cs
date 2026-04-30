@@ -112,6 +112,9 @@ namespace Emby.Xtream.Plugin.Service
         private CancellationTokenSource _activeSyncCancellation;
 
         private SyncProgress _movieProgress = new SyncProgress();
+        private SyncProgress _documentariesProgress = new SyncProgress();
+        private SyncProgress _docuSeriesProgress = new SyncProgress();
+        private SyncProgress _docuEpisodeProgress = new SyncProgress();
         private SyncProgress _seriesProgress = new SyncProgress();
         private SyncProgress _episodeProgress = new SyncProgress();
 
@@ -239,6 +242,8 @@ namespace Emby.Xtream.Plugin.Service
         }
 
         public SyncProgress MovieProgress => _movieProgress;
+        public SyncProgress DocumentariesProgress => _documentariesProgress;
+        public SyncProgress DocuSeriesProgress => _docuSeriesProgress;
         public SyncProgress SeriesProgress => _seriesProgress;
 
         public bool StopActiveSync()
@@ -336,11 +341,12 @@ namespace Emby.Xtream.Plugin.Service
             return true;
         }
 
-        public async Task SyncMoviesAsync(PluginConfiguration config, CancellationToken cancellationToken, Action saveConfig = null, IProgress<double> taskProgress = null)
+        public async Task SyncMoviesAsync(PluginConfiguration config, CancellationToken cancellationToken, Action saveConfig = null, IProgress<double> taskProgress = null, bool isDocumentaries = false)
         {
             ApplyUserAgentToSharedClient();
             CheckAndUpgradeNamingVersion(config, saveConfig);
-            _movieProgress = new SyncProgress { IsRunning = true, Phase = "Starting movie sync" };
+            var mp = new SyncProgress { IsRunning = true, Phase = "Starting movie sync" };
+            if (isDocumentaries) _documentariesProgress = mp; else _movieProgress = mp;
             lock (_failedItemsLock) { _failedItems.Clear(); }
             var movieSyncStart = DateTime.UtcNow;
             var movieSyncSuccess = true;
@@ -357,12 +363,12 @@ namespace Emby.Xtream.Plugin.Service
                     folderMappings.Count == 0)
                 {
                     movieSyncSuccess = false;
-                    _movieProgress.AbortReason =
+                    mp.AbortReason =
                         "Multiple Folders mode is on but no categories are assigned to any folder. " +
                         "Click + Add Folder, name it, use Refresh Categories, tick the VOD categories for that folder, then save plugin settings. " +
                         "Or switch back to Single Folder to use the flat category list.";
-                    _movieProgress.Phase = "Configuration needed";
-                    _logger.Warn("Movie sync aborted: {0}", _movieProgress.AbortReason);
+                    mp.Phase = "Configuration needed";
+                    _logger.Warn("Movie sync aborted: {0}", mp.AbortReason);
                     return;
                 }
 
@@ -371,7 +377,7 @@ namespace Emby.Xtream.Plugin.Service
                 // Fetch category names if needed for folder organization
                 if (!string.Equals(config.MovieFolderMode, "single", StringComparison.OrdinalIgnoreCase))
                 {
-                    _movieProgress.Phase = "Fetching VOD categories";
+                    mp.Phase = "Fetching VOD categories";
                     var categories = await FetchCategoriesAsync("get_vod_categories", config, cancellationToken).ConfigureAwait(false);
                     foreach (var cat in categories)
                     {
@@ -379,7 +385,7 @@ namespace Emby.Xtream.Plugin.Service
                     }
                 }
 
-                _movieProgress.Phase = "Fetching VOD streams";
+                mp.Phase = "Fetching VOD streams";
                 var allStreams = await FetchVodStreamsAsync(config.SelectedVodCategoryIds, config, cancellationToken).ConfigureAwait(false);
 
                 // Delta sync: split into new (not yet synced) and existing
@@ -394,8 +400,8 @@ namespace Emby.Xtream.Plugin.Service
                 _logger.Info("Delta movie sync: {0} new, {1} existing (since timestamp {2})",
                     newStreams.Count, existingStreams.Count, lastMovieTs);
 
-                _movieProgress.Total = allStreams.Count;
-                _movieProgress.Phase = "Writing STRM files";
+                mp.Total = allStreams.Count;
+                mp.Phase = "Writing STRM files";
 
                 // Log TMDB statistics
                 if (config.EnableTmdbFolderNaming)
@@ -427,9 +433,9 @@ namespace Emby.Xtream.Plugin.Service
                         var movieName = SanitizeFileName(cleanedName);
                         if (string.IsNullOrWhiteSpace(movieName))
                         {
-                            Interlocked.Increment(ref _movieProgress.Failed);
-                            Interlocked.Increment(ref _movieProgress.Completed);
-                            ReportTaskProgress(_movieProgress, taskProgress);
+                            Interlocked.Increment(ref mp.Failed);
+                            Interlocked.Increment(ref mp.Completed);
+                            ReportTaskProgress(mp, taskProgress);
                             return;
                         }
 
@@ -468,9 +474,9 @@ namespace Emby.Xtream.Plugin.Service
                         var folderName = BuildMovieFolderName(cleanedName, tmdbId);
                         if (string.IsNullOrWhiteSpace(folderName))
                         {
-                            Interlocked.Increment(ref _movieProgress.Failed);
-                            Interlocked.Increment(ref _movieProgress.Completed);
-                            ReportTaskProgress(_movieProgress, taskProgress);
+                            Interlocked.Increment(ref mp.Failed);
+                            Interlocked.Increment(ref mp.Completed);
+                            ReportTaskProgress(mp, taskProgress);
                             return;
                         }
 
@@ -479,9 +485,9 @@ namespace Emby.Xtream.Plugin.Service
 
                         if (subFolder == null)
                         {
-                            Interlocked.Increment(ref _movieProgress.Skipped);
-                            Interlocked.Increment(ref _movieProgress.Completed);
-                            ReportTaskProgress(_movieProgress, taskProgress);
+                            Interlocked.Increment(ref mp.Skipped);
+                            Interlocked.Increment(ref mp.Completed);
+                            ReportTaskProgress(mp, taskProgress);
                             return;
                         }
 
@@ -496,9 +502,9 @@ namespace Emby.Xtream.Plugin.Service
                             {
                                 writtenPaths.Add(strmPath);
                             }
-                            Interlocked.Increment(ref _movieProgress.Skipped);
-                            Interlocked.Increment(ref _movieProgress.Completed);
-                            ReportTaskProgress(_movieProgress, taskProgress);
+                            Interlocked.Increment(ref mp.Skipped);
+                            Interlocked.Increment(ref mp.Completed);
+                            ReportTaskProgress(mp, taskProgress);
                             return;
                         }
 
@@ -529,7 +535,7 @@ namespace Emby.Xtream.Plugin.Service
                                 File.WriteAllText(itemPath, itemUrl);
                                 if (!fileExists)
                                 {
-                                    Interlocked.Increment(ref _movieProgress.Added);
+                                    Interlocked.Increment(ref mp.Added);
                                     isAnyNewFile = true;
                                 }
                             }
@@ -558,8 +564,8 @@ namespace Emby.Xtream.Plugin.Service
                             catch (Exception ex) { _logger.Debug("NFO write failed for '{0}': {1}", movie.Name, ex.Message); }
                         }
 
-                        Interlocked.Increment(ref _movieProgress.Completed);
-                        ReportTaskProgress(_movieProgress, taskProgress);
+                        Interlocked.Increment(ref mp.Completed);
+                        ReportTaskProgress(mp, taskProgress);
                     }
                     catch (OperationCanceledException)
                     {
@@ -581,9 +587,9 @@ namespace Emby.Xtream.Plugin.Service
                                 ErrorMessage = ex.Message
                             });
                         }
-                        Interlocked.Increment(ref _movieProgress.Failed);
-                        Interlocked.Increment(ref _movieProgress.Completed);
-                        ReportTaskProgress(_movieProgress, taskProgress);
+                        Interlocked.Increment(ref mp.Failed);
+                        Interlocked.Increment(ref mp.Completed);
+                        ReportTaskProgress(mp, taskProgress);
                     }
                     finally
                     {
@@ -597,9 +603,9 @@ namespace Emby.Xtream.Plugin.Service
                 cancellationToken.ThrowIfCancellationRequested();
                 if (config.CleanupOrphans)
                 {
-                    _movieProgress.Phase = "Cleaning up orphaned files";
+                    mp.Phase = "Cleaning up orphaned files";
                     var moviesRoot = Path.Combine(config.StrmLibraryPath, GetMovieRootFolderName(config));
-                    _movieProgress.Deleted = CleanupOrphans(moviesRoot, writtenPaths, config.OrphanSafetyThreshold);
+                    mp.Deleted = CleanupOrphans(moviesRoot, writtenPaths, config.OrphanSafetyThreshold);
                 }
 
                 // Persist the highest Added timestamp seen so next sync can delta from here
@@ -615,28 +621,28 @@ namespace Emby.Xtream.Plugin.Service
                 }
 
                 _logger.Info("Movie STRM sync completed: {0} written, {1} skipped, {2} failed",
-                    _movieProgress.Completed - _movieProgress.Skipped, _movieProgress.Skipped, _movieProgress.Failed);
+                    mp.Completed - mp.Skipped, mp.Skipped, mp.Failed);
             }
             catch (OperationCanceledException)
             {
                 _logger.Info("Movie STRM sync stopped by user request.");
-                _movieProgress.Phase = "Stopped";
+                mp.Phase = "Stopped";
                 movieSyncSuccess = false;
                 throw;
             }
             catch (Exception ex)
             {
                 _logger.Error("Movie sync failed: {0}", ex.Message);
-                _movieProgress.Phase = "Failed: " + ex.Message;
+                mp.Phase = "Failed: " + ex.Message;
                 movieSyncSuccess = false;
                 throw;
             }
             finally
             {
-                _movieProgress.IsRunning = false;
-                if (string.IsNullOrEmpty(_movieProgress.AbortReason) && movieSyncSuccess)
+                mp.IsRunning = false;
+                if (string.IsNullOrEmpty(mp.AbortReason) && movieSyncSuccess)
                 {
-                    _movieProgress.Phase = "Complete";
+                    mp.Phase = "Complete";
                 }
 
                 AddHistoryEntry(new SyncHistoryEntry
@@ -645,24 +651,25 @@ namespace Emby.Xtream.Plugin.Service
                     EndTime = DateTime.UtcNow,
                     Success = movieSyncSuccess,
                     WasMovieSync = true,
-                    MoviesTotal = _movieProgress.Total,
-                    MoviesCompleted = _movieProgress.Completed,
-                    MoviesAdded = _movieProgress.Added,
-                    MoviesSkipped = _movieProgress.Skipped,
-                    MoviesFailed = _movieProgress.Failed,
-                    MoviesDeleted = _movieProgress.Deleted,
+                    MoviesTotal = mp.Total,
+                    MoviesCompleted = mp.Completed,
+                    MoviesAdded = mp.Added,
+                    MoviesSkipped = mp.Skipped,
+                    MoviesFailed = mp.Failed,
+                    MoviesDeleted = mp.Deleted,
                     AddedMovieTitles = addedMovieTitles,
                 });
                 EndSyncCancellation(syncCancellation);
             }
         }
 
-        public async Task SyncSeriesAsync(PluginConfiguration config, CancellationToken cancellationToken, Action saveConfig = null, IProgress<double> taskProgress = null)
+        public async Task SyncSeriesAsync(PluginConfiguration config, CancellationToken cancellationToken, Action saveConfig = null, IProgress<double> taskProgress = null, bool isDocuSeries = false)
         {
             ApplyUserAgentToSharedClient();
             CheckAndUpgradeNamingVersion(config, saveConfig);
-            _seriesProgress = new SyncProgress { IsRunning = true, Phase = "Starting series sync" };
-            _episodeProgress = new SyncProgress { IsRunning = true };
+            var sp = new SyncProgress { IsRunning = true, Phase = "Starting series sync" };
+            var ep = new SyncProgress { IsRunning = true };
+            if (isDocuSeries) { _docuSeriesProgress = sp; _docuEpisodeProgress = ep; } else { _seriesProgress = sp; _episodeProgress = ep; }
             lock (_failedItemsLock) { _failedItems.RemoveAll(i => i.ItemType == "Series"); }
             var seriesSyncStart = DateTime.UtcNow;
             var seriesSyncSuccess = true;
@@ -679,12 +686,12 @@ namespace Emby.Xtream.Plugin.Service
                     folderMappings.Count == 0)
                 {
                     seriesSyncSuccess = false;
-                    _seriesProgress.AbortReason =
+                    sp.AbortReason =
                         "Multiple Folders mode is on but no categories are assigned to any folder. " +
                         "Click + Add Folder, name it, use Refresh Categories, tick the series categories for that folder, then save plugin settings. " +
                         "Or switch back to Single Folder to use the flat category list.";
-                    _seriesProgress.Phase = "Configuration needed";
-                    _logger.Warn("Series sync aborted: {0}", _seriesProgress.AbortReason);
+                    sp.Phase = "Configuration needed";
+                    _logger.Warn("Series sync aborted: {0}", sp.AbortReason);
                     return;
                 }
 
@@ -692,7 +699,7 @@ namespace Emby.Xtream.Plugin.Service
 
                 if (!string.Equals(config.SeriesFolderMode, "single", StringComparison.OrdinalIgnoreCase))
                 {
-                    _seriesProgress.Phase = "Fetching series categories";
+                    sp.Phase = "Fetching series categories";
                     var categories = await FetchSeriesCategoriesWithFallbackAsync(config, cancellationToken).ConfigureAwait(false);
                     foreach (var cat in categories)
                     {
@@ -705,15 +712,15 @@ namespace Emby.Xtream.Plugin.Service
                     ? ParseTvdbOverrides(config.TvdbFolderIdOverrides)
                     : null;
 
-                _seriesProgress.Phase = "Fetching series list";
+                sp.Phase = "Fetching series list";
                 var allSeries = await FetchSeriesListAsync(config.SelectedSeriesCategoryIds, config, cancellationToken).ConfigureAwait(false);
 
                 // Delta sync: split into changed and unchanged using LastModified timestamp
                 var lastSeriesTs = config.LastSeriesSyncTimestamp;
                 long maxSeriesTs = lastSeriesTs;
 
-                _seriesProgress.Total = allSeries.Count;
-                _seriesProgress.Phase = "Writing STRM files";
+                sp.Total = allSeries.Count;
+                sp.Phase = "Writing STRM files";
 
                 int deltaNew = 0, deltaExisting = 0;
                 if (lastSeriesTs > 0)
@@ -757,7 +764,7 @@ namespace Emby.Xtream.Plugin.Service
                         var seriesName = SanitizeFileName(cleanedName);
                         if (string.IsNullOrWhiteSpace(seriesName))
                         {
-                            Interlocked.Increment(ref _seriesProgress.Failed);
+                            Interlocked.Increment(ref sp.Failed);
                             return;
                         }
 
@@ -767,9 +774,9 @@ namespace Emby.Xtream.Plugin.Service
                         if (subFolder == null)
                         {
                             Interlocked.Increment(ref noFolderSkippedCount);
-                            Interlocked.Increment(ref _seriesProgress.Skipped);
-                            Interlocked.Increment(ref _seriesProgress.Completed);
-                            ReportTaskProgress(_seriesProgress, taskProgress);
+                            Interlocked.Increment(ref sp.Skipped);
+                            Interlocked.Increment(ref sp.Completed);
+                            ReportTaskProgress(sp, taskProgress);
                             return;
                         }
 
@@ -794,9 +801,9 @@ namespace Emby.Xtream.Plugin.Service
                             {
                                 _logger.Info("Skipping series '{0}' (id={1}): provider returned {2}", series.Name, series.SeriesId, msg);
                                 Interlocked.Increment(ref providerErrorSkippedCount);
-                                Interlocked.Increment(ref _seriesProgress.Skipped);
-                                Interlocked.Increment(ref _seriesProgress.Completed);
-                                ReportTaskProgress(_seriesProgress, taskProgress);
+                                Interlocked.Increment(ref sp.Skipped);
+                                Interlocked.Increment(ref sp.Completed);
+                                ReportTaskProgress(sp, taskProgress);
                                 return;
                             }
 
@@ -812,16 +819,16 @@ namespace Emby.Xtream.Plugin.Service
                                     ErrorMessage = msg
                                 });
                             }
-                            Interlocked.Increment(ref _seriesProgress.Failed);
-                            Interlocked.Increment(ref _seriesProgress.Completed);
-                            ReportTaskProgress(_seriesProgress, taskProgress);
+                            Interlocked.Increment(ref sp.Failed);
+                            Interlocked.Increment(ref sp.Completed);
+                            ReportTaskProgress(sp, taskProgress);
                             return;
                         }
 
                         if (detail == null || detail.Episodes == null || detail.Episodes.Count == 0)
                         {
-                            Interlocked.Increment(ref _seriesProgress.Completed);
-                            ReportTaskProgress(_seriesProgress, taskProgress);
+                            Interlocked.Increment(ref sp.Completed);
+                            ReportTaskProgress(sp, taskProgress);
                             return;
                         }
 
@@ -905,11 +912,11 @@ namespace Emby.Xtream.Plugin.Service
                                     }
                                 }
                                 Interlocked.Increment(ref tsSkippedCount);
-                                Interlocked.Increment(ref _seriesProgress.Skipped);
-                                Interlocked.Increment(ref _seriesProgress.Completed);
-                                ReportTaskProgress(_seriesProgress, taskProgress);
-                                Interlocked.Add(ref _episodeProgress.Total, existingStrms.Length);
-                                Interlocked.Add(ref _episodeProgress.Skipped, existingStrms.Length);
+                                Interlocked.Increment(ref sp.Skipped);
+                                Interlocked.Increment(ref sp.Completed);
+                                ReportTaskProgress(sp, taskProgress);
+                                Interlocked.Add(ref ep.Total, existingStrms.Length);
+                                Interlocked.Add(ref ep.Skipped, existingStrms.Length);
                                 // Carry forward the stored hash (unchanged series)
                                 var seriesKey = series.SeriesId.ToString(CultureInfo.InvariantCulture);
                                 string carryHash;
@@ -941,11 +948,11 @@ namespace Emby.Xtream.Plugin.Service
                                         writtenPaths.Add(existingStrm);
                                     }
                                 }
-                                Interlocked.Increment(ref _seriesProgress.Skipped);
-                                Interlocked.Increment(ref _seriesProgress.Completed);
-                                ReportTaskProgress(_seriesProgress, taskProgress);
-                                Interlocked.Add(ref _episodeProgress.Total, existingStrms.Length);
-                                Interlocked.Add(ref _episodeProgress.Skipped, existingStrms.Length);
+                                Interlocked.Increment(ref sp.Skipped);
+                                Interlocked.Increment(ref sp.Completed);
+                                ReportTaskProgress(sp, taskProgress);
+                                Interlocked.Add(ref ep.Total, existingStrms.Length);
+                                Interlocked.Add(ref ep.Skipped, existingStrms.Length);
                                 Interlocked.Increment(ref hashSkippedCount);
                                 return;
                             }
@@ -999,15 +1006,15 @@ namespace Emby.Xtream.Plugin.Service
 
                                     if (!fileExists)
                                     {
-                                        Interlocked.Increment(ref _episodeProgress.Added);
+                                        Interlocked.Increment(ref ep.Added);
                                     }
                                 }
                                 else
                                 {
-                                    Interlocked.Increment(ref _episodeProgress.Skipped);
+                                    Interlocked.Increment(ref ep.Skipped);
                                 }
 
-                                Interlocked.Increment(ref _episodeProgress.Total);
+                                Interlocked.Increment(ref ep.Total);
 
                                 lock (writtenPaths)
                                 {
@@ -1018,15 +1025,15 @@ namespace Emby.Xtream.Plugin.Service
 
                         if (isNewSeries)
                         {
-                            Interlocked.Increment(ref _seriesProgress.Added);
+                            Interlocked.Increment(ref sp.Added);
                             lock (addedSeriesTitles)
                             {
                                 if (addedSeriesTitles.Count < 20) addedSeriesTitles.Add(cleanedName);
                             }
                         }
 
-                        Interlocked.Increment(ref _seriesProgress.Completed);
-                        ReportTaskProgress(_seriesProgress, taskProgress);
+                        Interlocked.Increment(ref sp.Completed);
+                        ReportTaskProgress(sp, taskProgress);
                     }
                     catch (OperationCanceledException)
                     {
@@ -1046,9 +1053,9 @@ namespace Emby.Xtream.Plugin.Service
                                 ErrorMessage = ex.Message
                             });
                         }
-                        Interlocked.Increment(ref _seriesProgress.Failed);
-                        Interlocked.Increment(ref _seriesProgress.Completed);
-                        ReportTaskProgress(_seriesProgress, taskProgress);
+                        Interlocked.Increment(ref sp.Failed);
+                        Interlocked.Increment(ref sp.Completed);
+                        ReportTaskProgress(sp, taskProgress);
                     }
                     finally
                     {
@@ -1062,11 +1069,11 @@ namespace Emby.Xtream.Plugin.Service
                 cancellationToken.ThrowIfCancellationRequested();
                 if (config.CleanupOrphans)
                 {
-                    _seriesProgress.Phase = "Cleaning up orphaned files";
+                    sp.Phase = "Cleaning up orphaned files";
                     var showsRoot = Path.Combine(config.StrmLibraryPath, GetSeriesRootFolderName(config));
                     var deletedEpisodes = CleanupOrphans(showsRoot, writtenPaths, config.OrphanSafetyThreshold);
-                    _seriesProgress.Deleted = deletedEpisodes;
-                    _episodeProgress.Deleted = deletedEpisodes;
+                    sp.Deleted = deletedEpisodes;
+                    ep.Deleted = deletedEpisodes;
                 }
 
                 // Persist the highest LastModified timestamp seen
@@ -1091,28 +1098,28 @@ namespace Emby.Xtream.Plugin.Service
                     _logger.Info("Series skip: {0} series unchanged by episode hash (already up to date on disk)", hashSkippedCount);
 
                 _logger.Info("Series STRM sync completed: {0} written, {1} skipped, {2} failed",
-                    _seriesProgress.Completed - _seriesProgress.Skipped, _seriesProgress.Skipped, _seriesProgress.Failed);
+                    sp.Completed - sp.Skipped, sp.Skipped, sp.Failed);
             }
             catch (OperationCanceledException)
             {
                 _logger.Info("Series STRM sync stopped by user request.");
-                _seriesProgress.Phase = "Stopped";
+                sp.Phase = "Stopped";
                 seriesSyncSuccess = false;
                 throw;
             }
             catch (Exception ex)
             {
                 _logger.Error("Series sync failed: {0}", ex.Message);
-                _seriesProgress.Phase = "Failed: " + ex.Message;
+                sp.Phase = "Failed: " + ex.Message;
                 seriesSyncSuccess = false;
                 throw;
             }
             finally
             {
-                _seriesProgress.IsRunning = false;
-                if (string.IsNullOrEmpty(_seriesProgress.AbortReason) && seriesSyncSuccess)
+                sp.IsRunning = false;
+                if (string.IsNullOrEmpty(sp.AbortReason) && seriesSyncSuccess)
                 {
-                    _seriesProgress.Phase = "Complete";
+                    sp.Phase = "Complete";
                 }
 
                 AddHistoryEntry(new SyncHistoryEntry
@@ -1121,17 +1128,17 @@ namespace Emby.Xtream.Plugin.Service
                     EndTime = DateTime.UtcNow,
                     Success = seriesSyncSuccess,
                     WasSeriesSync = true,
-                    SeriesTotal = _seriesProgress.Total,
-                    SeriesCompleted = _seriesProgress.Completed,
-                    SeriesAdded = _seriesProgress.Added,
-                    SeriesSkipped = _seriesProgress.Skipped,
-                    SeriesFailed = _seriesProgress.Failed,
-                    SeriesDeleted = _seriesProgress.Deleted,
-                    EpisodeTotal = _episodeProgress.Total,
-                    EpisodeAdded = _episodeProgress.Added,
-                    EpisodeSkipped = _episodeProgress.Skipped,
-                    EpisodeFailed = _episodeProgress.Failed,
-                    EpisodeDeleted = _episodeProgress.Deleted,
+                    SeriesTotal = sp.Total,
+                    SeriesCompleted = sp.Completed,
+                    SeriesAdded = sp.Added,
+                    SeriesSkipped = sp.Skipped,
+                    SeriesFailed = sp.Failed,
+                    SeriesDeleted = sp.Deleted,
+                    EpisodeTotal = ep.Total,
+                    EpisodeAdded = ep.Added,
+                    EpisodeSkipped = ep.Skipped,
+                    EpisodeFailed = ep.Failed,
+                    EpisodeDeleted = ep.Deleted,
                     AddedSeriesTitles = addedSeriesTitles,
                 });
                 EndSyncCancellation(syncCancellation);

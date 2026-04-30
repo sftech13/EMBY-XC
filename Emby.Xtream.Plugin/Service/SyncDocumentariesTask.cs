@@ -38,7 +38,7 @@ namespace Emby.Xtream.Plugin.Service
             }
 
             var svc = Plugin.Instance.StrmSyncService;
-            if (svc.MovieProgress.IsRunning)
+            if (svc.DocumentariesProgress.IsRunning || svc.MovieProgress.IsRunning)
             {
                 _logger.Info("Movie/documentary sync already running - skipping scheduled run.");
                 return;
@@ -55,7 +55,8 @@ namespace Emby.Xtream.Plugin.Service
                     config.StrmNamingVersion = docConfig.StrmNamingVersion;
                     Plugin.Instance.SaveConfiguration();
                 },
-                progress).ConfigureAwait(false);
+                progress,
+                isDocumentaries: true).ConfigureAwait(false);
 
             config.LastDocumentarySyncTimestamp = docConfig.LastMovieSyncTimestamp;
             config.StrmNamingVersion = docConfig.StrmNamingVersion;

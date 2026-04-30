@@ -1936,10 +1936,9 @@ function (BaseView, loading) {
             Series: '.syncSeriesResult',
             DocuSeries: '.syncDocuSeriesResult'
         };
-        var progressKey = type === 'Documentaries' ? 'Movies' : (type === 'DocuSeries' ? 'Series' : type);
         var resultEl = view.querySelector(resultMap[type]);
         return ApiClient.getJSON(ApiClient.getUrl('XC2EMBY/Sync/Status')).then(function (status) {
-            var progress = status[progressKey];
+            var progress = status[type];
             if (!progress) return;
             if (progress.IsRunning || progress.Total > 0) {
                 renderProgressBar(resultEl, progress);

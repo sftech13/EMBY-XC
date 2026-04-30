@@ -212,7 +212,9 @@ namespace Emby.Xtream.Plugin.Api
     public class SyncStatusResult
     {
         public SyncProgressInfo Movies { get; set; }
+        public SyncProgressInfo Documentaries { get; set; }
         public SyncProgressInfo Series { get; set; }
+        public SyncProgressInfo DocuSeries { get; set; }
     }
 
     public class SyncProgressInfo
@@ -510,7 +512,7 @@ namespace Emby.Xtream.Plugin.Api
                 return result;
             }
 
-            if (syncService.MovieProgress.IsRunning)
+            if (syncService.DocumentariesProgress.IsRunning || syncService.MovieProgress.IsRunning)
             {
                 result.Success = false;
                 result.Message = "A movie/documentary sync is already running.";
@@ -528,13 +530,14 @@ namespace Emby.Xtream.Plugin.Api
                         config.LastDocumentarySyncTimestamp = docConfig.LastMovieSyncTimestamp;
                         config.StrmNamingVersion = docConfig.StrmNamingVersion;
                         Plugin.Instance.SaveConfiguration();
-                    }).ConfigureAwait(false);
+                    },
+                    isDocumentaries: true).ConfigureAwait(false);
 
                 config.LastDocumentarySyncTimestamp = docConfig.LastMovieSyncTimestamp;
                 config.StrmNamingVersion = docConfig.StrmNamingVersion;
                 Plugin.Instance.SaveConfiguration();
 
-                var progress = syncService.MovieProgress;
+                var progress = syncService.DocumentariesProgress;
                 if (!string.IsNullOrEmpty(progress.AbortReason))
                 {
                     result.Success = false;
@@ -552,7 +555,7 @@ namespace Emby.Xtream.Plugin.Api
             }
             catch (OperationCanceledException)
             {
-                var progress = syncService.MovieProgress;
+                var progress = syncService.DocumentariesProgress;
                 result.Success = false;
                 result.Message = "Documentary sync stopped.";
                 result.Total = progress.Total;
@@ -647,7 +650,7 @@ namespace Emby.Xtream.Plugin.Api
                 return result;
             }
 
-            if (syncService.SeriesProgress.IsRunning)
+            if (syncService.DocuSeriesProgress.IsRunning || syncService.SeriesProgress.IsRunning)
             {
                 result.Success = false;
                 result.Message = "A TV show/docu series sync is already running.";
@@ -666,14 +669,15 @@ namespace Emby.Xtream.Plugin.Api
                         config.DocuSeriesEpisodeHashesJson = docuConfig.SeriesEpisodeHashesJson;
                         config.StrmNamingVersion = docuConfig.StrmNamingVersion;
                         Plugin.Instance.SaveConfiguration();
-                    }).ConfigureAwait(false);
+                    },
+                    isDocuSeries: true).ConfigureAwait(false);
 
                 config.LastDocuSeriesSyncTimestamp = docuConfig.LastSeriesSyncTimestamp;
                 config.DocuSeriesEpisodeHashesJson = docuConfig.SeriesEpisodeHashesJson;
                 config.StrmNamingVersion = docuConfig.StrmNamingVersion;
                 Plugin.Instance.SaveConfiguration();
 
-                var progress = syncService.SeriesProgress;
+                var progress = syncService.DocuSeriesProgress;
                 if (!string.IsNullOrEmpty(progress.AbortReason))
                 {
                     result.Success = false;
@@ -691,7 +695,7 @@ namespace Emby.Xtream.Plugin.Api
             }
             catch (OperationCanceledException)
             {
-                var progress = syncService.SeriesProgress;
+                var progress = syncService.DocuSeriesProgress;
                 result.Success = false;
                 result.Message = "Docu Series sync stopped.";
                 result.Total = progress.Total;
@@ -731,7 +735,9 @@ namespace Emby.Xtream.Plugin.Api
         {
             var syncService = Plugin.Instance.StrmSyncService;
             var movieProg = syncService.MovieProgress;
+            var docProg = syncService.DocumentariesProgress;
             var seriesProg = syncService.SeriesProgress;
+            var docuProg = syncService.DocuSeriesProgress;
 
             return new SyncStatusResult
             {
@@ -744,6 +750,15 @@ namespace Emby.Xtream.Plugin.Api
                     Failed = movieProg.Failed,
                     IsRunning = movieProg.IsRunning,
                 },
+                Documentaries = new SyncProgressInfo
+                {
+                    Phase = docProg.Phase,
+                    Total = docProg.Total,
+                    Completed = docProg.Completed,
+                    Skipped = docProg.Skipped,
+                    Failed = docProg.Failed,
+                    IsRunning = docProg.IsRunning,
+                },
                 Series = new SyncProgressInfo
                 {
                     Phase = seriesProg.Phase,
@@ -752,6 +767,15 @@ namespace Emby.Xtream.Plugin.Api
                     Skipped = seriesProg.Skipped,
                     Failed = seriesProg.Failed,
                     IsRunning = seriesProg.IsRunning,
+                },
+                DocuSeries = new SyncProgressInfo
+                {
+                    Phase = docuProg.Phase,
+                    Total = docuProg.Total,
+                    Completed = docuProg.Completed,
+                    Skipped = docuProg.Skipped,
+                    Failed = docuProg.Failed,
+                    IsRunning = docuProg.IsRunning,
                 },
             };
         }
@@ -764,7 +788,8 @@ namespace Emby.Xtream.Plugin.Api
         public async Task<object> Post(RetryFailed request)
         {
             var syncService = Plugin.Instance.StrmSyncService;
-            if (syncService.MovieProgress.IsRunning || syncService.SeriesProgress.IsRunning)
+            if (syncService.MovieProgress.IsRunning || syncService.DocumentariesProgress.IsRunning ||
+                syncService.SeriesProgress.IsRunning || syncService.DocuSeriesProgress.IsRunning)
                 return new SyncResult { Success = false, Message = "A sync is already running." };
             if (syncService.FailedItems.Count == 0)
                 return new SyncResult { Success = false, Message = "No failed items to retry." };

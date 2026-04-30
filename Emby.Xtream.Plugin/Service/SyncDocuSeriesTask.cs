@@ -38,7 +38,7 @@ namespace Emby.Xtream.Plugin.Service
             }
 
             var svc = Plugin.Instance.StrmSyncService;
-            if (svc.SeriesProgress.IsRunning)
+            if (svc.DocuSeriesProgress.IsRunning || svc.SeriesProgress.IsRunning)
             {
                 _logger.Info("TV show/docu series sync already running - skipping scheduled run.");
                 return;
@@ -56,7 +56,8 @@ namespace Emby.Xtream.Plugin.Service
                     config.StrmNamingVersion = docConfig.StrmNamingVersion;
                     Plugin.Instance.SaveConfiguration();
                 },
-                progress).ConfigureAwait(false);
+                progress,
+                isDocuSeries: true).ConfigureAwait(false);
 
             config.LastDocuSeriesSyncTimestamp = docConfig.LastSeriesSyncTimestamp;
             config.DocuSeriesEpisodeHashesJson = docConfig.SeriesEpisodeHashesJson;
