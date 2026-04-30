@@ -5,8 +5,8 @@
     <LangVersion>7.3</LangVersion>
     <AssemblyName>XC2EMBY.Plugin</AssemblyName>
     <RootNamespace>Emby.Xtream.Plugin</RootNamespace>
-    <VersionPrefix>1.1.11</VersionPrefix>
-    <VersionSuffix></VersionSuffix>
+    <VersionPrefix>1.1.12</VersionPrefix>
+    <VersionSuffix>beta.1</VersionSuffix>
     <Version Condition="'$(VersionSuffix)' == ''">$(VersionPrefix)</Version>
     <Version Condition="'$(VersionSuffix)' != ''">$(VersionPrefix)-$(VersionSuffix)</Version>
     <AssemblyVersion>$(VersionPrefix).0</AssemblyVersion>

@@ -9,7 +9,6 @@ namespace Emby.Xtream.Plugin.Service
 {
     internal sealed class LocalMediaFilter
     {
-        private static readonly Regex StripYear = new Regex(@"\b(19|20)\d{2}\b", RegexOptions.Compiled);
         private static readonly Regex StripNonAlpha = new Regex(@"[^a-z0-9\s]", RegexOptions.Compiled);
         private static readonly Regex CollapseSpace = new Regex(@"\s+", RegexOptions.Compiled);
 
@@ -59,11 +58,9 @@ namespace Emby.Xtream.Plugin.Service
                 foreach (var item in movies)
                 {
                     string id;
-                    if (item.ProviderIds != null && item.ProviderIds.TryGetValue("Tmdb", out id) && !string.IsNullOrEmpty(id))
+                    if (TryGetProviderId(item.ProviderIds, "Tmdb", out id))
                         movieTmdbIds.Add(id);
-                    var norm = NormalizeTitle(item.Name);
-                    if (!string.IsNullOrEmpty(norm))
-                        movieTitles.Add(norm);
+                    AddTitleKeys(movieTitles, item.Name, item.ProductionYear);
                 }
 
                 var series = libraryManager.GetItemList(new InternalItemsQuery
@@ -74,11 +71,9 @@ namespace Emby.Xtream.Plugin.Service
                 foreach (var item in series)
                 {
                     string id;
-                    if (item.ProviderIds != null && item.ProviderIds.TryGetValue("Tmdb", out id) && !string.IsNullOrEmpty(id))
+                    if (TryGetProviderId(item.ProviderIds, "Tmdb", out id))
                         seriesTmdbIds.Add(id);
-                    var norm = NormalizeTitle(item.Name);
-                    if (!string.IsNullOrEmpty(norm))
-                        seriesTitles.Add(norm);
+                    AddTitleKeys(seriesTitles, item.Name, item.ProductionYear);
                 }
 
                 logger.Info("Local media filter: {0} movies ({1} TMDB IDs), {2} series ({3} TMDB IDs) from Emby library",
@@ -112,10 +107,42 @@ namespace Emby.Xtream.Plugin.Service
         {
             if (string.IsNullOrWhiteSpace(title)) return string.Empty;
             var s = title.ToLowerInvariant();
-            s = StripYear.Replace(s, " ");
             s = StripNonAlpha.Replace(s, " ");
             s = CollapseSpace.Replace(s, " ");
             return s.Trim();
+        }
+
+        private static bool TryGetProviderId(Dictionary<string, string> providerIds, string key, out string id)
+        {
+            id = null;
+            if (providerIds == null)
+                return false;
+
+            foreach (var pair in providerIds)
+            {
+                if (string.Equals(pair.Key, key, StringComparison.OrdinalIgnoreCase) &&
+                    !string.IsNullOrWhiteSpace(pair.Value))
+                {
+                    id = pair.Value.Trim();
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static void AddTitleKeys(HashSet<string> titles, string name, int? productionYear)
+        {
+            var titleOnly = NormalizeTitle(name);
+            if (!string.IsNullOrEmpty(titleOnly))
+                titles.Add(titleOnly);
+
+            if (productionYear.HasValue && productionYear.Value > 0)
+            {
+                var withYear = NormalizeTitle(name + " " + productionYear.Value);
+                if (!string.IsNullOrEmpty(withYear))
+                    titles.Add(withYear);
+            }
         }
     }
 }
