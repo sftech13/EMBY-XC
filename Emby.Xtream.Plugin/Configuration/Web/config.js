@@ -618,6 +618,7 @@ function (BaseView, loading) {
             view.querySelector('.txtOrphanSafetyThreshold').value = Math.round((config.OrphanSafetyThreshold || 0.20) * 100);
             view.querySelector('.orphanThresholdContainer').style.display = config.CleanupOrphans ? '' : 'none';
             setChecked(view.querySelector('.chkEnableNfoFiles'), !!config.EnableNfoFiles);
+            setChecked(view.querySelector('.chkEnableLocalMediaFilter'), !!config.EnableLocalMediaFilter);
 
             // Auto-sync schedule
             setChecked(view.querySelector('.chkAutoSyncEnabled'), !!config.AutoSyncEnabled);
@@ -734,6 +735,7 @@ function (BaseView, loading) {
             config.CleanupOrphans = view.querySelector('.chkCleanupOrphans').checked;
             config.OrphanSafetyThreshold = (parseInt(view.querySelector('.txtOrphanSafetyThreshold').value, 10) || 0) / 100;
             config.EnableNfoFiles = view.querySelector('.chkEnableNfoFiles').checked;
+            config.EnableLocalMediaFilter = view.querySelector('.chkEnableLocalMediaFilter').checked;
 
             // Auto-sync schedule
             config.AutoSyncEnabled = view.querySelector('.chkAutoSyncEnabled').checked;

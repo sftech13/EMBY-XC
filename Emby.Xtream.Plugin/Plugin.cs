@@ -303,6 +303,7 @@ namespace Emby.Xtream.Plugin
             target.LastInstalledVersion = source.LastInstalledVersion;
             target.UseBetaChannel = source.UseBetaChannel;
             target.SmartSkipExisting = source.SmartSkipExisting;
+            target.EnableLocalMediaFilter = source.EnableLocalMediaFilter;
             target.SyncParallelism = source.SyncParallelism;
             target.CleanupOrphans = source.CleanupOrphans;
             target.OrphanSafetyThreshold = source.OrphanSafetyThreshold;

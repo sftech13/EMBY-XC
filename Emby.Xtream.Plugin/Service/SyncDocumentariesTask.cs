@@ -84,6 +84,7 @@ namespace Emby.Xtream.Plugin.Service
                 EnableTmdbFallbackLookup = source.EnableTmdbFallbackLookup,
                 EnableNfoFiles = source.EnableNfoFiles,
                 SmartSkipExisting = source.SmartSkipExisting,
+                EnableLocalMediaFilter = source.EnableLocalMediaFilter,
                 SyncParallelism = source.SyncParallelism,
                 CleanupOrphans = source.CleanupOrphans,
                 OrphanSafetyThreshold = source.OrphanSafetyThreshold,

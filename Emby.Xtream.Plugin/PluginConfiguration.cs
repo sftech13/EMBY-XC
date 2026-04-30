@@ -99,6 +99,7 @@ namespace Emby.Xtream.Plugin
 
         // Sync settings
         public bool SmartSkipExisting { get; set; } = true;
+        public bool EnableLocalMediaFilter { get; set; }
         public int SyncParallelism { get; set; } = 3;
         public bool CleanupOrphans { get; set; }
 

@@ -418,6 +418,13 @@ namespace Emby.Xtream.Plugin.Service
 
                 _logger.Info("Starting movie STRM sync for {0} streams", allStreams.Count);
 
+                LocalMediaFilter localFilter = null;
+                if (config.EnableLocalMediaFilter)
+                {
+                    mp.Phase = "Scanning Emby library";
+                    localFilter = LocalMediaFilter.Build(_logger);
+                }
+
                 var writtenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var semaphore = new SemaphoreSlim(config.SyncParallelism);
 
@@ -434,6 +441,14 @@ namespace Emby.Xtream.Plugin.Service
                         if (string.IsNullOrWhiteSpace(movieName))
                         {
                             Interlocked.Increment(ref mp.Failed);
+                            Interlocked.Increment(ref mp.Completed);
+                            ReportTaskProgress(mp, taskProgress);
+                            return;
+                        }
+
+                        if (localFilter != null && localFilter.ContainsMovie(movie.TmdbId, cleanedName))
+                        {
+                            Interlocked.Increment(ref mp.Skipped);
                             Interlocked.Increment(ref mp.Completed);
                             ReportTaskProgress(mp, taskProgress);
                             return;
@@ -741,6 +756,13 @@ namespace Emby.Xtream.Plugin.Service
                     _logger.Info("Starting series STRM sync for {0} series", allSeries.Count);
                 }
 
+                LocalMediaFilter localSeriesFilter = null;
+                if (config.EnableLocalMediaFilter)
+                {
+                    sp.Phase = "Scanning Emby library";
+                    localSeriesFilter = LocalMediaFilter.Build(_logger);
+                }
+
                 var writtenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var semaphore = new SemaphoreSlim(config.SyncParallelism);
 
@@ -774,6 +796,14 @@ namespace Emby.Xtream.Plugin.Service
                         if (subFolder == null)
                         {
                             Interlocked.Increment(ref noFolderSkippedCount);
+                            Interlocked.Increment(ref sp.Skipped);
+                            Interlocked.Increment(ref sp.Completed);
+                            ReportTaskProgress(sp, taskProgress);
+                            return;
+                        }
+
+                        if (localSeriesFilter != null && localSeriesFilter.ContainsSeries(series.TmdbId, cleanedName))
+                        {
                             Interlocked.Increment(ref sp.Skipped);
                             Interlocked.Increment(ref sp.Completed);
                             ReportTaskProgress(sp, taskProgress);

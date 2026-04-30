@@ -1122,6 +1122,7 @@ namespace Emby.Xtream.Plugin.Api
                 CachedVodCategories = source.CachedVodCategories,
                 CachedSeriesCategories = source.CachedSeriesCategories,
                 SmartSkipExisting = source.SmartSkipExisting,
+                EnableLocalMediaFilter = source.EnableLocalMediaFilter,
                 SyncParallelism = source.SyncParallelism,
                 CleanupOrphans = source.CleanupOrphans,
                 OrphanSafetyThreshold = source.OrphanSafetyThreshold,
