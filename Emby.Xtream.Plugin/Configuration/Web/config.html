@@ -404,18 +404,29 @@
                     <div class="dashboardFailedItemsCard dashboard-card" style="display:none; border-color:rgba(204,0,0,0.3);">
                         <h3 style="color:#cc4444;">Failed Items</h3>
                         <div class="dashboardFailedItemsContent"></div>
-                        <button class="btnRetryFailed raised button-submit" is="emby-button" type="button" style="margin-top:0.8em;">
-                            <span>Retry Failed Items</span>
-                        </button>
+                        <div style="display:flex; gap:0.5em; flex-wrap:wrap; margin-top:0.8em;">
+                            <button class="btnRetryFailed raised button-submit" is="emby-button" type="button">
+                                <span>Retry Failed Items</span>
+                            </button>
+                            <button class="btnClearFailedItems raised button-secondary" is="emby-button" type="button">
+                                <span>Clear Failed Items</span>
+                            </button>
+                        </div>
                         <div class="retryFailedResult" style="margin-top:0.5em;"></div>
                     </div>
 
                     <!-- Sync History -->
                     <div class="dashboard-card">
-                        <h3>Sync History</h3>
+                        <div style="display:flex; align-items:center; justify-content:space-between; gap:0.8em; flex-wrap:wrap;">
+                            <h3 style="margin-bottom:0;">Sync History</h3>
+                            <button class="btnClearSyncHistory raised button-secondary" is="emby-button" type="button" style="display:none;">
+                                <span>Clear History</span>
+                            </button>
+                        </div>
                         <div class="dashboardHistoryContent">
                             <div style="opacity:0.5;">No sync history yet</div>
                         </div>
+                        <div class="clearSyncHistoryResult" style="margin-top:0.5em;"></div>
                     </div>
                 </div>
 

@@ -6,7 +6,7 @@
 
 <p align="center">
   An Emby Server plugin that connects directly to any Xtream-compatible IPTV provider.<br/>
-  Live TV with guide data, background codec detection, VOD movie sync, and series sync — all from one config page.
+  Live TV with guide data, background codec detection, VOD movie/documentary sync, and TV/docu-series sync — all from one config page.
 </p>
 
 <p align="center">
@@ -35,6 +35,7 @@
 - [Codec Detection & OSD Display](#codec-detection--osd-display)
 - [Folder Modes](#folder-modes)
 - [Metadata & NFO Files](#metadata--nfo-files)
+- [Local Media Filtering](#local-media-filtering)
 - [Orphan Cleanup](#orphan-cleanup)
 - [Update Checker](#update-checker)
 - [Development & Releases](#development--releases)
@@ -67,10 +68,12 @@
 
 ### VOD Movies
 - Syncs Xtream VOD catalog into `.strm` files for Emby library scanning
-- Three folder layout modes: single flat folder, per-category folders, or fully custom category-to-folder mapping
+- Two folder layout modes in the UI: single folder or custom multi-folder category mapping
 - Smart delta sync — only processes items added since the last run
+- Optional **Skip Local Media** filter skips XC items already present in your Emby library
 - Optional TMDb folder naming (`Movie Title [tmdbid=123]`) with fallback lookup through Emby
 - Optional Kodi-compatible `.nfo` sidecar files
+- **Stop Sync** can cancel an active STRM write
 - One-click deletion of all synced content from the Movies tab
 
 ### Documentary Movies
@@ -79,11 +82,12 @@
 
 ### TV Shows
 - Syncs Xtream series into `Show/Season XX/Episode.strm` folder structure
-- Same three folder modes as movies, plus TVDb/TMDb folder naming
+- Same folder modes as movies, plus TVDb/TMDb folder naming
 - Episode hash detection skips unchanged series even when the provider bumps timestamps
 - TVDb ID manual overrides per series name
 - Optional TVDb and TMDB fallback lookups through Emby's provider stack
 - Optional `tvshow.nfo` sidecar files
+- **Stop Sync** can cancel an active STRM write
 
 ### Docu Series
 - Uses the same series sync engine as TV Shows, with separate enable switch, category selection, folder mappings, root folder, delete action, delta timestamp, and episode hash cache
@@ -111,8 +115,8 @@ Download `XC2EMBY.Plugin.dll` from the [latest release](../../releases/latest). 
 Requires .NET SDK 8.0+. The plugin targets .NET Standard 2.0 for Emby compatibility.
 
 ```bash
-git clone https://github.com/sftech13/emby-xtream.git
-cd emby-xtream
+git clone https://github.com/sftech13/EMBY-XC.git
+cd EMBY-XC
 dotnet build Emby.Xtream.Plugin/Emby.Xtream.Plugin.csproj -c Release
 # Output: artifacts/bin/Release/netstandard2.0/XC2EMBY.Plugin.dll
 ```
@@ -171,9 +175,13 @@ Click **Test Connection** to verify credentials before saving.
 
 #### STRM Library Path
 
-The base directory where Movies and TV Shows folders will be created. Example: `/media/xtream` -> movies go to `/media/xtream/Movies`, series go to `/media/xtream/TV Shows`.
+The base directory where Movies, Documentaries, TV Shows, and Docu Series folders will be created. Example: `/media/xtream` -> movies go to `/media/xtream/Movies`, series go to `/media/xtream/TV Shows`.
 
-Use the **Browse** button to navigate the server filesystem. Click **Validate** (or tab away from the field) to confirm the path is writable.
+Use the **Browse** buttons to navigate the server filesystem for the root path and each content folder field. The path is validated automatically when it changes.
+
+Folder fields can be either:
+- a folder name under the STRM library root, such as `Movies`
+- a full absolute path, such as `/media/Movies`
 
 #### Guide (EPG)
 
@@ -230,7 +238,7 @@ Enables VOD movie sync to `.strm` files.
 
 #### Folder Mode
 
-Three modes control how movies are organized on disk. See [Folder Modes](#folder-modes) for a full explanation with examples.
+Two modes control how movies are organized on disk. See [Folder Modes](#folder-modes) for a full explanation with examples.
 
 #### Category Selection
 
@@ -238,7 +246,7 @@ Click **Refresh Categories** to load available VOD categories. Select which cate
 
 Use the search box to filter by name. **Select All** / **Deselect All** buttons are available.
 
-> An orange badge on the category count means no categories are selected — only relevant in Custom folder mode where unselected categories are skipped.
+> An orange badge on the category count means no categories are selected — only relevant in Multiple Folders mode where unmapped categories are skipped.
 
 #### Metadata Options
 
@@ -246,7 +254,8 @@ Use the search box to filter by name. **Select All** / **Deselect All** buttons 
 |---|---|
 | TMDB Folder Naming | Appends `[tmdbid=12345]` to movie folder names for Emby metadata matching |
 | TMDB Fallback Lookup | When a movie has no TMDB ID from the provider, queries Emby's TheMovieDb provider to find one (slower) |
-| Write NFO Files | Creates a Kodi-compatible `movie.nfo` sidecar with title, year, and TMDB ID |
+| Write NFO Files | Creates Kodi-compatible `.nfo` sidecars with title and metadata IDs |
+| Skip Local Media | Skips XC movies already present in your Emby library, matching by TMDB ID first and normalized title/year fallback |
 
 #### Content Name Cleaning
 
@@ -254,7 +263,8 @@ Optional cleaning applied to movie titles before they are used as folder and fil
 
 #### Sync Controls
 
-- **Sync Now** — full sync: processes all selected categories, writes files, updates the delta sync timestamp, and runs orphan cleanup if enabled.
+- **Sync Now** — runs the movie sync, writes needed files, updates the delta sync timestamp, and runs orphan cleanup if enabled.
+- **Stop Sync** — requests cancellation of the active STRM sync. The current file operation may finish before the sync stops.
 
 ---
 
@@ -318,8 +328,10 @@ Shows whether auto-sync is enabled and when the next run is scheduled. See [Auto
 
 | Button | Action |
 |---|---|
-| Sync All | Triggers both movie and series sync immediately (if each is enabled) |
+| Sync Enabled Libraries | Runs enabled Movies, Documentaries, TV Shows, and Docu Series syncs in sequence |
 | Retry Failed | Re-runs only the items that failed during the last sync |
+| Clear Failed Items | Clears the failed item list without retrying |
+| Clear History | Clears stored sync history |
 | Download Logs | Downloads a sanitized copy of the Emby log file with credentials redacted |
 
 ---
@@ -343,7 +355,7 @@ Enables scheduled sync runs without manual intervention.
 | Interval (hours) | 24 | Hours between runs (interval mode only, 1–168) |
 | Daily Time | 03:00 | HH:mm in server local time (daily mode only) |
 
-Auto-sync only runs the sync types that are individually enabled (Movies and/or Series). It uses the same parallelism, orphan cleanup, and smart-skip settings as manual syncs.
+Auto-sync only runs the sync types that are individually enabled: Movies, Documentaries, TV Shows, and Docu Series. It uses the same parallelism, orphan cleanup, smart-skip, and local-media filter settings as manual syncs.
 
 ---
 
@@ -425,9 +437,11 @@ Use **Clear Codec Cache** on the Live TV tab to force fresh probes for all chann
 
 ## Folder Modes
 
-Both Movies and Series support three folder layout modes.
+Movies, Documentaries, TV Shows, and Docu Series support two folder layout modes in the UI.
 
-### Single (flat)
+The configuration reader still accepts the older internal value `multiple` for compatibility, but the current config page uses **Single Folder** and **Multiple Folders** only. The Multiple Folders card stores custom per-folder category assignments.
+
+### Single Folder
 
 All content in one folder under Movies or TV Shows:
 
@@ -442,26 +456,7 @@ All content in one folder under Movies or TV Shows:
         Series Name - S01E01 - Episode Title.strm
 ```
 
-### Multiple (per-category)
-
-One subfolder per provider category:
-
-```
-{StrmLibraryPath}/
-  Movies/
-    Action/
-      Movie Title (2023)/
-        Movie Title (2023).strm
-    Comedy/
-      ...
-  TV Shows/
-    Drama/
-      Series Name/
-        Season 01/
-          ...
-```
-
-### Custom (manual mapping)
+### Multiple Folders
 
 You define which categories go into which folder. Enter mappings in the text area:
 
@@ -474,7 +469,7 @@ Foreign=3001,3002,3003
 
 Each line: `FolderName=CategoryId1,CategoryId2,...`
 
-Categories not mapped to any folder are skipped. If no mappings are defined and Custom mode is active, the sync will abort with a configuration error rather than silently doing nothing.
+In the UI this is managed with **+ Add Folder** and category checkboxes after **Refresh Categories**. Categories not mapped to any folder are skipped. If no folders/mappings are defined while Multiple Folders is active, the sync aborts with a configuration error rather than silently doing nothing.
 
 Result:
 ```
@@ -531,14 +526,14 @@ These take priority over all automatic lookups.
 
 ### NFO Sidecar Files
 
-When **Write NFO Files** is enabled, a Kodi-compatible XML sidecar is created alongside each movie/series folder. Existing NFO files are never overwritten (preserves any manual edits).
+When **Write NFO Files** is enabled, Kodi-compatible XML sidecars are created when a metadata ID is available. Existing NFO files are never overwritten, preserving manual edits.
 
-**Movie NFO (`movie.nfo`):**
+**Movie NFO (`<Movie Folder Name>.nfo`):**
 ```xml
 <movie>
   <title>The Dark Knight</title>
   <year>2008</year>
-  <tmdbid>155</tmdbid>
+  <uniqueid type="tmdb" default="true">155</uniqueid>
 </movie>
 ```
 
@@ -546,9 +541,24 @@ When **Write NFO Files** is enabled, a Kodi-compatible XML sidecar is created al
 ```xml
 <tvshow>
   <title>Breaking Bad</title>
-  <tvdbid>81189</tvdbid>
+  <uniqueid type="tvdb" default="true">81189</uniqueid>
 </tvshow>
 ```
+
+---
+
+## Local Media Filtering
+
+When **Skip Local Media** is enabled, the sync scans the current Emby library at the start of each run and builds lookup sets for existing movies and series.
+
+Matching order:
+1. TMDB ID, when both the XC item and Emby library item have one
+2. Normalized title with production year, such as `3 10 to yuma 2007`
+3. Normalized title without year as a fallback
+
+Years are preserved during matching to reduce false positives between remakes or same-name titles. For example, `3:10 to Yuma (1957)` and `3:10 to Yuma (2007)` are treated as different items when Emby has production years.
+
+Skipped local matches are counted as `Skipped` in sync progress. For series, the local-media check happens before fetching per-series episode details, reducing provider API calls.
 
 ---
 
@@ -579,7 +589,7 @@ Smart skip and orphan cleanup work together:
 
 The Dashboard tab includes a built-in update checker that queries GitHub releases.
 
-- Checks the `sftech13/emby-xtream` repository for new releases
+- Checks the `sftech13/EMBY-XC` repository for new releases
 - **Beta Channel** — when enabled, also checks pre-releases in addition to stable releases
 - Shows available version, release notes link, and a one-click **Install Update** button
 - Install downloads the new DLL and replaces the installed file atomically, then prompts for an Emby restart
@@ -655,7 +665,7 @@ Complete list of all configuration fields.
 | `StrmLibraryPath` | string | `"/config/xtream"` | Base output path |
 | `MovieRootFolderName` | string | `"Movies"` | Root folder name under `StrmLibraryPath` |
 | `SelectedVodCategoryIds` | int[] | `[]` | VOD categories to sync (empty = all) |
-| `MovieFolderMode` | string | `"single"` | `"single"`, `"multiple"`, or `"custom"` |
+| `MovieFolderMode` | string | `"single"` | `"single"` or `"custom"` (`"multiple"` accepted for legacy configs) |
 | `MovieFolderMappings` | string | `""` | Custom mappings (`FolderName=Cat1,Cat2`) |
 | `EnableTmdbFolderNaming` | bool | `false` | Add `[tmdbid=...]` to movie folders |
 | `EnableTmdbFallbackLookup` | bool | `false` | Look up missing TMDB IDs via Emby |
@@ -667,7 +677,7 @@ Complete list of all configuration fields.
 | `SyncDocumentaries` | bool | `false` | Enable documentary movie sync |
 | `DocumentaryRootFolderName` | string | `"Documentaries"` | Root folder name under `StrmLibraryPath` |
 | `SelectedDocumentaryCategoryIds` | int[] | `[]` | VOD categories to sync as documentaries |
-| `DocumentaryFolderMode` | string | `"single"` | `"single"`, `"multiple"`, or `"custom"` |
+| `DocumentaryFolderMode` | string | `"single"` | `"single"` or `"custom"` (`"multiple"` accepted for legacy configs) |
 | `DocumentaryFolderMappings` | string | `""` | Custom mappings |
 
 ### TV Shows
@@ -677,7 +687,7 @@ Complete list of all configuration fields.
 | `SyncSeries` | bool | `false` | Enable series sync |
 | `SeriesRootFolderName` | string | `"TV Shows"` | Root folder name under `StrmLibraryPath` |
 | `SelectedSeriesCategoryIds` | int[] | `[]` | Series categories to sync (empty = all) |
-| `SeriesFolderMode` | string | `"single"` | `"single"`, `"multiple"`, or `"custom"` |
+| `SeriesFolderMode` | string | `"single"` | `"single"` or `"custom"` (`"multiple"` accepted for legacy configs) |
 | `SeriesFolderMappings` | string | `""` | Custom mappings |
 | `EnableSeriesIdFolderNaming` | bool | `false` | Add `[tvdbid=...]` or `[tmdbid=...]` to series folders |
 | `EnableSeriesMetadataLookup` | bool | `false` | Look up missing TVDb IDs via Emby |
@@ -690,7 +700,7 @@ Complete list of all configuration fields.
 | `SyncDocuSeries` | bool | `false` | Enable documentary series sync |
 | `DocuSeriesRootFolderName` | string | `"Docu Series"` | Root folder name under `StrmLibraryPath` |
 | `SelectedDocuSeriesCategoryIds` | int[] | `[]` | Series categories to sync as docu series |
-| `DocuSeriesFolderMode` | string | `"single"` | `"single"`, `"multiple"`, or `"custom"` |
+| `DocuSeriesFolderMode` | string | `"single"` | `"single"` or `"custom"` (`"multiple"` accepted for legacy configs) |
 | `DocuSeriesFolderMappings` | string | `""` | Custom mappings |
 
 ### Shared Sync
@@ -700,7 +710,8 @@ Complete list of all configuration fields.
 | `EnableNfoFiles` | bool | `false` | Write `.nfo` sidecar files |
 | `EnableContentNameCleaning` | bool | `false` | Clean box-style prefixes from titles |
 | `ContentRemoveTerms` | string | `""` | Custom title terms to remove (one per line) |
-| `SmartSkipExisting` | bool | `true` | Delta sync — only process new items |
+| `SmartSkipExisting` | bool | `true` | Skip re-writing existing unchanged STRM files |
+| `EnableLocalMediaFilter` | bool | `false` | Skip XC items already present in the Emby library |
 | `SyncParallelism` | int | `3` | Max concurrent sync tasks (1–10) |
 | `CleanupOrphans` | bool | `false` | Delete files removed from provider |
 | `OrphanSafetyThreshold` | double | `0.20` | Max orphan % before skipping cleanup |
@@ -752,13 +763,16 @@ All endpoints require Emby authentication. Base path: `/XC2EMBY/`
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/XC2EMBY/Sync/Movies` | Full movie sync |
-| POST | `/XC2EMBY/Sync/Documentaries` | Full documentary movie sync |
-| POST | `/XC2EMBY/Sync/Series` | Full TV show sync |
-| POST | `/XC2EMBY/Sync/DocuSeries` | Full docu series sync |
+| POST | `/XC2EMBY/Sync/Movies` | Run movie sync |
+| POST | `/XC2EMBY/Sync/Documentaries` | Run documentary movie sync |
+| POST | `/XC2EMBY/Sync/Series` | Run TV show sync |
+| POST | `/XC2EMBY/Sync/DocuSeries` | Run docu series sync |
+| POST | `/XC2EMBY/Sync/Stop` | Request cancellation of the active STRM sync |
 | GET | `/XC2EMBY/Sync/Status` | Live sync progress |
 | GET | `/XC2EMBY/Sync/FailedItems` | Items that failed last sync |
 | POST | `/XC2EMBY/Sync/RetryFailed` | Retry failed items |
+| POST | `/XC2EMBY/Sync/ClearFailedItems` | Clear failed item list |
+| POST | `/XC2EMBY/Sync/ClearHistory` | Clear stored sync history |
 
 ### Cache
 

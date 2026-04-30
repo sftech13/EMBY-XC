@@ -21,8 +21,8 @@ namespace Emby.Xtream.Plugin.Service
 
     public static class UpdateChecker
     {
-        private const string GitHubApiUrl = "https://api.github.com/repos/sftech13/emby-xtream/releases/latest";
-        private const string GitHubAllReleasesUrl = "https://api.github.com/repos/sftech13/emby-xtream/releases";
+        private const string GitHubApiUrl = "https://api.github.com/repos/sftech13/EMBY-XC/releases/latest";
+        private const string GitHubAllReleasesUrl = "https://api.github.com/repos/sftech13/EMBY-XC/releases";
         private const string DllAssetName = "XC2EMBY.Plugin.dll";
         private static readonly TimeSpan CacheTtl = TimeSpan.FromHours(1);
 

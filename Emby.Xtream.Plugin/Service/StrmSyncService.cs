@@ -285,6 +285,14 @@ namespace Emby.Xtream.Plugin.Service
             get { lock (_failedItemsLock) { return _failedItems.ToList(); } }
         }
 
+        public void ClearFailedItems()
+        {
+            lock (_failedItemsLock)
+            {
+                _failedItems.Clear();
+            }
+        }
+
         // Lazy-loaded from PluginConfiguration.SyncHistoryJson so history survives restarts.
         // Must be called inside _historyLock.
         private List<SyncHistoryEntry> GetOrLoadHistory()
@@ -314,6 +322,24 @@ namespace Emby.Xtream.Plugin.Service
             lock (_historyLock)
             {
                 return new List<SyncHistoryEntry>(GetOrLoadHistory());
+            }
+        }
+
+        public void ClearSyncHistory()
+        {
+            lock (_historyLock)
+            {
+                GetOrLoadHistory().Clear();
+            }
+
+            try
+            {
+                Plugin.Instance.Configuration.SyncHistoryJson = string.Empty;
+                Plugin.Instance.SaveConfiguration();
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug("Failed to clear sync history: {0}", ex.Message);
             }
         }
 

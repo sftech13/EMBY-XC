@@ -332,6 +332,14 @@ function (BaseView, loading) {
             retryFailed(view);
         });
 
+        view.querySelector('.btnClearFailedItems').addEventListener('click', function () {
+            clearFailedItems(view);
+        });
+
+        view.querySelector('.btnClearSyncHistory').addEventListener('click', function () {
+            clearSyncHistory(view);
+        });
+
         // Download sanitized log button
         view.querySelector('.btnDownloadLog').addEventListener('click', function () {
             window.open(ApiClient.getUrl('XC2EMBY/Logs') + '?api_key=' + ApiClient.accessToken(), '_blank');
@@ -2248,6 +2256,42 @@ function (BaseView, loading) {
             });
     }
 
+    function clearFailedItems(view) {
+        var btn = view.querySelector('.btnClearFailedItems');
+        var result = view.querySelector('.retryFailedResult');
+        if (btn) btn.disabled = true;
+        if (result) result.textContent = 'Clearing failed items...';
+
+        ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('XC2EMBY/Sync/ClearFailedItems') })
+            .then(function (data) {
+                if (result) result.textContent = data.Message || 'Failed items cleared.';
+                loadFailedItems(view);
+                if (btn) btn.disabled = false;
+            })
+            .catch(function () {
+                if (result) result.textContent = 'Clear failed items request failed.';
+                if (btn) btn.disabled = false;
+            });
+    }
+
+    function clearSyncHistory(view) {
+        var btn = view.querySelector('.btnClearSyncHistory');
+        var result = view.querySelector('.clearSyncHistoryResult');
+        if (btn) btn.disabled = true;
+        if (result) result.textContent = 'Clearing sync history...';
+
+        ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('XC2EMBY/Sync/ClearHistory') })
+            .then(function (data) {
+                if (result) result.textContent = data.Message || 'Sync history cleared.';
+                loadDashboard(view);
+                if (btn) btn.disabled = false;
+            })
+            .catch(function () {
+                if (result) result.textContent = 'Clear sync history request failed.';
+                if (btn) btn.disabled = false;
+            });
+    }
+
     function renderDashboardStatus(view, data) {
         // Show plugin version from dashboard data (independent of update check)
         var versionEl = view.querySelector('.pluginVersion');
@@ -2416,8 +2460,10 @@ function (BaseView, loading) {
 
     function renderDashboardHistory(view, data) {
         var container = view.querySelector('.dashboardHistoryContent');
+        var clearBtn = view.querySelector('.btnClearSyncHistory');
         var hasHistory = !!(data.History && data.History.length > 0);
         updateSyncCTAEmphasis(view, hasHistory);
+        if (clearBtn) clearBtn.style.display = hasHistory ? '' : 'none';
 
         if (!hasHistory) {
             container.innerHTML = '<div style="opacity:0.5;">No sync history yet</div>';

@@ -144,6 +144,16 @@ namespace Emby.Xtream.Plugin.Api
     {
     }
 
+    [Route("/XC2EMBY/Sync/ClearFailedItems", "POST", Summary = "Clears failed sync items")]
+    public class ClearFailedItems : IReturn<SyncResult>
+    {
+    }
+
+    [Route("/XC2EMBY/Sync/ClearHistory", "POST", Summary = "Clears sync history")]
+    public class ClearSyncHistory : IReturn<SyncResult>
+    {
+    }
+
     [Route("/XC2EMBY/Logs", "GET", Summary = "Downloads sanitized plugin logs")]
     public class GetSanitizedLogs : IReturnVoid
     {
@@ -803,6 +813,26 @@ namespace Emby.Xtream.Plugin.Api
                 Total = p.Total,
                 Completed = p.Completed,
                 Failed = p.Failed
+            };
+        }
+
+        public object Post(ClearFailedItems request)
+        {
+            Plugin.Instance.StrmSyncService.ClearFailedItems();
+            return new SyncResult
+            {
+                Success = true,
+                Message = "Failed items cleared."
+            };
+        }
+
+        public object Post(ClearSyncHistory request)
+        {
+            Plugin.Instance.StrmSyncService.ClearSyncHistory();
+            return new SyncResult
+            {
+                Success = true,
+                Message = "Sync history cleared."
             };
         }
 
