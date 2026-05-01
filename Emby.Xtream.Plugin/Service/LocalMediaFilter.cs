@@ -9,6 +9,7 @@ namespace Emby.Xtream.Plugin.Service
 {
     internal sealed class LocalMediaFilter
     {
+        private static readonly Regex StripParens = new Regex(@"\([^)]*\)", RegexOptions.Compiled);
         private static readonly Regex StripNonAlpha = new Regex(@"[^a-z0-9\s]", RegexOptions.Compiled);
         private static readonly Regex CollapseSpace = new Regex(@"\s+", RegexOptions.Compiled);
 
@@ -107,6 +108,7 @@ namespace Emby.Xtream.Plugin.Service
         {
             if (string.IsNullOrWhiteSpace(title)) return string.Empty;
             var s = title.ToLowerInvariant();
+            s = StripParens.Replace(s, " ");    // remove (US), (UK), (2010), etc.
             s = StripNonAlpha.Replace(s, " ");
             s = CollapseSpace.Replace(s, " ");
             return s.Trim();
