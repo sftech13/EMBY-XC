@@ -448,10 +448,11 @@ namespace Emby.Xtream.Plugin.Service
                 if (config.EnableLocalMediaFilter)
                 {
                     mp.Phase = "Scanning Emby library";
-                    localFilter = LocalMediaFilter.Build(_logger);
+                    localFilter = LocalMediaFilter.Build(_logger, config.StrmLibraryPath);
                 }
 
                 var writtenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var locallyFilteredPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var semaphore = new SemaphoreSlim(config.SyncParallelism);
 
                 var tasks = allStreams.Select(async movie =>
@@ -467,14 +468,6 @@ namespace Emby.Xtream.Plugin.Service
                         if (string.IsNullOrWhiteSpace(movieName))
                         {
                             Interlocked.Increment(ref mp.Failed);
-                            Interlocked.Increment(ref mp.Completed);
-                            ReportTaskProgress(mp, taskProgress);
-                            return;
-                        }
-
-                        if (localFilter != null && localFilter.ContainsMovie(movie.TmdbId, cleanedName))
-                        {
-                            Interlocked.Increment(ref mp.Skipped);
                             Interlocked.Increment(ref mp.Completed);
                             ReportTaskProgress(mp, taskProgress);
                             return;
@@ -534,6 +527,23 @@ namespace Emby.Xtream.Plugin.Service
 
                         var movieDir = Path.Combine(config.StrmLibraryPath, subFolder, folderName);
                         var strmPath = Path.Combine(movieDir, folderName + ".strm");
+
+                        if (localFilter != null && localFilter.ContainsMovie(movie.TmdbId, cleanedName))
+                        {
+                            if (File.Exists(strmPath))
+                            {
+                                lock (locallyFilteredPaths)
+                                {
+                                    locallyFilteredPaths.Add(strmPath);
+                                }
+                            }
+
+                            _logger.Debug("Local media filter: skipping movie '{0}' (already in library)", cleanedName);
+                            Interlocked.Increment(ref mp.Skipped);
+                            Interlocked.Increment(ref mp.Completed);
+                            ReportTaskProgress(mp, taskProgress);
+                            return;
+                        }
 
                         // Smart skip: if file already exists AND the movie is not new (delta), skip
                         var isNewMovie = lastMovieTs == 0 || movie.Added > lastMovieTs;
@@ -646,7 +656,7 @@ namespace Emby.Xtream.Plugin.Service
                 {
                     mp.Phase = "Cleaning up orphaned files";
                     var moviesRoot = Path.Combine(config.StrmLibraryPath, GetMovieRootFolderName(config));
-                    mp.Deleted = CleanupOrphans(moviesRoot, writtenPaths, config.OrphanSafetyThreshold);
+                    mp.Deleted = CleanupOrphans(moviesRoot, writtenPaths, config.OrphanSafetyThreshold, locallyFilteredPaths);
                 }
 
                 // Persist the highest Added timestamp seen so next sync can delta from here
@@ -786,10 +796,11 @@ namespace Emby.Xtream.Plugin.Service
                 if (config.EnableLocalMediaFilter)
                 {
                     sp.Phase = "Scanning Emby library";
-                    localSeriesFilter = LocalMediaFilter.Build(_logger);
+                    localSeriesFilter = LocalMediaFilter.Build(_logger, config.StrmLibraryPath);
                 }
 
                 var writtenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var locallyFilteredPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var semaphore = new SemaphoreSlim(config.SyncParallelism);
 
                 // Episode hash cache: load stored hashes so we can skip file I/O for unchanged series
@@ -822,14 +833,6 @@ namespace Emby.Xtream.Plugin.Service
                         if (subFolder == null)
                         {
                             Interlocked.Increment(ref noFolderSkippedCount);
-                            Interlocked.Increment(ref sp.Skipped);
-                            Interlocked.Increment(ref sp.Completed);
-                            ReportTaskProgress(sp, taskProgress);
-                            return;
-                        }
-
-                        if (localSeriesFilter != null && localSeriesFilter.ContainsSeries(series.TmdbId, cleanedName))
-                        {
                             Interlocked.Increment(ref sp.Skipped);
                             Interlocked.Increment(ref sp.Completed);
                             ReportTaskProgress(sp, taskProgress);
@@ -890,9 +893,9 @@ namespace Emby.Xtream.Plugin.Service
 
                         // Build series folder name with metadata ID
                         var folderName = seriesName;
+                        var providerTmdbId = detail.Info != null ? detail.Info.TmdbId : null;
                         if (config.EnableSeriesIdFolderNaming)
                         {
-                            var providerTmdbId = detail.Info != null ? detail.Info.TmdbId : null;
                             int? autoTvdbId = null;
 
                             // Only do TVDb lookup if no override and no provider TMDB
@@ -954,7 +957,7 @@ namespace Emby.Xtream.Plugin.Service
 
                         // Smart skip: skip unchanged series (delta) that already have episodes on disk
                         var isChangedSeries = lastSeriesTs == 0 || seriesLm > lastSeriesTs;
-                        if (!isChangedSeries && config.SmartSkipExisting && Directory.Exists(seriesDir))
+                        if (localSeriesFilter == null && !isChangedSeries && config.SmartSkipExisting && Directory.Exists(seriesDir))
                         {
                             var existingStrms = Directory.GetFiles(seriesDir, "*.strm", SearchOption.AllDirectories);
                             if (existingStrms.Length > 0)
@@ -989,7 +992,8 @@ namespace Emby.Xtream.Plugin.Service
                         updatedHashes[epHashKey] = currentEpHash;
 
                         string previousHash;
-                        if (config.SmartSkipExisting
+                        if (localSeriesFilter == null
+                            && config.SmartSkipExisting
                             && storedHashes.TryGetValue(epHashKey, out previousHash)
                             && previousHash == currentEpHash
                             && Directory.Exists(seriesDir))
@@ -1043,6 +1047,24 @@ namespace Emby.Xtream.Plugin.Service
                                 var fileName = fileNameBase + ".strm";
 
                                 var strmPath = Path.Combine(seasonDir, fileName);
+
+                                if (localSeriesFilter != null &&
+                                    localSeriesFilter.ContainsEpisode(providerTmdbId ?? series.TmdbId, cleanedName, seasonNum, episodeNum))
+                                {
+                                    if (File.Exists(strmPath))
+                                    {
+                                        lock (locallyFilteredPaths)
+                                        {
+                                            locallyFilteredPaths.Add(strmPath);
+                                        }
+                                    }
+
+                                    _logger.Debug("Local media filter: skipping episode '{0}' S{1:D2}E{2:D2} (already in library)",
+                                        cleanedName, seasonNum, episodeNum);
+                                    Interlocked.Increment(ref ep.Total);
+                                    Interlocked.Increment(ref ep.Skipped);
+                                    continue;
+                                }
 
                                 var ext = !string.IsNullOrEmpty(episode.ContainerExtension)
                                     ? episode.ContainerExtension
@@ -1127,7 +1149,7 @@ namespace Emby.Xtream.Plugin.Service
                 {
                     sp.Phase = "Cleaning up orphaned files";
                     var showsRoot = Path.Combine(config.StrmLibraryPath, GetSeriesRootFolderName(config));
-                    var deletedEpisodes = CleanupOrphans(showsRoot, writtenPaths, config.OrphanSafetyThreshold);
+                    var deletedEpisodes = CleanupOrphans(showsRoot, writtenPaths, config.OrphanSafetyThreshold, locallyFilteredPaths);
                     sp.Deleted = deletedEpisodes;
                     ep.Deleted = deletedEpisodes;
                 }
@@ -1779,7 +1801,11 @@ namespace Emby.Xtream.Plugin.Service
             return STJ.JsonSerializer.Deserialize<SeriesDetailInfo>(json, JsonOptions);
         }
 
-        private int CleanupOrphans(string rootPath, HashSet<string> validPaths, double safetyThreshold)
+        private int CleanupOrphans(
+            string rootPath,
+            HashSet<string> validPaths,
+            double safetyThreshold,
+            HashSet<string> locallyFilteredPaths = null)
         {
             if (!Directory.Exists(rootPath))
             {
@@ -1787,24 +1813,30 @@ namespace Emby.Xtream.Plugin.Service
             }
 
             var existingStrms = Directory.GetFiles(rootPath, "*.strm", SearchOption.AllDirectories);
-            var orphanCount = existingStrms.Count(s => !validPaths.Contains(s));
+            var providerOrphanCount = existingStrms.Count(s =>
+                !validPaths.Contains(s) &&
+                (locallyFilteredPaths == null || !locallyFilteredPaths.Contains(s)));
+            var thresholdTotal = existingStrms.Count(s =>
+                locallyFilteredPaths == null || !locallyFilteredPaths.Contains(s));
 
-            if (safetyThreshold > 0 && existingStrms.Length > 10 && orphanCount > 0)
+            var skipProviderOrphans = false;
+            if (safetyThreshold > 0 && thresholdTotal > 10 && providerOrphanCount > 0)
             {
-                double ratio = (double)orphanCount / existingStrms.Length;
+                double ratio = (double)providerOrphanCount / thresholdTotal;
                 if (ratio > safetyThreshold)
                 {
                     _logger.Warn(
-                        "Orphan cleanup skipped: {0}/{1} ({2:P0}) exceeds safety threshold {3:P0} — possible provider issue",
-                        orphanCount, existingStrms.Length, ratio, safetyThreshold);
-                    return 0;
+                        "Provider orphan cleanup skipped: {0}/{1} ({2:P0}) exceeds safety threshold {3:P0} — possible provider issue",
+                        providerOrphanCount, thresholdTotal, ratio, safetyThreshold);
+                    skipProviderOrphans = true;
                 }
             }
             var removed = 0;
 
             foreach (var strmFile in existingStrms)
             {
-                if (!validPaths.Contains(strmFile))
+                var isLocallyFiltered = locallyFilteredPaths != null && locallyFilteredPaths.Contains(strmFile);
+                if (!validPaths.Contains(strmFile) && (isLocallyFiltered || !skipProviderOrphans))
                 {
                     try
                     {

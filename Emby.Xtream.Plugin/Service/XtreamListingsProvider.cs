@@ -69,6 +69,14 @@ namespace Emby.Xtream.Plugin.Service
                 var title        = StripEpgQualifiers(prog.Element("title")?.Value ?? "Unknown");
                 var rawSubTitle  = prog.Element("sub-title")?.Value;
                 var episodeTitle = StripEpgQualifiers(rawSubTitle);
+                var genres       = prog.Elements("category").Select(e => e.Value).ToList();
+                var isMovie      = genres.Any(c =>
+                    c.IndexOf("movie", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    c.IndexOf("film", StringComparison.OrdinalIgnoreCase) >= 0);
+                var isSports     = genres.Any(c =>
+                    c.IndexOf("sport", StringComparison.OrdinalIgnoreCase) >= 0);
+                var isNews       = genres.Any(c =>
+                    c.IndexOf("news", StringComparison.OrdinalIgnoreCase) >= 0);
                 var seriesKey    = NormalizeGuideKey(title);
                 var episodeKey   = NormalizeGuideKey(episodeTitle);
 
@@ -85,21 +93,28 @@ namespace Emby.Xtream.Plugin.Service
 
                 var program = new ProgramInfo
                 {
-                    ChannelId    = channelId,
-                    Id           = string.Format(CultureInfo.InvariantCulture, "{0}_{1}", channelId, startStr),
-                    ShowId       = showId,
-                    Name         = title,
-                    Overview     = prog.Element("desc")?.Value,
-                    StartDate    = start,
-                    EndDate      = stop,
-                    Genres       = prog.Elements("category").Select(e => e.Value).ToList(),
-                    ImageUrl     = prog.Element("icon")?.Attribute("src")?.Value,
-                    EpisodeTitle = episodeTitle,
-                    IsMovie      = false,
-                    IsSeries     = prog.Element("episode-num") != null,
+                    ChannelId      = channelId,
+                    Id             = string.Format(CultureInfo.InvariantCulture, "{0}_{1}", channelId, startStr),
+                    ShowId         = showId,
+                    Name           = title,
+                    Overview       = prog.Element("desc")?.Value,
+                    StartDate      = start,
+                    EndDate        = stop,
+                    Genres         = genres,
+                    ImageUrl       = prog.Element("icon")?.Attribute("src")?.Value,
+                    EpisodeTitle   = episodeTitle,
+                    IsMovie        = isMovie,
+                    IsSports       = isSports,
+                    IsNews         = isNews,
+                    IsSeries       = !isMovie,
+                    IsLive         = prog.Element("live") != null,
+                    IsNew          = prog.Element("new") != null,
+                    IsRepeat       = prog.Element("previously-shown") != null,
+                    IsPremiere     = prog.Element("premiere") != null,
+                    OfficialRating = prog.Element("rating")?.Element("value")?.Value,
                     // SeriesId feeds SeriesPresentationUniqueKey — used by series timers
                     // to match all episodes of a show. Keep it series-level only.
-                    SeriesId     = seriesKey,
+                    SeriesId       = seriesKey,
                 };
 
                 // Season/episode from xmltv_ns: "S.E.part" (all 0-based)
@@ -112,6 +127,16 @@ namespace Emby.Xtream.Plugin.Service
                         program.SeasonNumber = s + 1;
                     if (parts.Length >= 2 && int.TryParse(parts[1].Trim(), out var ep))
                         program.EpisodeNumber = ep + 1;
+                }
+
+                // Fallback: onscreen "S01 E01" or "S1E1" when xmltv_ns is absent
+                if (program.SeasonNumber == null)
+                {
+                    var onscreen = prog.Elements("episode-num")
+                        .FirstOrDefault(e => string.Equals(
+                            e.Attribute("system")?.Value, "onscreen", StringComparison.OrdinalIgnoreCase));
+                    if (onscreen != null)
+                        TryParseOnscreenEpisode(onscreen.Value, program);
                 }
 
                 // Production year from <date>YYYY...</date>
@@ -138,10 +163,22 @@ namespace Emby.Xtream.Plugin.Service
                 showKey);
         }
 
+        private static readonly Regex OnscreenEpRx =
+            new Regex(@"[Ss](\d+)\s*[Ee](\d+)", RegexOptions.Compiled);
+
         // Strip Unicode Modifier Letter characters that EPG providers append to titles:
-        // ᴺᵉʷ = NEW, ᴴᴰ = HD, etc. These are \p{Lm} category and break series timer matching.
+        // ᴺᵉʷ = NEW, ᴸᶦᵛᵉ = LIVE, etc. Structured <new /> and <live /> tags still drive flags.
         private static readonly Regex EpgQualifierRx =
             new Regex(@"\s*[\p{Lm}]+", RegexOptions.Compiled);
+
+        private static void TryParseOnscreenEpisode(string value, ProgramInfo program)
+        {
+            if (string.IsNullOrEmpty(value)) return;
+            var m = OnscreenEpRx.Match(value);
+            if (!m.Success) return;
+            if (int.TryParse(m.Groups[1].Value, out var s)) program.SeasonNumber = s;
+            if (int.TryParse(m.Groups[2].Value, out var ep)) program.EpisodeNumber = ep;
+        }
 
         private static string StripEpgQualifiers(string value)
         {

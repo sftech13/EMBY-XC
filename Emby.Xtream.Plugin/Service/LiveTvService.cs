@@ -354,6 +354,24 @@ namespace Emby.Xtream.Plugin.Service
                         sb.AppendFormat(CultureInfo.InvariantCulture,
                             "    <desc>{0}</desc>\n", EscapeXml(desc));
                     }
+                    if (!string.IsNullOrEmpty(program.SubTitle))
+                        sb.AppendFormat(CultureInfo.InvariantCulture,
+                            "    <sub-title>{0}</sub-title>\n", EscapeXml(program.SubTitle));
+                    if (program.Categories != null)
+                    {
+                        foreach (var cat in program.Categories)
+                            sb.AppendFormat(CultureInfo.InvariantCulture,
+                                "    <category lang=\"en\">{0}</category>\n", EscapeXml(cat));
+                    }
+                    if (!string.IsNullOrEmpty(program.EpisodeNumOnscreen))
+                        sb.AppendFormat(CultureInfo.InvariantCulture,
+                            "    <episode-num system=\"onscreen\">{0}</episode-num>\n", EscapeXml(program.EpisodeNumOnscreen));
+                    if (!string.IsNullOrEmpty(program.ImageUrl))
+                        sb.AppendFormat(CultureInfo.InvariantCulture,
+                            "    <icon src=\"{0}\" />\n", EscapeXml(program.ImageUrl));
+                    if (!string.IsNullOrEmpty(program.Rating))
+                        sb.AppendFormat(CultureInfo.InvariantCulture,
+                            "    <rating><value>{0}</value></rating>\n", EscapeXml(program.Rating));
                     if (program.IsLive) sb.AppendLine("    <live />");
                     if (program.IsNew) sb.AppendLine("    <new />");
                     if (program.IsPreviouslyShown) sb.AppendLine("    <previously-shown />");

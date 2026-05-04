@@ -153,6 +153,34 @@ namespace Emby.Xtream.Plugin.Client
                     if (!string.IsNullOrEmpty(src))
                         program.ImageUrl = src;
                 }
+                else if (string.Equals(name, "episode-num", StringComparison.OrdinalIgnoreCase))
+                {
+                    var system = reader.GetAttribute("system");
+                    if (string.Equals(system, "onscreen", StringComparison.OrdinalIgnoreCase)
+                        && !reader.IsEmptyElement
+                        && string.IsNullOrEmpty(program.EpisodeNumOnscreen))
+                    {
+                        program.EpisodeNumOnscreen = ReadText(reader);
+                    }
+                }
+                else if (string.Equals(name, "rating", StringComparison.OrdinalIgnoreCase))
+                {
+                    // <rating system="MPAA"><value>TV-14</value></rating>
+                    var depth2 = reader.Depth;
+                    while (reader.Read())
+                    {
+                        if (reader.NodeType == XmlNodeType.EndElement && reader.Depth == depth2)
+                            break;
+                        if (reader.NodeType == XmlNodeType.Element
+                            && string.Equals(reader.Name, "value", StringComparison.OrdinalIgnoreCase)
+                            && !reader.IsEmptyElement)
+                        {
+                            var val = ReadText(reader);
+                            if (!string.IsNullOrWhiteSpace(val) && string.IsNullOrEmpty(program.Rating))
+                                program.Rating = val.Trim();
+                        }
+                    }
+                }
             }
 
             return program;
