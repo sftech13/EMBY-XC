@@ -340,6 +340,14 @@ function (BaseView, loading) {
             clearSyncHistory(view);
         });
 
+        view.querySelector('.btnCheckUpdate').addEventListener('click', function () {
+            checkPluginUpdate(view);
+        });
+
+        view.querySelector('.btnInstallUpdate').addEventListener('click', function () {
+            installPluginUpdate(view);
+        });
+
         // Download sanitized log button
         view.querySelector('.btnDownloadLog').addEventListener('click', function () {
             window.open(ApiClient.getUrl('XC2EMBY/Logs') + '?api_key=' + ApiClient.accessToken(), '_blank');
@@ -2290,6 +2298,77 @@ function (BaseView, loading) {
                 if (result) result.textContent = 'Clear sync history request failed.';
                 if (btn) btn.disabled = false;
             });
+    }
+
+    function setUpdateStatus(view, message, isGood) {
+        var status = view.querySelector('.pluginUpdateStatus');
+        if (!status) return;
+        status.textContent = message || '';
+        status.style.color = isGood === false ? '#e74c3c' : '';
+        status.style.opacity = message ? '0.8' : '0.65';
+    }
+
+    function checkPluginUpdate(view) {
+        var btn = view.querySelector('.btnCheckUpdate');
+        var installBtn = view.querySelector('.btnInstallUpdate');
+        if (btn) btn.disabled = true;
+        if (installBtn) installBtn.style.display = 'none';
+        setUpdateStatus(view, 'Checking...', null);
+
+        ApiClient.ajax({
+            type: 'GET',
+            url: ApiClient.getUrl('XC2EMBY/CheckUpdate'),
+            dataType: 'json'
+        }).then(function (result) {
+            if (btn) btn.disabled = false;
+
+            if (result && result.Error) {
+                setUpdateStatus(view, result.Error, false);
+                return;
+            }
+
+            if (result && result.UpdateAvailable) {
+                var latest = result.LatestVersion ? 'v' + result.LatestVersion : 'latest';
+                setUpdateStatus(view, latest + ' available', true);
+                if (installBtn) installBtn.style.display = '';
+                return;
+            }
+
+            var current = result && result.CurrentVersion ? 'v' + result.CurrentVersion : 'current';
+            setUpdateStatus(view, current + ' is current', true);
+        }).catch(function () {
+            if (btn) btn.disabled = false;
+            setUpdateStatus(view, 'Update check failed.', false);
+        });
+    }
+
+    function installPluginUpdate(view) {
+        var checkBtn = view.querySelector('.btnCheckUpdate');
+        var installBtn = view.querySelector('.btnInstallUpdate');
+        if (checkBtn) checkBtn.disabled = true;
+        if (installBtn) installBtn.disabled = true;
+        setUpdateStatus(view, 'Installing...', null);
+
+        ApiClient.ajax({
+            type: 'POST',
+            url: ApiClient.getUrl('XC2EMBY/InstallUpdate'),
+            dataType: 'json'
+        }).then(function (result) {
+            if (checkBtn) checkBtn.disabled = false;
+            if (installBtn) installBtn.disabled = false;
+
+            if (result && result.Success) {
+                if (installBtn) installBtn.style.display = 'none';
+                setUpdateStatus(view, result.Message || 'Update installed. Restart Emby.', true);
+                return;
+            }
+
+            setUpdateStatus(view, (result && result.Message) || 'Install failed.', false);
+        }).catch(function () {
+            if (checkBtn) checkBtn.disabled = false;
+            if (installBtn) installBtn.disabled = false;
+            setUpdateStatus(view, 'Install request failed.', false);
+        });
     }
 
     function renderDashboardStatus(view, data) {
