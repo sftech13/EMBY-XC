@@ -539,12 +539,14 @@ namespace Emby.Xtream.Plugin.Api
                     {
                         config.LastDocumentarySyncTimestamp = docConfig.LastMovieSyncTimestamp;
                         config.StrmNamingVersion = docConfig.StrmNamingVersion;
+                        config.MovieTmdbCacheJson = docConfig.MovieTmdbCacheJson;
                         Plugin.Instance.SaveConfiguration();
                     },
                     isDocumentaries: true).ConfigureAwait(false);
 
                 config.LastDocumentarySyncTimestamp = docConfig.LastMovieSyncTimestamp;
                 config.StrmNamingVersion = docConfig.StrmNamingVersion;
+                config.MovieTmdbCacheJson = docConfig.MovieTmdbCacheJson;
                 Plugin.Instance.SaveConfiguration();
 
                 var progress = syncService.DocumentariesProgress;
@@ -1145,6 +1147,7 @@ namespace Emby.Xtream.Plugin.Api
                 ContentRemoveTerms = source.ContentRemoveTerms,
                 EnableTmdbFolderNaming = source.EnableTmdbFolderNaming,
                 EnableTmdbFallbackLookup = source.EnableTmdbFallbackLookup,
+                MovieTmdbCacheJson = source.MovieTmdbCacheJson,
                 EnableSeriesIdFolderNaming = source.EnableSeriesIdFolderNaming,
                 EnableSeriesMetadataLookup = source.EnableSeriesMetadataLookup,
                 TvdbFolderIdOverrides = source.TvdbFolderIdOverrides,

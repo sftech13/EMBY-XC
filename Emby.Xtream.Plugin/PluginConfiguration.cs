@@ -79,6 +79,7 @@ namespace Emby.Xtream.Plugin
         // TMDB folder naming
         public bool EnableTmdbFolderNaming { get; set; }
         public bool EnableTmdbFallbackLookup { get; set; }
+        public string MovieTmdbCacheJson { get; set; } = string.Empty;
 
         // Series metadata matching
         public bool EnableSeriesIdFolderNaming { get; set; }

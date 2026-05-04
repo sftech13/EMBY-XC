@@ -53,6 +53,7 @@ namespace Emby.Xtream.Plugin.Service
                 {
                     config.LastDocumentarySyncTimestamp = docConfig.LastMovieSyncTimestamp;
                     config.StrmNamingVersion = docConfig.StrmNamingVersion;
+                    config.MovieTmdbCacheJson = docConfig.MovieTmdbCacheJson;
                     Plugin.Instance.SaveConfiguration();
                 },
                 progress,
@@ -60,6 +61,7 @@ namespace Emby.Xtream.Plugin.Service
 
             config.LastDocumentarySyncTimestamp = docConfig.LastMovieSyncTimestamp;
             config.StrmNamingVersion = docConfig.StrmNamingVersion;
+            config.MovieTmdbCacheJson = docConfig.MovieTmdbCacheJson;
             Plugin.Instance.SaveConfiguration();
             progress.Report(100);
         }
@@ -82,6 +84,7 @@ namespace Emby.Xtream.Plugin.Service
                 ContentRemoveTerms = source.ContentRemoveTerms,
                 EnableTmdbFolderNaming = source.EnableTmdbFolderNaming,
                 EnableTmdbFallbackLookup = source.EnableTmdbFallbackLookup,
+                MovieTmdbCacheJson = source.MovieTmdbCacheJson,
                 EnableNfoFiles = source.EnableNfoFiles,
                 SmartSkipExisting = source.SmartSkipExisting,
                 EnableLocalMediaFilter = source.EnableLocalMediaFilter,

@@ -293,6 +293,7 @@ namespace Emby.Xtream.Plugin
             target.ContentRemoveTerms = source.ContentRemoveTerms;
             target.EnableTmdbFolderNaming = source.EnableTmdbFolderNaming;
             target.EnableTmdbFallbackLookup = source.EnableTmdbFallbackLookup;
+            target.MovieTmdbCacheJson = source.MovieTmdbCacheJson;
             target.EnableSeriesIdFolderNaming = source.EnableSeriesIdFolderNaming;
             target.EnableSeriesMetadataLookup = source.EnableSeriesMetadataLookup;
             target.TvdbFolderIdOverrides = source.TvdbFolderIdOverrides;

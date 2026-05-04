@@ -209,6 +209,31 @@ namespace Emby.Xtream.Plugin.Service
             return STJ.JsonSerializer.Serialize(hashes);
         }
 
+        internal static ConcurrentDictionary<string, string> DeserializeMovieTmdbCache(string json)
+        {
+            if (string.IsNullOrWhiteSpace(json))
+                return new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            try
+            {
+                var values = STJ.JsonSerializer.Deserialize<Dictionary<string, string>>(json)
+                             ?? new Dictionary<string, string>();
+                return new ConcurrentDictionary<string, string>(values, StringComparer.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            }
+        }
+
+        internal static string SerializeMovieTmdbCache(ConcurrentDictionary<string, string> cache)
+        {
+            if (cache == null || cache.IsEmpty)
+                return string.Empty;
+
+            return STJ.JsonSerializer.Serialize(cache);
+        }
+
         internal static string GetMovieRootFolderName(PluginConfiguration config)
         {
             var value = config?.MovieRootFolderName;
@@ -451,6 +476,17 @@ namespace Emby.Xtream.Plugin.Service
                     localFilter = LocalMediaFilter.Build(_logger, config.StrmLibraryPath);
                 }
 
+                var enrichMovieTmdbIds = config.EnableLocalMediaFilter || config.EnableTmdbFolderNaming;
+                var movieTmdbCache = DeserializeMovieTmdbCache(config.MovieTmdbCacheJson);
+                var movieTmdbCacheChanged = 0;
+                if (enrichMovieTmdbIds)
+                {
+                    var listIds = allStreams.Count(m => IsValidTmdbId(m.TmdbId));
+                    var cachedIds = allStreams.Count(m => movieTmdbCache.ContainsKey(m.StreamId.ToString(CultureInfo.InvariantCulture)));
+                    _logger.Info("Movie TMDB detail cache: {0}/{1} cached, {2}/{1} present in VOD list",
+                        cachedIds, allStreams.Count, listIds);
+                }
+
                 var writtenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var locallyFilteredPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var semaphore = new SemaphoreSlim(config.SyncParallelism);
@@ -473,13 +509,33 @@ namespace Emby.Xtream.Plugin.Service
                             return;
                         }
 
+                        var providerTmdbId = IsValidTmdbId(movie.TmdbId) ? movie.TmdbId.Trim() : null;
+                        if (string.IsNullOrEmpty(providerTmdbId) && enrichMovieTmdbIds)
+                        {
+                            var cacheKey = movie.StreamId.ToString(CultureInfo.InvariantCulture);
+                            string cachedTmdbId;
+                            if (movieTmdbCache.TryGetValue(cacheKey, out cachedTmdbId) && IsValidTmdbId(cachedTmdbId))
+                            {
+                                providerTmdbId = cachedTmdbId.Trim();
+                            }
+                            else
+                            {
+                                providerTmdbId = await FetchVodDetailTmdbIdAsync(movie.StreamId, config, cancellationToken).ConfigureAwait(false);
+                                if (IsValidTmdbId(providerTmdbId))
+                                {
+                                    movieTmdbCache[cacheKey] = providerTmdbId.Trim();
+                                    Interlocked.Exchange(ref movieTmdbCacheChanged, 1);
+                                }
+                            }
+                        }
+
                         // Determine TMDB ID for folder naming
                         string tmdbId = null;
                         if (config.EnableTmdbFolderNaming)
                         {
-                            if (IsValidTmdbId(movie.TmdbId))
+                            if (IsValidTmdbId(providerTmdbId))
                             {
-                                tmdbId = movie.TmdbId.Trim();
+                                tmdbId = providerTmdbId.Trim();
                             }
                             else if (config.EnableTmdbFallbackLookup)
                             {
@@ -528,7 +584,7 @@ namespace Emby.Xtream.Plugin.Service
                         var movieDir = Path.Combine(config.StrmLibraryPath, subFolder, folderName);
                         var strmPath = Path.Combine(movieDir, folderName + ".strm");
 
-                        if (localFilter != null && localFilter.ContainsMovie(movie.TmdbId, cleanedName))
+                        if (localFilter != null && localFilter.ContainsMovie(providerTmdbId, cleanedName))
                         {
                             if (File.Exists(strmPath))
                             {
@@ -633,7 +689,7 @@ namespace Emby.Xtream.Plugin.Service
                                 StreamId = movie.StreamId,
                                 Name = movie.Name,
                                 CategoryId = movie.CategoryId,
-                                TmdbId = movie.TmdbId,
+                                TmdbId = IsValidTmdbId(movie.TmdbId) ? movie.TmdbId : null,
                                 ContainerExtension = movie.ContainerExtension,
                                 ErrorMessage = ex.Message
                             });
@@ -649,6 +705,13 @@ namespace Emby.Xtream.Plugin.Service
                 });
 
                 await Task.WhenAll(tasks).ConfigureAwait(false);
+
+                if (Volatile.Read(ref movieTmdbCacheChanged) != 0)
+                {
+                    config.MovieTmdbCacheJson = SerializeMovieTmdbCache(movieTmdbCache);
+                    saveConfig?.Invoke();
+                    _logger.Info("Movie TMDB detail cache updated: {0} entries", movieTmdbCache.Count);
+                }
 
                 // Cleanup orphans
                 cancellationToken.ThrowIfCancellationRequested();
@@ -1724,6 +1787,58 @@ namespace Emby.Xtream.Plugin.Service
             }
 
             return allStreams;
+        }
+
+        private async Task<string> FetchVodDetailTmdbIdAsync(
+            int streamId, PluginConfiguration config, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var url = string.Format(
+                    CultureInfo.InvariantCulture,
+                    "{0}/player_api.php?username={1}&password={2}&action=get_vod_info&vod_id={3}",
+                    config.BaseUrl,
+                    Uri.EscapeDataString(config.Username ?? string.Empty),
+                    Uri.EscapeDataString(config.Password ?? string.Empty),
+                    streamId);
+
+                var json = await _httpClient.GetStringAsync(url).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+
+                using (var doc = STJ.JsonDocument.Parse(json))
+                {
+                    STJ.JsonElement info;
+                    if (!doc.RootElement.TryGetProperty("info", out info) ||
+                        info.ValueKind != STJ.JsonValueKind.Object)
+                    {
+                        return null;
+                    }
+
+                    foreach (var key in new[] { "tmdb_id", "tmdb", "tmdbid" })
+                    {
+                        STJ.JsonElement value;
+                        if (!info.TryGetProperty(key, out value))
+                            continue;
+
+                        var id = value.ValueKind == STJ.JsonValueKind.String
+                            ? value.GetString()
+                            : value.ToString();
+
+                        if (IsValidTmdbId(id))
+                            return id.Trim();
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug("VOD detail TMDB lookup failed for stream {0}: {1}", streamId, ex.Message);
+            }
+
+            return null;
         }
 
         private async Task<List<SeriesInfo>> FetchSeriesListAsync(
