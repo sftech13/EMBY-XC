@@ -40,7 +40,7 @@
 - [Update Checker](#update-checker)
 - [Development & Releases](#development--releases)
 - [Configuration Reference](#configuration-reference)
-- [API Reference](#api-reference)
+- [Credits](#credits)
 
 ---
 
@@ -58,6 +58,7 @@
 - Registered as a native Emby `IListingsProvider` — guide data flows through Emby's standard Live TV pipeline
 - Three guide modes: **Xtream server** XMLTV, **custom XMLTV URL**, or **disabled**
 - Full XMLTV document cached in memory with configurable TTL
+- Full XMLTV field passthrough: sub-title, categories, production year, content rating, icon/poster, live/new/repeat/premiere flags, and season/episode numbers (xmltv_ns or onscreen format)
 - Each program gets a unique `ShowId` scoped to its channel, preventing Emby from showing irrelevant "Other Showings" across unrelated channels
 
 ### Codec Detection & OSD Display
@@ -340,18 +341,26 @@ Shows whether auto-sync is enabled and when the next run is scheduled. See [Auto
 
 Enables scheduled sync runs without manual intervention.
 
+### How It Works
+
+Auto-sync uses Emby's built-in scheduled task system. Each content type — Movies, Documentaries, TV Shows, and Docu Series — is registered as a separate Emby scheduled task and appears under **Dashboard → Scheduled Tasks** in Emby. From there you can adjust the trigger time or run the task manually.
+
+At install, the tasks register default daily triggers staggered starting at 03:00 to avoid concurrent runs. If **Auto-Sync Enabled** is off, all scheduled task runs exit immediately without syncing — so disabling this toggle is the master switch even if Emby's scheduler fires the task.
+
 ### Modes
 
-**Interval mode** — runs every N hours counted from the end of the last sync.
+The mode setting controls how the **next sync time** is calculated and displayed on the plugin dashboard. It does not change how Emby fires the underlying task.
 
-**Daily mode** — runs once per day at a fixed local server time (e.g., `03:00`). If the time has already passed today, the next run is scheduled for the same time tomorrow.
+**Interval mode** — the next sync is shown as `lastSyncEndTime + intervalHours`.
+
+**Daily mode** — the next sync is shown as the next occurrence of the configured `HH:mm` in server local time.
 
 ### Settings
 
 | Setting | Default | Description |
 |---|---|---|
-| Auto-Sync Enabled | Off | Master enable |
-| Mode | interval | `interval` or `daily` |
+| Auto-Sync Enabled | Off | Master enable — tasks exit immediately if off |
+| Mode | interval | `interval` or `daily` (affects dashboard display of next run) |
 | Interval (hours) | 24 | Hours between runs (interval mode only, 1–168) |
 | Daily Time | 03:00 | HH:mm in server local time (daily mode only) |
 
@@ -549,7 +558,7 @@ When **Write NFO Files** is enabled, Kodi-compatible XML sidecars are created wh
 
 ## Local Media Filtering
 
-When **Skip Local Media** is enabled, the sync scans the current Emby library at the start of each run and builds lookup sets for existing movies and series.
+When **Skip Local Media** is enabled, the sync scans the current Emby library at the start of each run and builds lookup sets for existing movies, series, and episodes.
 
 Matching order:
 1. TMDB ID, when both the XC item and Emby library item have one
@@ -557,6 +566,8 @@ Matching order:
 3. Normalized title without year as a fallback
 
 Years are preserved during matching to reduce false positives between remakes or same-name titles. For example, `3:10 to Yuma (1957)` and `3:10 to Yuma (2007)` are treated as different items when Emby has production years.
+
+Items already under the plugin's own STRM library path are automatically excluded from the lookup set, so the filter only matches against non-STRM library content.
 
 Skipped local matches are counted as `Skipped` in sync progress. For series, the local-media check happens before fetching per-series episode details, reducing provider API calls.
 
@@ -575,6 +586,10 @@ To prevent accidental mass deletion (e.g., if a provider temporarily returns an 
 - Set to **0** to disable the safety check (always clean up regardless of percentage)
 
 Empty parent directories are removed after file deletion.
+
+### Local Media Filter Interaction
+
+When **Skip Local Media** is also enabled, STRMs for items matched against your local library are tracked separately. The orphan safety threshold only counts provider-missing orphans (items removed from the XC catalog) — locally-filtered STRMs are excluded from the ratio calculation and deleted independently. This prevents a first-run with a large local library from triggering the safety threshold.
 
 ### Smart Skip Interaction
 
@@ -617,7 +632,7 @@ git tag v1.1.0
 git push origin v1.1.0
 ```
 
-Use beta tags with letters, such as `v1.1.0-beta.1`, for test builds. Use plain numeric tags, such as `v1.1.0`, for releases. The release workflow publishes `artifacts/publish/XC2EMBY.Plugin.dll` and creates a draft GitHub Release.
+Use beta tags with letters, such as `v1.1.0-beta.1`, for test builds. Use plain numeric tags, such as `v1.1.0`, for releases. The release workflow publishes `artifacts/publish/XC2EMBY.Plugin.dll` and creates a published GitHub Release.
 
 ---
 
@@ -740,76 +755,9 @@ Complete list of all configuration fields.
 
 ---
 
-## API Reference
+## Credits
 
-All endpoints require Emby authentication. Base path: `/XC2EMBY/`
-
-### Playlist & EPG
-
-| Method | Path | Description |
-|---|---|---|
-| GET | `/XC2EMBY/LiveTv` | M3U playlist for external clients |
-| GET | `/XC2EMBY/Epg` | XMLTV EPG for external clients |
-
-### Categories
-
-| Method | Path | Description |
-|---|---|---|
-| GET | `/XC2EMBY/Categories/Live` | Live channel categories |
-| GET | `/XC2EMBY/Categories/Vod` | VOD movie categories |
-| GET | `/XC2EMBY/Categories/Series` | Series categories |
-
-### Sync
-
-| Method | Path | Description |
-|---|---|---|
-| POST | `/XC2EMBY/Sync/Movies` | Run movie sync |
-| POST | `/XC2EMBY/Sync/Documentaries` | Run documentary movie sync |
-| POST | `/XC2EMBY/Sync/Series` | Run TV show sync |
-| POST | `/XC2EMBY/Sync/DocuSeries` | Run docu series sync |
-| POST | `/XC2EMBY/Sync/Stop` | Request cancellation of the active STRM sync |
-| GET | `/XC2EMBY/Sync/Status` | Live sync progress |
-| GET | `/XC2EMBY/Sync/FailedItems` | Items that failed last sync |
-| POST | `/XC2EMBY/Sync/RetryFailed` | Retry failed items |
-| POST | `/XC2EMBY/Sync/ClearFailedItems` | Clear failed item list |
-| POST | `/XC2EMBY/Sync/ClearHistory` | Clear stored sync history |
-
-### Cache
-
-| Method | Path | Description |
-|---|---|---|
-| POST | `/XC2EMBY/RefreshCache` | Invalidate M3U, EPG, and channel caches |
-| POST | `/XC2EMBY/ClearCodecCache` | Clear ffprobe codec cache |
-
-### Content Deletion
-
-| Method | Path | Description |
-|---|---|---|
-| DELETE | `/XC2EMBY/Content/Movies` | Delete all movie STRM files |
-| DELETE | `/XC2EMBY/Content/Documentaries` | Delete all documentary STRM files |
-| DELETE | `/XC2EMBY/Content/Series` | Delete all TV show STRM files |
-| DELETE | `/XC2EMBY/Content/DocuSeries` | Delete all docu series STRM files |
-
-### Testing & Validation
-
-| Method | Path | Description |
-|---|---|---|
-| POST | `/XC2EMBY/TestConnection` | Test Xtream server credentials |
-| POST | `/XC2EMBY/ValidateStrmPath` | Verify a path is writable |
-| GET | `/XC2EMBY/BrowsePath` | List subdirectories at a path |
-| GET | `/XC2EMBY/WritablePaths` | Enumerate writable mount points |
-| GET | `/XC2EMBY/TestTmdbLookup` | Test TMDB fallback lookup for a movie name |
-
-### Dashboard & Updates
-
-| Method | Path | Description |
-|---|---|---|
-| GET | `/XC2EMBY/Dashboard` | Sync history, library stats, next auto-sync time |
-| GET | `/XC2EMBY/CheckUpdate` | Check GitHub for new releases |
-| GET | `/XC2EMBY/GuideDiagnostics` | Live TV channel-to-guide mapping diagnostics |
-| POST | `/XC2EMBY/InstallUpdate` | Download and install a new DLL |
-| POST | `/XC2EMBY/RestartEmby` | Restart Emby server |
-| GET | `/XC2EMBY/Logs` | Download sanitized log file |
+XC2EMBY is a fork of the original work by [@firestaerter3](https://github.com/firestaerter3). The foundation, plugin architecture, and core Xtream integration concepts originated from that project. This fork has been extended and modified significantly from that base.
 
 ---
 
