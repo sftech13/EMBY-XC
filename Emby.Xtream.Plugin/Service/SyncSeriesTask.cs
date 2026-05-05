@@ -32,6 +32,11 @@ namespace Emby.Xtream.Plugin.Service
         public async Task Execute(CancellationToken cancellationToken, IProgress<double> progress)
         {
             var config = Plugin.Instance.Configuration;
+            if (!config.AutoSyncEnabled)
+            {
+                _logger.Info("Automatic sync disabled — skipping scheduled series sync.");
+                return;
+            }
             if (!config.SyncSeries)
             {
                 _logger.Info("Series sync disabled — skipping.");
