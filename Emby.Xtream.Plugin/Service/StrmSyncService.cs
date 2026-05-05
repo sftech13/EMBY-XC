@@ -479,6 +479,8 @@ namespace Emby.Xtream.Plugin.Service
                 var enrichMovieTmdbIds = config.EnableLocalMediaFilter || config.EnableTmdbFolderNaming;
                 var movieTmdbCache = DeserializeMovieTmdbCache(config.MovieTmdbCacheJson);
                 var movieTmdbCacheChanged = 0;
+                var movieTmdbCacheUnsavedAdds = 0;
+                var movieTmdbCacheSaveLock = new object();
                 if (enrichMovieTmdbIds)
                 {
                     var listIds = allStreams.Count(m => IsValidTmdbId(m.TmdbId));
@@ -525,6 +527,19 @@ namespace Emby.Xtream.Plugin.Service
                                 {
                                     movieTmdbCache[cacheKey] = providerTmdbId.Trim();
                                     Interlocked.Exchange(ref movieTmdbCacheChanged, 1);
+                                    if (Interlocked.Increment(ref movieTmdbCacheUnsavedAdds) >= 500)
+                                    {
+                                        lock (movieTmdbCacheSaveLock)
+                                        {
+                                            if (Volatile.Read(ref movieTmdbCacheUnsavedAdds) >= 500)
+                                            {
+                                                config.MovieTmdbCacheJson = SerializeMovieTmdbCache(movieTmdbCache);
+                                                saveConfig?.Invoke();
+                                                Interlocked.Exchange(ref movieTmdbCacheUnsavedAdds, 0);
+                                                _logger.Info("Movie TMDB detail cache checkpoint: {0} entries", movieTmdbCache.Count);
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -708,8 +723,12 @@ namespace Emby.Xtream.Plugin.Service
 
                 if (Volatile.Read(ref movieTmdbCacheChanged) != 0)
                 {
-                    config.MovieTmdbCacheJson = SerializeMovieTmdbCache(movieTmdbCache);
-                    saveConfig?.Invoke();
+                    lock (movieTmdbCacheSaveLock)
+                    {
+                        config.MovieTmdbCacheJson = SerializeMovieTmdbCache(movieTmdbCache);
+                        saveConfig?.Invoke();
+                        Interlocked.Exchange(ref movieTmdbCacheUnsavedAdds, 0);
+                    }
                     _logger.Info("Movie TMDB detail cache updated: {0} entries", movieTmdbCache.Count);
                 }
 
