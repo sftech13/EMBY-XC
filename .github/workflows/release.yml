@@ -62,4 +62,4 @@ jobs:
         with:
           files: artifacts/publish/XC2EMBY.Plugin.dll
           body_path: release_notes.md
-          draft: true
+          draft: false
