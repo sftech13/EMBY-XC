@@ -55,6 +55,10 @@ function (BaseView, loading) {
             updateEpgVisibility(view);
         });
 
+        view.querySelector('.chkEnableLiveTv').addEventListener('change', function () {
+            updateLiveTvVisibility(view);
+        });
+
         view.querySelector('.chkSyncMovies').addEventListener('change', function () {
             updateVodMovieVisibility(view);
         });
@@ -327,6 +331,10 @@ function (BaseView, loading) {
             dashboardSyncAll(self);
         });
 
+        view.querySelector('.btnDashboardRefreshGuide').addEventListener('click', function () {
+            refreshCache(view, '.dashboardRefreshGuideResult');
+        });
+
         // Retry failed items button
         view.querySelector('.btnRetryFailed').addEventListener('click', function () {
             retryFailed(view);
@@ -558,6 +566,7 @@ function (BaseView, loading) {
             view.querySelector('.selOutputFormat').value = config.LiveTvOutputFormat || 'ts';
             view.querySelector('.txtTunerCount').value = config.TunerCount > 0 ? config.TunerCount : 1;
             setChecked(view.querySelector('.chkLiveTvDirectPlay'), config.EnableLiveTvDirectPlay !== false);
+            setChecked(view.querySelector('.chkClearLiveTvLogoCacheOnRefresh'), !!config.ClearLiveTvLogoCacheOnRefresh);
             setChecked(view.querySelector('.chkIncludeGroupTitle'), config.IncludeGroupTitleInM3U !== false);
 
             var epgVal = config.EpgSource;
@@ -652,6 +661,7 @@ function (BaseView, loading) {
 
             updateTmdbVisibility(view);
             updateNameCleaningVisibility(view);
+            updateLiveTvVisibility(view);
             updateEpgVisibility(view);
             updateVodMovieVisibility(view);
             updateDocumentaryVisibility(view);
@@ -698,6 +708,7 @@ function (BaseView, loading) {
             config.TunerCount = Math.max(1, parseInt(view.querySelector('.txtTunerCount').value, 10) || 1);
             config.IncludeAdultChannels = false;
             config.EnableLiveTvDirectPlay = view.querySelector('.chkLiveTvDirectPlay').checked;
+            config.ClearLiveTvLogoCacheOnRefresh = view.querySelector('.chkClearLiveTvLogoCacheOnRefresh').checked;
             config.IncludeGroupTitleInM3U = view.querySelector('.chkIncludeGroupTitle').checked;
 
             config.EpgSource = parseInt(view.querySelector('.selectEpgSource').value, 10);
@@ -801,7 +812,7 @@ function (BaseView, loading) {
         var btnMap = { dashboard: '.tabBtnDashboard', generic: '.tabBtnGeneric', movies: '.tabBtnMovies', documentaries: '.tabBtnDocumentaries', series: '.tabBtnSeries', docuSeries: '.tabBtnDocuSeries', liveTv: '.tabBtnLiveTv' };
 
         var panel = view.querySelector(panelMap[tabName]);
-        if (panel) panel.style.display = 'block';
+        if (panel) panel.style.display = (tabName === 'generic' || tabName === 'liveTv') ? 'grid' : 'block';
 
         var btn = view.querySelector(btnMap[tabName]);
         if (btn) {
@@ -828,6 +839,14 @@ function (BaseView, loading) {
     function updateNameCleaningVisibility(view) {
         var enabled = view.querySelector('.chkEnableNameCleaning').checked;
         view.querySelector('.nameCleaningSettings').style.display = enabled ? '' : 'none';
+    }
+
+    function updateLiveTvVisibility(view) {
+        var enabled = view.querySelector('.chkEnableLiveTv').checked;
+        var items = view.querySelectorAll('.liveTvSettings');
+        for (var i = 0; i < items.length; i++) {
+            items[i].style.display = enabled ? '' : 'none';
+        }
     }
 
     function updateVodMovieVisibility(view) {
@@ -2135,15 +2154,15 @@ function (BaseView, loading) {
         });
     }
 
-    function refreshCache(view) {
-        var resultEl = view.querySelector('.refreshCacheResult');
+    function refreshCache(view, resultSelector) {
+        var resultEl = view.querySelector(resultSelector || '.refreshCacheResult');
         resultEl.innerHTML = '<span style="opacity:0.5;">Refreshing cache...</span>';
 
         ApiClient.ajax({
             type: 'POST',
             url: ApiClient.getUrl('XC2EMBY/RefreshCache')
         }).then(function () {
-            setPillResult(resultEl, true, 'Cache refreshed successfully!');
+            setPillResult(resultEl, true, 'Cache refresh requested successfully.');
         }).catch(function () {
             setPillResult(resultEl, false, 'Failed to refresh cache.');
         });

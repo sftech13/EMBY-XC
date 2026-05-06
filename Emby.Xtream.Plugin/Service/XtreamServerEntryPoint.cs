@@ -1,11 +1,15 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Threading;
 using MediaBrowser.Controller;
+using MediaBrowser.Controller.Entities;
+using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.LiveTv;
 using MediaBrowser.Controller.Plugins;
+using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.LiveTv;
 using MediaBrowser.Model.Logging;
 using ITunerHost = MediaBrowser.Controller.LiveTv.ITunerHost;
@@ -289,8 +293,13 @@ namespace Emby.Xtream.Plugin.Service
 
         // ── Guide refresh ─────────────────────────────────────────────────────
 
-        internal void TriggerGuideRefresh()
+        internal GuideLogoCleanupResult TriggerGuideRefresh()
         {
+            var config = Plugin.Instance.Configuration;
+            var logoCleanup = config.ClearLiveTvLogoCacheOnRefresh
+                ? ClearGuideLogos()
+                : new GuideLogoCleanupResult { Success = true, Skipped = true };
+
             try
             {
                 var infos = GetListingProviderInfos();
@@ -299,22 +308,103 @@ namespace Emby.Xtream.Plugin.Service
                 if (info == null)
                 {
                     _logger.Warn("TriggerGuideRefresh: xtream-epg listing provider not found");
-                    return;
+                    logoCleanup.GuideRefreshTriggered = false;
+                    return logoCleanup;
                 }
 
                 // startRefresh=true causes Emby to re-fetch listings and rebuild the guide.
                 _liveTvManager.SaveListingProvider(info, false, true, CancellationToken.None)
                     .GetAwaiter().GetResult();
 
-                _logger.Info("Guide refresh triggered after cache clear");
+                logoCleanup.GuideRefreshTriggered = true;
+                _logger.Info(
+                    "Guide refresh triggered after cache clear; logo cleanup skipped={0}, scanned {1} channel(s), removed {2} logo(s), {3} failed",
+                    logoCleanup.Skipped,
+                    logoCleanup.ChannelsScanned,
+                    logoCleanup.LogosDeleted,
+                    logoCleanup.Failed);
             }
             catch (Exception ex)
             {
                 _logger.Warn("TriggerGuideRefresh failed: {0}", ex.Message);
+                logoCleanup.GuideRefreshTriggered = false;
             }
+
+            return logoCleanup;
+        }
+
+        internal GuideLogoCleanupResult ClearGuideLogos()
+        {
+            var result = new GuideLogoCleanupResult();
+
+            try
+            {
+                var channels = GetInternalLiveTvChannels();
+                result.ChannelsScanned = channels.Count;
+
+                foreach (var channel in channels)
+                {
+                    try
+                    {
+                        if (!channel.HasImage(ImageType.Primary, 0))
+                            continue;
+
+                        channel.DeleteImage(ImageType.Primary, 0);
+                        result.LogosDeleted++;
+                    }
+                    catch
+                    {
+                        result.Failed++;
+                    }
+                }
+
+                result.Success = result.Failed == 0;
+                _logger.Info(
+                    "Guide logo cleanup completed: scanned {0} channel(s), removed {1} logo(s), {2} failed",
+                    result.ChannelsScanned,
+                    result.LogosDeleted,
+                    result.Failed);
+            }
+            catch (Exception ex)
+            {
+                result.Success = false;
+                result.Message = ex.Message;
+                _logger.Warn("Guide logo cleanup failed: {0}", ex.Message);
+            }
+
+            return result;
         }
 
         // ── Reflection helpers ────────────────────────────────────────────────
+
+        private List<BaseItem> GetInternalLiveTvChannels()
+        {
+            var method = _liveTvManager.GetType().GetMethod(
+                "GetInternalChannels",
+                BindingFlags.Public | BindingFlags.Instance);
+
+            if (method == null)
+                return new List<BaseItem>();
+
+            var task = method.Invoke(_liveTvManager, new object[]
+            {
+                new InternalItemsQuery(),
+                true,
+                CancellationToken.None
+            }) as System.Threading.Tasks.Task;
+
+            if (task == null)
+                return new List<BaseItem>();
+
+            task.GetAwaiter().GetResult();
+
+            var result = task.GetType().GetProperty("Result")?.GetValue(task);
+            var items = result?.GetType().GetProperty("Items")?.GetValue(result) as IEnumerable;
+            if (items == null)
+                return new List<BaseItem>();
+
+            return items.OfType<BaseItem>().ToList();
+        }
 
         private IEnumerable<T> GetExisting<T>(string fieldName)
         {
@@ -353,5 +443,16 @@ namespace Emby.Xtream.Plugin.Service
         }
 
         public void Dispose() { }
+    }
+
+    internal class GuideLogoCleanupResult
+    {
+        public bool Success { get; set; }
+        public string Message { get; set; }
+        public int ChannelsScanned { get; set; }
+        public int LogosDeleted { get; set; }
+        public int Failed { get; set; }
+        public bool Skipped { get; set; }
+        public bool GuideRefreshTriggered { get; set; }
     }
 }

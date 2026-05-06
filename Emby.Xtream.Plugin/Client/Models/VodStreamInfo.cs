@@ -25,6 +25,7 @@ namespace Emby.Xtream.Plugin.Client.Models
         public string ContainerExtension { get; set; } = "mp4";
 
         [JsonPropertyName("added")]
+        [JsonConverter(typeof(FlexibleNullableDoubleConverter))]
         public double? Added { get; set; }
 
         [JsonPropertyName("tmdb_id")]

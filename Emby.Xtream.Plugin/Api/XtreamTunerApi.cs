@@ -36,6 +36,11 @@ namespace Emby.Xtream.Plugin.Api
     {
     }
 
+    [Route("/XC2EMBY/RefreshLogos", "POST", Summary = "Removes Live TV channel logos and refreshes guide data")]
+    public class RefreshLogos : IReturn<RefreshLogosResult>
+    {
+    }
+
     [Route("/XC2EMBY/ClearCodecCache", "POST", Summary = "Clears per-channel codec cache so all channels are re-probed on next tune")]
     public class ClearCodecCache : IReturnVoid
     {
@@ -187,6 +192,15 @@ namespace Emby.Xtream.Plugin.Api
     {
         public bool Success { get; set; }
         public string Message { get; set; }
+    }
+
+    public class RefreshLogosResult
+    {
+        public bool Success { get; set; }
+        public string Message { get; set; }
+        public int ChannelsScanned { get; set; }
+        public int LogosDeleted { get; set; }
+        public int Failed { get; set; }
     }
 
     public class BrowsePathResult
@@ -1316,6 +1330,44 @@ namespace Emby.Xtream.Plugin.Api
             Plugin.Instance.LiveTvService.InvalidateCache();
             XtreamTunerHost.Instance?.ClearCaches();
             XtreamServerEntryPoint.Instance?.TriggerGuideRefresh();
+        }
+
+        public object Post(RefreshLogos request)
+        {
+            var result = new RefreshLogosResult();
+
+            try
+            {
+                Plugin.Instance.LiveTvService.InvalidateCache();
+                XtreamTunerHost.Instance?.ClearCaches();
+
+                var cleanup = XtreamServerEntryPoint.Instance?.TriggerGuideRefresh();
+                if (cleanup == null)
+                {
+                    result.Message = "Emby guide refresh service is not available.";
+                    return result;
+                }
+
+                result.ChannelsScanned = cleanup.ChannelsScanned;
+                result.LogosDeleted = cleanup.LogosDeleted;
+                result.Failed = cleanup.Failed;
+                result.Success = cleanup.Success && cleanup.GuideRefreshTriggered;
+                result.Message = cleanup.Skipped && result.Success
+                    ? "Guide refresh triggered. Logo cache cleanup skipped by plugin setting."
+                    : result.Success
+                    ? string.Format(CultureInfo.InvariantCulture,
+                        "Removed {0} logo(s) from {1} Live TV channel(s), then refreshed the guide.",
+                        result.LogosDeleted, result.ChannelsScanned)
+                    : string.Format(CultureInfo.InvariantCulture,
+                        "Removed {0} logo(s) from {1} Live TV channel(s); {2} channel(s) failed. Guide refresh triggered: {3}.",
+                        result.LogosDeleted, result.ChannelsScanned, result.Failed, cleanup.GuideRefreshTriggered);
+            }
+            catch (Exception ex)
+            {
+                result.Message = "Failed to remove Live TV logos: " + ex.Message;
+            }
+
+            return result;
         }
 
         public void Post(ClearCodecCache request)

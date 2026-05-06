@@ -256,6 +256,7 @@ namespace Emby.Xtream.Plugin
             target.EnableLiveTv = source.EnableLiveTv;
             target.LiveTvOutputFormat = source.LiveTvOutputFormat;
             target.EnableLiveTvDirectPlay = source.EnableLiveTvDirectPlay;
+            target.ClearLiveTvLogoCacheOnRefresh = source.ClearLiveTvLogoCacheOnRefresh;
             target.TunerCount = source.TunerCount > 0 ? source.TunerCount : 1;
             target.StreamCodecCacheJson = source.StreamCodecCacheJson;
             target.EpgSource = source.EpgSource;

@@ -15,6 +15,7 @@ namespace Emby.Xtream.Plugin
         public bool EnableLiveTv { get; set; } = true;
         public string LiveTvOutputFormat { get; set; } = "ts";
         public bool EnableLiveTvDirectPlay { get; set; } = true;
+        public bool ClearLiveTvLogoCacheOnRefresh { get; set; }
         public int TunerCount { get; set; } = 1;
 
         // Per-channel codec cache: JSON dict (streamId → {VideoCodec, AudioCodec})

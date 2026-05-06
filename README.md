@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logo.svg" width="180" alt="XC2EMBY" />
+  <img src="logo.png" width="240" alt="XC2EMBY" />
 </p>
 
 <h1 align="center">XC2EMBY</h1>
@@ -46,6 +46,13 @@
 
 ## Features Overview
 
+### Current Release: v1.1.23
+- Refreshed the Dashboard, Settings, and Live TV tabs with clearer row-based controls and improved layout.
+- Added Dashboard and Live TV guide refresh actions for clearing XC2EMBY channel/guide caches and triggering Emby guide refresh.
+- Added optional Live TV channel-logo cache cleanup during guide refresh.
+- Added a new XC2EMBY plugin logo for Emby and the README.
+- Improved provider parsing for mixed numeric/string `added` timestamps in live and VOD stream data.
+
 ### Live TV
 - Registers as a native Emby tuner host — channels appear in Live TV just like any other tuner
 - Fetches channel list from Xtream `get_live_streams` API with a 6-hour warm cache and background refresh
@@ -53,6 +60,7 @@
 - Optional **direct play** — clients connect straight to the Xtream URL, bypassing Emby's transcoder entirely
 - Filters channels by category and optionally excludes adult content
 - Optionally adds category names as M3U `group-title` tags
+- Optional guide refresh action clears cached channel logos so Emby can re-fetch current artwork
 
 ### Guide Data (EPG)
 - Registered as a native Emby `IListingsProvider` — guide data flows through Emby's standard Live TV pipeline
@@ -96,6 +104,7 @@
 
 ### Dashboard & Administration
 - Built-in dashboard: sync history (last 10 runs), live progress, library stats, auto-sync schedule
+- Quick actions for guide refresh, enabled-library sync, and sanitized log download
 - Real-time progress bars for running syncs
 - Retry failed items from the last sync
 - Sanitized log download (credentials redacted)
@@ -226,8 +235,9 @@ Click **Refresh Categories** to fetch the current category list from your provid
 
 #### Cache Controls
 
-- **Refresh Cache** — immediately invalidates the M3U playlist cache and EPG cache, and clears the in-memory channel list. Emby will re-fetch everything on next access.
+- **Refresh Channel & EPG Cache** — invalidates XC2EMBY channel/guide caches and asks Emby to refresh guide data.
 - **Clear Codec Cache** — removes all background-probed codec entries. Every channel will be re-probed on next tune. Use this if codec info appears wrong or stale.
+- **Clear Channel Logo Cache on Guide Refresh** — when enabled, guide refresh deletes cached Live TV channel images so Emby can re-fetch current logos.
 
 ---
 
