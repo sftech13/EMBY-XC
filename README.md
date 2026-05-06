@@ -31,7 +31,6 @@
 - [Dashboard](#dashboard)
 - [Auto-Sync](#auto-sync)
 - [Channel Name Cleaning](#channel-name-cleaning)
-- [Content Name Cleaning](#content-name-cleaning)
 - [Codec Detection & OSD Display](#codec-detection--osd-display)
 - [Folder Modes](#folder-modes)
 - [Metadata & NFO Files](#metadata--nfo-files)
@@ -46,12 +45,21 @@
 
 ## Features Overview
 
-### Current Release: v1.1.23
+### Current Release: v1.1.25
+
+**v1.1.25**
+- Fixed series sync failure when provider returns `episodes` as an empty array `[]` instead of an object (e.g. Due South).
+- Fixed series sync failure when provider returns no detail data (empty array, null, or false) for a series (e.g. Obi-Wan Kenobi). Both cases are now skipped gracefully instead of appearing as failed items.
+
+**v1.1.24**
+- Version bump.
+
+**v1.1.23**
 - Refreshed the Dashboard, Settings, and Live TV tabs with clearer row-based controls and improved layout.
 - Added Dashboard and Live TV guide refresh actions for clearing XC2EMBY channel/guide caches and triggering Emby guide refresh.
 - Added optional Live TV channel-logo cache cleanup during guide refresh.
 - Added a new XC2EMBY plugin logo for Emby and the README.
-- Improved provider parsing for mixed numeric/string `added` timestamps in live and VOD stream data.
+- Fixed provider parsing for mixed numeric/string `added` timestamps in live and VOD stream data — previously caused a complete channel list failure when any channel had a non-numeric value.
 
 ### Live TV
 - Registers as a native Emby tuner host — channels appear in Live TV just like any other tuner
