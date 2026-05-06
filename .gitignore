@@ -41,6 +41,8 @@ docs/play-timing-analysis.md
 # Screenshots (scratch reference images)
 *.png
 !Emby.Xtream.Plugin/thumb.png
+!logo.png
+!docs/*.png
 
 # Bug logs (local only)
 logs/

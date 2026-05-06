@@ -180,6 +180,8 @@ The config page tabs are ordered as: **Dashboard**, **Live TV**, **Movies**, **D
 
 ### Settings Tab
 
+![Settings](docs/settings.png)
+
 #### Xtream Connection
 
 | Field | Description |
@@ -218,6 +220,8 @@ Optional cleaning applied to all live channel names. See [Channel Name Cleaning]
 ---
 
 ### Live TV Tab
+
+![Live TV](docs/LiveTV.png)
 
 #### Enable Live TV
 
@@ -321,6 +325,8 @@ Identical layout to the TV Shows tab, but stores its own series category selecti
 ---
 
 ## Dashboard
+
+![Dashboard](docs/Dashboard.png)
 
 The Dashboard tab gives a live view of the plugin state.
 
