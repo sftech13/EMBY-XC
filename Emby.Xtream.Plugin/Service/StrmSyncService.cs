@@ -1932,6 +1932,11 @@ namespace Emby.Xtream.Plugin.Service
                 config.BaseUrl, Uri.EscapeDataString(config.Username ?? string.Empty), Uri.EscapeDataString(config.Password ?? string.Empty), seriesId);
 
             var json = await _httpClient.GetStringAsync(url).ConfigureAwait(false);
+            // Some providers return [] or false/null when a series has no detail.
+            // Treat anything that isn't a JSON object as empty rather than throwing.
+            var trimmed = json == null ? string.Empty : json.TrimStart();
+            if (trimmed.Length == 0 || trimmed[0] != '{')
+                return null;
             return STJ.JsonSerializer.Deserialize<SeriesDetailInfo>(json, JsonOptions);
         }
 
