@@ -45,7 +45,11 @@
 
 ## Features Overview
 
-### Current Release: v1.1.26
+### Current Release: v1.1.27
+
+**v1.1.27**
+- Live TV guide-affecting setting changes now automatically clear XC2EMBY caches and trigger an Emby guide refresh after save.
+- Fixed disabled Live TV categories continuing to appear until a manual guide/cache refresh or cache expiry.
 
 **v1.1.26**
 - Fixed Live TV category selections losing their checked state after saving, refreshing categories, or returning to the tab.

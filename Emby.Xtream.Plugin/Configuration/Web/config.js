@@ -700,6 +700,7 @@ function (BaseView, loading) {
         loading.show();
         ApiClient.getPluginConfiguration(pluginId).then(function (config) {
             var view = instance.view;
+            var previousLiveSettings = captureLiveRefreshSettings(config);
 
             config.BaseUrl = view.querySelector('.txtBaseUrl').value.replace(/\/+$/, '');
             config.Username = view.querySelector('.txtUsername').value;
@@ -792,10 +793,15 @@ function (BaseView, loading) {
             config.EnableSeriesMetadataLookup = fallbackOn;
             config.TvdbFolderIdOverrides = view.querySelector('.txtTvdbFolderIdOverrides').value;
 
+            var refreshLiveGuide = liveRefreshSettingsChanged(previousLiveSettings, captureLiveRefreshSettings(config));
+
             ApiClient.updatePluginConfiguration(pluginId, config).then(function () {
                 loading.hide();
                 Dashboard.processPluginConfigurationUpdateResult();
                 applyScheduleToTasks(view, config, ApiClient);
+                if (refreshLiveGuide) {
+                    refreshCache(view);
+                }
                 if (typeof callback === 'function') callback();
             }).catch(function (err) {
                 loading.hide();
@@ -807,6 +813,57 @@ function (BaseView, loading) {
             console.error('XC2EMBY: getPluginConfiguration failed', err);
             Dashboard.alert('Failed to load configuration before saving. Try a hard refresh (Ctrl+Shift+R) and try again.');
         });
+    }
+
+    function captureLiveRefreshSettings(config) {
+        return {
+            enabled: config.EnableLiveTv !== false,
+            categories: normalizeIdArray(config.SelectedLiveCategoryIds),
+            outputFormat: config.LiveTvOutputFormat || 'ts',
+            tunerCount: config.TunerCount || 1,
+            directPlay: config.EnableLiveTvDirectPlay !== false,
+            includeGroupTitle: config.IncludeGroupTitleInM3U !== false,
+            epgSource: config.EpgSource,
+            customEpgUrl: config.CustomEpgUrl || '',
+            epgCacheMinutes: config.EpgCacheMinutes || 30,
+            epgDaysToFetch: config.EpgDaysToFetch || 2,
+            m3uCacheMinutes: config.M3UCacheMinutes || 15
+        };
+    }
+
+    function normalizeIdArray(ids) {
+        var result = [];
+        if (ids && ids.length) {
+            for (var i = 0; i < ids.length; i++) {
+                var id = parseInt(ids[i], 10);
+                if (!isNaN(id)) result.push(id);
+            }
+        }
+        result.sort(function (a, b) { return a - b; });
+        return result;
+    }
+
+    function liveRefreshSettingsChanged(before, after) {
+        if (!before || !after) return false;
+        if (!sameIdArray(before.categories, after.categories)) return true;
+        return before.enabled !== after.enabled
+            || before.outputFormat !== after.outputFormat
+            || before.tunerCount !== after.tunerCount
+            || before.directPlay !== after.directPlay
+            || before.includeGroupTitle !== after.includeGroupTitle
+            || String(before.epgSource) !== String(after.epgSource)
+            || before.customEpgUrl !== after.customEpgUrl
+            || before.epgCacheMinutes !== after.epgCacheMinutes
+            || before.epgDaysToFetch !== after.epgDaysToFetch
+            || before.m3uCacheMinutes !== after.m3uCacheMinutes;
+    }
+
+    function sameIdArray(left, right) {
+        if (left.length !== right.length) return false;
+        for (var i = 0; i < left.length; i++) {
+            if (left[i] !== right[i]) return false;
+        }
+        return true;
     }
 
     function switchTab(view, tabName) {
