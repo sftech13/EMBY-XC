@@ -45,7 +45,11 @@
 
 ## Features Overview
 
-### Current Release: v1.1.25
+### Current Release: v1.1.26
+
+**v1.1.26**
+- Fixed Live TV category selections losing their checked state after saving, refreshing categories, or returning to the tab.
+- Updated category selection state immediately after save so refreshed category lists redraw from the latest saved choices.
 
 **v1.1.25**
 - Fixed series sync failure when provider returns `episodes` as an empty array `[]` instead of an object (e.g. Due South).

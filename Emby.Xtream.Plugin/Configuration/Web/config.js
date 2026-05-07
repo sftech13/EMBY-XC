@@ -174,10 +174,12 @@ function (BaseView, loading) {
 
         view.querySelector('.btnSelectAllCategories').addEventListener('click', function () {
             toggleAllCategories(view, true);
+            self.selectedCategoryIds = getSelectedCategoryIds(self);
         });
 
         view.querySelector('.btnDeselectAllCategories').addEventListener('click', function () {
             toggleAllCategories(view, false);
+            self.selectedCategoryIds = getSelectedCategoryIds(self);
         });
 
         view.querySelector('.btnRefreshCache').addEventListener('click', function () {
@@ -401,6 +403,7 @@ function (BaseView, loading) {
         });
         view.querySelector('.categoriesContainer').addEventListener('change', function (e) {
             if (e.target.classList.contains('categoryCheckbox')) {
+                self.selectedCategoryIds = getSelectedCategoryIds(self);
                 updateCategoryCountBadge(view, 'live');
             }
         });
@@ -717,7 +720,9 @@ function (BaseView, loading) {
             config.EpgDaysToFetch = parseInt(view.querySelector('.txtEpgDaysToFetch').value, 10) || 2;
             config.M3UCacheMinutes = parseInt(view.querySelector('.txtM3UCacheMinutes').value, 10) || 15;
 
-            config.SelectedLiveCategoryIds = getSelectedCategoryIds(instance);
+            var selectedLiveCategoryIds = getSelectedCategoryIds(instance);
+            config.SelectedLiveCategoryIds = selectedLiveCategoryIds;
+            instance.selectedCategoryIds = selectedLiveCategoryIds;
 
             // Unified name cleaning → both backend properties
             var nameCleaningOn = view.querySelector('.chkEnableNameCleaning').checked;
@@ -731,25 +736,33 @@ function (BaseView, loading) {
             config.SyncMovies = view.querySelector('.chkSyncMovies').checked;
             config.MovieFolderMode = view.querySelector('.selMovieFolderMode').value;
             config.MovieFolderMappings = serializeFolderEntries(view, 'movie');
-            config.SelectedVodCategoryIds = getSelectedVodCategoryIds(instance);
+            var selectedVodCategoryIds = getSelectedVodCategoryIds(instance);
+            config.SelectedVodCategoryIds = selectedVodCategoryIds;
+            instance.selectedVodCategoryIds = selectedVodCategoryIds;
 
             // Documentary Movies
             config.SyncDocumentaries = view.querySelector('.chkSyncDocumentaries').checked;
             config.DocumentaryFolderMode = view.querySelector('.selDocumentaryFolderMode').value;
             config.DocumentaryFolderMappings = serializeFolderEntries(view, 'documentary');
-            config.SelectedDocumentaryCategoryIds = getSelectedDocumentaryCategoryIds(instance);
+            var selectedDocumentaryCategoryIds = getSelectedDocumentaryCategoryIds(instance);
+            config.SelectedDocumentaryCategoryIds = selectedDocumentaryCategoryIds;
+            instance.selectedDocumentaryCategoryIds = selectedDocumentaryCategoryIds;
 
             // Series
             config.SyncSeries = view.querySelector('.chkSyncSeries').checked;
             config.SeriesFolderMode = view.querySelector('.selSeriesFolderMode').value;
             config.SeriesFolderMappings = serializeFolderEntries(view, 'series');
-            config.SelectedSeriesCategoryIds = getSelectedSeriesCategoryIds(instance);
+            var selectedSeriesCategoryIds = getSelectedSeriesCategoryIds(instance);
+            config.SelectedSeriesCategoryIds = selectedSeriesCategoryIds;
+            instance.selectedSeriesCategoryIds = selectedSeriesCategoryIds;
 
             // Docu Series
             config.SyncDocuSeries = view.querySelector('.chkSyncDocuSeries').checked;
             config.DocuSeriesFolderMode = view.querySelector('.selDocuSeriesFolderMode').value;
             config.DocuSeriesFolderMappings = serializeFolderEntries(view, 'docuSeries');
-            config.SelectedDocuSeriesCategoryIds = getSelectedDocuSeriesCategoryIds(instance);
+            var selectedDocuSeriesCategoryIds = getSelectedDocuSeriesCategoryIds(instance);
+            config.SelectedDocuSeriesCategoryIds = selectedDocuSeriesCategoryIds;
+            instance.selectedDocuSeriesCategoryIds = selectedDocuSeriesCategoryIds;
 
             // Sync settings
             config.StrmLibraryPath = view.querySelector('.txtStrmLibraryPath').value.replace(/\/+$/, '') || '/config/xtream';
