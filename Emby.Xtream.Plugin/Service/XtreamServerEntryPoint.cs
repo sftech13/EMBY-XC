@@ -312,6 +312,21 @@ namespace Emby.Xtream.Plugin.Service
                     return logoCleanup;
                 }
 
+                // SaveTunerHost triggers Emby to re-fetch the channel list from the tuner,
+                // picking up any new channels added by the provider since last scan.
+                var tuners = _liveTvManager.GetTunerHostInfos(XtreamTunerHost.TunerType);
+                var tuner = tuners?.Count > 0 ? tuners[0] : null;
+                if (tuner != null)
+                {
+                    _liveTvManager.SaveTunerHost(tuner, CancellationToken.None)
+                        .GetAwaiter().GetResult();
+                    _logger.Info("Tuner channel rescan triggered");
+                }
+                else
+                {
+                    _logger.Warn("TriggerGuideRefresh: no xtream tuner host found for channel rescan");
+                }
+
                 // startRefresh=true causes Emby to re-fetch listings and rebuild the guide.
                 _liveTvManager.SaveListingProvider(info, false, true, CancellationToken.None)
                     .GetAwaiter().GetResult();
