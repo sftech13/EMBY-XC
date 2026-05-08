@@ -299,6 +299,10 @@ namespace Emby.Xtream.Plugin.Service
                         tags = new string[] { catName };
                     }
 
+                    // Only wire up the listings provider when we have a confirmed XMLTV match.
+                    // A null listingsId with ListingsProviderId still set causes Emby to fall
+                    // back to name-based matching, which links unrelated duplicate-named channels
+                    // (e.g. two streams both named "PPV 12") to the same EPG entry.
                     result.Add(new ChannelInfo
                     {
                         Id = CreateEmbyChannelId(tuner, streamIdStr),
@@ -308,9 +312,9 @@ namespace Emby.Xtream.Plugin.Service
                         ImageUrl = string.IsNullOrEmpty(channel.StreamIcon) ? null : channel.StreamIcon,
                         ChannelType = ChannelType.TV,
                         TunerHostId = tuner.Id,
-                        ListingsProviderId = listingsProviderId,
+                        ListingsProviderId = listingsId != null ? listingsProviderId : null,
                         ListingsChannelId = listingsId,
-                        ListingsChannelName = cleanName,
+                        ListingsChannelName = listingsId != null ? cleanName : null,
                         AlternateNames = alternateNames,
                         Tags = tags,
                     });

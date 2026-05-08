@@ -1329,6 +1329,7 @@ namespace Emby.Xtream.Plugin.Api
         {
             Plugin.Instance.LiveTvService.InvalidateCache();
             XtreamTunerHost.Instance?.ClearCaches();
+            XtreamServerEntryPoint.Instance?.TriggerChannelRescan();
             XtreamServerEntryPoint.Instance?.TriggerGuideRefresh();
         }
 
