@@ -23,10 +23,7 @@ namespace Emby.Xtream.Plugin.Service
     {
         internal const string TunerType = "xtream-tuner";
 
-        // Channels change rarely — keep the cache warm for 6 hours.
-        // Stale cache is served immediately while a background refresh runs,
-        // so Emby never blocks on an API call after the first load.
-        private static readonly TimeSpan CacheDuration = TimeSpan.FromHours(6);
+        private static readonly TimeSpan MinCacheDuration = TimeSpan.FromMinutes(5);
 
         private static readonly STJ.JsonSerializerOptions JsonOptions = new STJ.JsonSerializerOptions
         {
@@ -160,8 +157,10 @@ namespace Emby.Xtream.Plugin.Service
             var cached = _cachedChannels;
             if (cached != null)
             {
+                var cacheDuration = TimeSpan.FromMinutes(
+                    Math.Max(MinCacheDuration.TotalMinutes, config.M3UCacheMinutes));
                 var age = DateTime.UtcNow - _cacheTime;
-                if (age < CacheDuration)
+                if (age < cacheDuration)
                 {
                     // Cache is fresh — return immediately.
                     Logger.Debug("Returning cached channel list ({0} channels, age {1:0}m)", cached.Count, age.TotalMinutes);
