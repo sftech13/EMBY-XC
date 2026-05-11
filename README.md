@@ -45,7 +45,10 @@
 
 ## Features Overview
 
-### Current Release: v1.1.31
+### Current Release: v1.1.32
+
+**v1.1.32**
+- Fixed "Other Showings" incorrectly linking unrelated programs in the guide OSD. Programs without an episode sub-title previously used a series-scoped ShowId, causing all episodes of a show (and in edge cases, completely unrelated programs) to appear as other showings of each other. The fallback now uses a unique per-channel per-airing key, matching Emby's own XMLTV provider behavior. Programs with an episode sub-title continue to use episode-scoped ShowId for accurate cross-channel airing discovery.
 
 **v1.1.31**
 - Fixed: stopping one user's live stream was dropping all other users watching the same channel. Emby was sharing a single stream instance across viewers despite the sharing flag being off — setting `EnableStreamSharing=true` lets Emby track consumer count properly and only close the upstream connection when the last viewer stops.

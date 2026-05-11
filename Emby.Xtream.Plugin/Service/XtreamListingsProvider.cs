@@ -85,11 +85,12 @@ namespace Emby.Xtream.Plugin.Service
                 // "Other Showings" finds only airings of that specific episode, not
                 // every episode of the same series (e.g. only "Lizzo" guest airings of
                 // The Drew Barrymore Show, not Charlize Theron/Belle Burden/etc.).
-                // Without a sub-title, fall back to series key so cross-channel
-                // matching still works for movies and one-off specials.
+                // When no sub-title, use a unique key per airing (channelId + start)
+                // so "Other Showings" never fires — null causes Emby to bucket all
+                // null-ShowId programs together, linking completely unrelated programs.
                 var showId = (!string.IsNullOrEmpty(seriesKey) && !string.IsNullOrEmpty(episodeKey))
                     ? seriesKey + "::" + episodeKey
-                    : seriesKey ?? title.ToLowerInvariant();
+                    : channelId + "::" + startStr;
 
                 var program = new ProgramInfo
                 {
