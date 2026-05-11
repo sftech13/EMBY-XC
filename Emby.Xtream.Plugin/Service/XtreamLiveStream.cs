@@ -35,7 +35,7 @@ namespace Emby.Xtream.Plugin.Service
         public int ConsumerCount { get; set; }
         public string OriginalStreamId { get; set; }
         public string TunerHostId { get; }
-        public bool EnableStreamSharing => false;
+        public bool EnableStreamSharing => true;
         public MediaSourceInfo MediaSource { get; set; }
         public string UniqueId { get; }
         public DateTimeOffset DateOpened { get; }
