@@ -45,7 +45,20 @@
 
 ## Features Overview
 
-### Current Release: v1.1.27
+### Current Release: v1.1.31
+
+**v1.1.31**
+- Fixed: stopping one user's live stream was dropping all other users watching the same channel. Emby was sharing a single stream instance across viewers despite the sharing flag being off — setting `EnableStreamSharing=true` lets Emby track consumer count properly and only close the upstream connection when the last viewer stops.
+
+**v1.1.30**
+- Fixed channel rescan scope: `TriggerChannelRescan()` (SaveTunerHost) is now only called from the "Refresh Channel & EPG Cache" button, not from guide-only refresh paths.
+- Fixed EPG name-fallback: `ListingsProviderId` is now nulled out when no XMLTV match exists, preventing Emby's name-matching engine from assigning wrong EPG to duplicate-named channels.
+
+**v1.1.29**
+- "Refresh Channel & EPG Cache" button now triggers a tuner channel rescan in addition to an EPG refresh, so newly added provider channels appear in Emby immediately without waiting for the cache to expire.
+
+**v1.1.28**
+- Channel cache TTL now respects the **Channel Cache Duration** setting (formerly M3U Cache Duration) instead of a hardcoded 6-hour value. Minimum 5 minutes. Label updated in the UI.
 
 **v1.1.27**
 - Live TV guide-affecting setting changes now automatically clear XC2EMBY caches and trigger an Emby guide refresh after save.
