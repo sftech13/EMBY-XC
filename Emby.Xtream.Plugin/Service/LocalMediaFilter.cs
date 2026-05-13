@@ -10,9 +10,14 @@ namespace Emby.Xtream.Plugin.Service
 {
     internal sealed class LocalMediaFilter
     {
+        // Matches a standalone 4-digit year in parens, e.g. (2005). Captured so we can
+        // keep the year as a plain number instead of discarding it entirely.
+        private static readonly Regex ExtractParenYear = new Regex(@"\((\d{4})\)", RegexOptions.Compiled);
         private static readonly Regex StripParens = new Regex(@"\([^)]*\)", RegexOptions.Compiled);
         private static readonly Regex StripNonAlpha = new Regex(@"[^a-z0-9\s]", RegexOptions.Compiled);
         private static readonly Regex CollapseSpace = new Regex(@"\s+", RegexOptions.Compiled);
+        // Matches a trailing 4-digit year appended by NormalizeTitle, used for fallback lookup.
+        private static readonly Regex TrailingYear = new Regex(@"\s\d{4}$", RegexOptions.Compiled);
         // Matches {tmdb-12345} in paths (Radarr/Sonarr optional TMDB tag)
         private static readonly Regex PathTmdbTag = new Regex(@"[\{\[]tmdb-(\d+)[\}\]]", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         // Matches {imdb-tt12345} (Radarr file names) and [imdb-tt12345] (Sonarr folder names)
@@ -185,41 +190,46 @@ namespace Emby.Xtream.Plugin.Service
 
         internal bool ContainsMovie(string tmdbId, string imdbId, string cleanedName)
         {
-            if (!string.IsNullOrEmpty(tmdbId) && _movieTmdbIds.Contains(tmdbId))
-                return true;
-            if (!string.IsNullOrEmpty(imdbId) && _movieImdbIds.Contains(imdbId))
-                return true;
+            if (!string.IsNullOrEmpty(tmdbId) && _movieTmdbIds.Contains(tmdbId)) return true;
+            if (!string.IsNullOrEmpty(imdbId) && _movieImdbIds.Contains(imdbId)) return true;
             var norm = NormalizeTitle(cleanedName);
-            return !string.IsNullOrEmpty(norm) && _movieTitles.Contains(norm);
+            if (string.IsNullOrEmpty(norm)) return false;
+            if (_movieTitles.Contains(norm)) return true;
+            // XC name had "(YYYY)" → norm ends with year; also try without year so
+            // "The Office (2005)" still matches a local "The Office" missing year metadata.
+            var noYear = TrailingYear.Replace(norm, string.Empty);
+            return noYear.Length < norm.Length && _movieTitles.Contains(noYear);
         }
 
         internal bool ContainsSeries(string tmdbId, string imdbId, string cleanedName)
         {
-            if (!string.IsNullOrEmpty(tmdbId) && _seriesTmdbIds.Contains(tmdbId))
-                return true;
-            if (!string.IsNullOrEmpty(imdbId) && _seriesImdbIds.Contains(imdbId))
-                return true;
+            if (!string.IsNullOrEmpty(tmdbId) && _seriesTmdbIds.Contains(tmdbId)) return true;
+            if (!string.IsNullOrEmpty(imdbId) && _seriesImdbIds.Contains(imdbId)) return true;
             var norm = NormalizeTitle(cleanedName);
-            return !string.IsNullOrEmpty(norm) && _seriesTitles.Contains(norm);
+            if (string.IsNullOrEmpty(norm)) return false;
+            if (_seriesTitles.Contains(norm)) return true;
+            var noYear = TrailingYear.Replace(norm, string.Empty);
+            return noYear.Length < norm.Length && _seriesTitles.Contains(noYear);
         }
 
         internal bool ContainsEpisode(string tmdbId, string cleanedName, int seasonNum, int episodeNum)
         {
-            if (seasonNum < 0 || episodeNum <= 0)
-                return false;
-
+            if (seasonNum < 0 || episodeNum <= 0) return false;
             if (!string.IsNullOrEmpty(tmdbId) && _episodeTmdbKeys.Contains(BuildEpisodeKey(tmdbId, seasonNum, episodeNum)))
                 return true;
-
             var norm = NormalizeTitle(cleanedName);
-            return !string.IsNullOrEmpty(norm) && _episodeTitleKeys.Contains(BuildEpisodeKey(norm, seasonNum, episodeNum));
+            if (string.IsNullOrEmpty(norm)) return false;
+            if (_episodeTitleKeys.Contains(BuildEpisodeKey(norm, seasonNum, episodeNum))) return true;
+            var noYear = TrailingYear.Replace(norm, string.Empty);
+            return noYear.Length < norm.Length && _episodeTitleKeys.Contains(BuildEpisodeKey(noYear, seasonNum, episodeNum));
         }
 
         internal static string NormalizeTitle(string title)
         {
             if (string.IsNullOrWhiteSpace(title)) return string.Empty;
             var s = title.ToLowerInvariant();
-            s = StripParens.Replace(s, " ");    // remove (US), (UK), (2010), etc.
+            s = ExtractParenYear.Replace(s, " $1 "); // (2005) → 2005; keep year as plain number
+            s = StripParens.Replace(s, " ");          // strip remaining (US), (UK), etc.
             s = StripNonAlpha.Replace(s, " ");
             s = CollapseSpace.Replace(s, " ");
             return s.Trim();

@@ -572,6 +572,22 @@
                         <div class="dashboardAutoSyncLine" style="font-size:0.85em; opacity:0.6; margin-top:0.4em;"></div>
                     </div>
 
+                    <!-- Pending Orphans (hidden when empty) -->
+                    <div class="dashboardPendingOrphansCard dashboard-card" style="display:none; border-color:rgba(230,150,0,0.4);">
+                        <h3 style="color:#e6a020;">Pending Orphan Deletions</h3>
+                        <div class="fieldDescription" style="margin-bottom:0.6em;">These STRM files were detected as orphaned during the last sync and are waiting for your review.</div>
+                        <div class="dashboardPendingOrphansContent"></div>
+                        <div style="display:flex; gap:0.5em; flex-wrap:wrap; margin-top:0.8em;">
+                            <button class="btnCommitOrphans raised block" is="emby-button" type="button" style="background:#c0392b;">
+                                <span>Delete Orphans</span>
+                            </button>
+                            <button class="btnDismissOrphans raised button-secondary" is="emby-button" type="button">
+                                <span>Dismiss</span>
+                            </button>
+                        </div>
+                        <div class="pendingOrphansResult" style="margin-top:0.5em;"></div>
+                    </div>
+
                     <!-- Failed Items (hidden when empty) -->
                     <div class="dashboardFailedItemsCard dashboard-card" style="display:none; border-color:rgba(204,0,0,0.3);">
                         <h3 style="color:#cc4444;">Failed Items</h3>
@@ -758,6 +774,18 @@
                             <div class="inputContainer">
                                 <input class="txtOrphanSafetyThreshold" type="number" is="emby-input"
                                        label=" " min="0" max="100" step="1" />
+                            </div>
+                        </div>
+                        <div class="settingsOptionItem orphanThresholdContainer" style="display:none;">
+                            <div>
+                                <div class="settingsOptionTitle">Preview Orphans Before Deleting</div>
+                                <div class="settingsOptionDescription">Stage orphaned files for review on the Dashboard instead of deleting them automatically.</div>
+                            </div>
+                            <div class="checkboxContainer">
+                                <label>
+                                    <input class="chkEnableOrphanPreview" type="checkbox" is="emby-checkbox" />
+                                    <span>Enabled</span>
+                                </label>
                             </div>
                         </div>
                         <div class="settingsOptionItem">

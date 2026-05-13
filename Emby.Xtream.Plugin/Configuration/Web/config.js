@@ -339,7 +339,16 @@ function (BaseView, loading) {
         });
 
         view.querySelector('.chkCleanupOrphans').addEventListener('change', function () {
-            view.querySelector('.orphanThresholdContainer').style.display = this.checked ? '' : 'none';
+            var show = this.checked ? '' : 'none';
+            var containers = view.querySelectorAll('.orphanThresholdContainer');
+            for (var i = 0; i < containers.length; i++) containers[i].style.display = show;
+        });
+
+        view.querySelector('.btnCommitOrphans').addEventListener('click', function () {
+            commitPendingOrphans(view);
+        });
+        view.querySelector('.btnDismissOrphans').addEventListener('click', function () {
+            dismissPendingOrphans(view);
         });
 
         // Dashboard sync all button
@@ -666,7 +675,9 @@ function (BaseView, loading) {
             view.querySelector('.txtSyncParallelism').value = config.SyncParallelism || 3;
             setChecked(view.querySelector('.chkCleanupOrphans'), !!config.CleanupOrphans);
             view.querySelector('.txtOrphanSafetyThreshold').value = Math.round((config.OrphanSafetyThreshold || 0.20) * 100);
-            view.querySelector('.orphanThresholdContainer').style.display = config.CleanupOrphans ? '' : 'none';
+            setChecked(view.querySelector('.chkEnableOrphanPreview'), !!config.EnableOrphanPreview);
+            var orphanContainers = view.querySelectorAll('.orphanThresholdContainer');
+            for (var oi = 0; oi < orphanContainers.length; oi++) orphanContainers[oi].style.display = config.CleanupOrphans ? '' : 'none';
             setChecked(view.querySelector('.chkEnableNfoFiles'), !!config.EnableNfoFiles);
             setChecked(view.querySelector('.chkEnableLocalMediaFilter'), !!config.EnableLocalMediaFilter);
 
@@ -797,6 +808,7 @@ function (BaseView, loading) {
             config.SyncParallelism = parseInt(view.querySelector('.txtSyncParallelism').value, 10) || 3;
             config.CleanupOrphans = view.querySelector('.chkCleanupOrphans').checked;
             config.OrphanSafetyThreshold = (parseInt(view.querySelector('.txtOrphanSafetyThreshold').value, 10) || 0) / 100;
+            config.EnableOrphanPreview = view.querySelector('.chkEnableOrphanPreview').checked;
             config.EnableNfoFiles = view.querySelector('.chkEnableNfoFiles').checked;
             config.EnableLocalMediaFilter = view.querySelector('.chkEnableLocalMediaFilter').checked;
 
@@ -2514,6 +2526,63 @@ function (BaseView, loading) {
         });
 
         loadFailedItems(view);
+        loadPendingOrphans(view);
+    }
+
+    function loadPendingOrphans(view) {
+        var card = view.querySelector('.dashboardPendingOrphansCard');
+        if (!card) return;
+
+        ApiClient.getJSON(ApiClient.getUrl('XC2EMBY/Sync/PendingOrphans')).then(function (result) {
+            if (!result || !result.Count || result.Count === 0) {
+                card.style.display = 'none';
+                return;
+            }
+            card.style.display = '';
+            var content = view.querySelector('.dashboardPendingOrphansContent');
+            var paths = result.Paths || [];
+            var html = '<div style="font-size:0.85em; margin-bottom:0.4em; opacity:0.7;">' + result.Count + ' file(s) staged for deletion:</div>';
+            html += '<div style="max-height:180px; overflow-y:auto; font-size:0.82em; font-family:monospace; opacity:0.65; border:1px solid rgba(128,128,128,0.2); border-radius:4px; padding:0.4em 0.6em;">';
+            for (var i = 0; i < paths.length; i++) {
+                html += '<div style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + escHtml(paths[i]) + '</div>';
+            }
+            html += '</div>';
+            content.innerHTML = html;
+        }).catch(function () {
+            card.style.display = 'none';
+        });
+    }
+
+    function commitPendingOrphans(view) {
+        var card = view.querySelector('.dashboardPendingOrphansCard');
+        var result = view.querySelector('.pendingOrphansResult');
+        var commitBtn = view.querySelector('.btnCommitOrphans');
+        var dismissBtn = view.querySelector('.btnDismissOrphans');
+        if (result) result.innerHTML = '<span style="opacity:0.5;">Deleting orphans...</span>';
+        if (commitBtn) commitBtn.disabled = true;
+        if (dismissBtn) dismissBtn.disabled = true;
+
+        ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('XC2EMBY/Sync/PendingOrphans'), dataType: 'json' })
+            .then(function (data) {
+                if (result) setPillResult(result, data.Success, data.Message);
+                if (commitBtn) commitBtn.disabled = false;
+                if (dismissBtn) dismissBtn.disabled = false;
+                if (card) card.style.display = 'none';
+                loadDashboard(view);
+            })
+            .catch(function () {
+                if (result) setPillResult(result, false, 'Delete request failed.');
+                if (commitBtn) commitBtn.disabled = false;
+                if (dismissBtn) dismissBtn.disabled = false;
+            });
+    }
+
+    function dismissPendingOrphans(view) {
+        var card = view.querySelector('.dashboardPendingOrphansCard');
+        ApiClient.ajax({ type: 'DELETE', url: ApiClient.getUrl('XC2EMBY/Sync/PendingOrphans') })
+            .then(function () {
+                if (card) card.style.display = 'none';
+            });
     }
 
     function loadFailedItems(view) {

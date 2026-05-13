@@ -108,6 +108,12 @@ namespace Emby.Xtream.Plugin
         /// <summary>Fraction of existing STRMs that can be deleted in one cleanup pass. 0 = disabled.</summary>
         public double OrphanSafetyThreshold { get; set; } = 0.20;
 
+        /// <summary>When true, orphans are staged for review instead of deleted automatically.</summary>
+        public bool EnableOrphanPreview { get; set; } = false;
+
+        /// <summary>JSON array of relative paths staged for orphan deletion (relative to StrmLibraryPath).</summary>
+        public string PendingOrphansJson { get; set; } = string.Empty;
+
         // Auto-sync schedule
         public bool   AutoSyncEnabled       { get; set; } = false;
         public string AutoSyncMode          { get; set; } = "interval"; // "interval" | "daily"

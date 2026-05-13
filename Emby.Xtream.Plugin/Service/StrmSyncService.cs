@@ -743,7 +743,16 @@ namespace Emby.Xtream.Plugin.Service
                 {
                     mp.Phase = "Cleaning up orphaned files";
                     var moviesRoot = Path.Combine(config.StrmLibraryPath, GetMovieRootFolderName(config));
-                    mp.Deleted = CleanupOrphans(moviesRoot, writtenPaths, config.OrphanSafetyThreshold, locallyFilteredPaths);
+                    var orphans = CollectOrphans(moviesRoot, writtenPaths, config.OrphanSafetyThreshold, locallyFilteredPaths);
+                    if (config.EnableOrphanPreview && orphans.Count > 0)
+                    {
+                        StagePendingOrphans(config, orphans);
+                        _logger.Info("{0} orphaned file(s) staged for review", orphans.Count);
+                    }
+                    else
+                    {
+                        mp.Deleted = DeleteOrphans(orphans, moviesRoot);
+                    }
                 }
 
                 // Persist the highest Added timestamp seen so next sync can delta from here
@@ -1237,9 +1246,18 @@ namespace Emby.Xtream.Plugin.Service
                 {
                     sp.Phase = "Cleaning up orphaned files";
                     var showsRoot = Path.Combine(config.StrmLibraryPath, GetSeriesRootFolderName(config));
-                    var deletedEpisodes = CleanupOrphans(showsRoot, writtenPaths, config.OrphanSafetyThreshold, locallyFilteredPaths);
-                    sp.Deleted = deletedEpisodes;
-                    ep.Deleted = deletedEpisodes;
+                    var orphans = CollectOrphans(showsRoot, writtenPaths, config.OrphanSafetyThreshold, locallyFilteredPaths);
+                    if (config.EnableOrphanPreview && orphans.Count > 0)
+                    {
+                        StagePendingOrphans(config, orphans);
+                        _logger.Info("{0} orphaned file(s) staged for review", orphans.Count);
+                    }
+                    else
+                    {
+                        var deleted = DeleteOrphans(orphans, showsRoot);
+                        sp.Deleted = deleted;
+                        ep.Deleted = deleted;
+                    }
                 }
 
                 // Persist the highest LastModified timestamp seen
@@ -1972,72 +1990,149 @@ namespace Emby.Xtream.Plugin.Service
             return STJ.JsonSerializer.Deserialize<SeriesDetailInfo>(json, JsonOptions);
         }
 
-        private int CleanupOrphans(
+        // Collects orphaned STRM paths under rootPath respecting the safety threshold.
+        // Returns empty list if safety threshold blocks cleanup.
+        private List<string> CollectOrphans(
             string rootPath,
             HashSet<string> validPaths,
             double safetyThreshold,
             HashSet<string> locallyFilteredPaths = null)
         {
-            if (!Directory.Exists(rootPath))
-            {
-                return 0;
-            }
+            if (!Directory.Exists(rootPath)) return new List<string>();
 
             var existingStrms = Directory.GetFiles(rootPath, "*.strm", SearchOption.AllDirectories);
-            var providerOrphanCount = existingStrms.Count(s =>
-                !validPaths.Contains(s) &&
-                (locallyFilteredPaths == null || !locallyFilteredPaths.Contains(s)));
-            var thresholdTotal = existingStrms.Count(s =>
-                locallyFilteredPaths == null || !locallyFilteredPaths.Contains(s));
-
-            var skipProviderOrphans = false;
-            if (safetyThreshold > 0 && thresholdTotal > 10 && providerOrphanCount > 0)
+            var orphans = new List<string>();
+            foreach (var s in existingStrms)
             {
-                double ratio = (double)providerOrphanCount / thresholdTotal;
-                if (ratio > safetyThreshold)
+                if (!validPaths.Contains(s) && (locallyFilteredPaths == null || !locallyFilteredPaths.Contains(s)))
+                    orphans.Add(s);
+            }
+
+            if (safetyThreshold > 0 && orphans.Count > 0)
+            {
+                var thresholdTotal = existingStrms.Count(s =>
+                    locallyFilteredPaths == null || !locallyFilteredPaths.Contains(s));
+                if (thresholdTotal > 10)
                 {
-                    _logger.Warn(
-                        "Provider orphan cleanup skipped: {0}/{1} ({2:P0}) exceeds safety threshold {3:P0} — possible provider issue",
-                        providerOrphanCount, thresholdTotal, ratio, safetyThreshold);
-                    skipProviderOrphans = true;
+                    double ratio = (double)orphans.Count / thresholdTotal;
+                    if (ratio > safetyThreshold)
+                    {
+                        _logger.Warn(
+                            "Orphan cleanup skipped: {0}/{1} ({2:P0}) exceeds safety threshold {3:P0}",
+                            orphans.Count, thresholdTotal, ratio, safetyThreshold);
+                        return new List<string>();
+                    }
                 }
             }
+            return orphans;
+        }
+
+        private int DeleteOrphans(IEnumerable<string> orphanPaths, string rootPath)
+        {
             var removed = 0;
-
-            foreach (var strmFile in existingStrms)
+            foreach (var strmFile in orphanPaths)
             {
-                var isLocallyFiltered = locallyFilteredPaths != null && locallyFilteredPaths.Contains(strmFile);
-                if (!validPaths.Contains(strmFile) && (isLocallyFiltered || !skipProviderOrphans))
+                try
                 {
-                    try
+                    File.Delete(strmFile);
+                    removed++;
+                    var dir = Path.GetDirectoryName(strmFile);
+                    while (!string.IsNullOrEmpty(dir) &&
+                           !string.Equals(dir, rootPath, StringComparison.OrdinalIgnoreCase) &&
+                           Directory.Exists(dir) &&
+                           Directory.GetFileSystemEntries(dir).Length == 0)
                     {
-                        File.Delete(strmFile);
-                        removed++;
-
-                        // Remove empty parent directories
-                        var dir = Path.GetDirectoryName(strmFile);
-                        while (!string.IsNullOrEmpty(dir) &&
-                               !string.Equals(dir, rootPath, StringComparison.OrdinalIgnoreCase) &&
-                               Directory.Exists(dir) &&
-                               Directory.GetFileSystemEntries(dir).Length == 0)
-                        {
-                            Directory.Delete(dir);
-                            dir = Path.GetDirectoryName(dir);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.Debug("Failed to cleanup orphan '{0}': {1}", strmFile, ex.Message);
+                        Directory.Delete(dir);
+                        dir = Path.GetDirectoryName(dir);
                     }
                 }
+                catch (Exception ex)
+                {
+                    _logger.Debug("Failed to delete orphan '{0}': {1}", strmFile, ex.Message);
+                }
             }
-
             if (removed > 0)
-            {
                 _logger.Info("Removed {0} orphaned STRM files from {1}", removed, rootPath);
-            }
-
             return removed;
+        }
+
+        // Stages orphan full paths as relative paths in PendingOrphansJson.
+        // Appends to any existing staged orphans (across multiple content-type syncs).
+        private static void StagePendingOrphans(PluginConfiguration config, IEnumerable<string> fullPaths)
+        {
+            var existing = new List<string>();
+            if (!string.IsNullOrEmpty(config.PendingOrphansJson))
+            {
+                try { existing = STJ.JsonSerializer.Deserialize<List<string>>(config.PendingOrphansJson, JsonOptions) ?? new List<string>(); }
+                catch { existing = new List<string>(); }
+            }
+            var root = (config.StrmLibraryPath ?? string.Empty)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var set = new HashSet<string>(existing, StringComparer.OrdinalIgnoreCase);
+            foreach (var full in fullPaths)
+            {
+                var rel = !string.IsNullOrEmpty(root) && full.StartsWith(root, StringComparison.OrdinalIgnoreCase)
+                    ? full.Substring(root.Length).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                    : full;
+                set.Add(rel);
+            }
+            config.PendingOrphansJson = STJ.JsonSerializer.Serialize(new List<string>(set), JsonOptions);
+        }
+
+        public List<string> GetPendingOrphans()
+        {
+            var config = Plugin.InstanceOrNull?.Configuration;
+            if (config == null || string.IsNullOrEmpty(config.PendingOrphansJson))
+                return new List<string>();
+            try { return STJ.JsonSerializer.Deserialize<List<string>>(config.PendingOrphansJson, JsonOptions) ?? new List<string>(); }
+            catch { return new List<string>(); }
+        }
+
+        public int CommitPendingOrphans()
+        {
+            var config = Plugin.InstanceOrNull?.Configuration;
+            if (config == null) return 0;
+            var paths = GetPendingOrphans();
+            var root = (config.StrmLibraryPath ?? string.Empty)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var removed = 0;
+            foreach (var rel in paths)
+            {
+                var full = string.IsNullOrEmpty(root)
+                    ? rel
+                    : Path.Combine(root, rel.TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+                if (!File.Exists(full)) { removed++; continue; }
+                try
+                {
+                    File.Delete(full);
+                    removed++;
+                    var dir = Path.GetDirectoryName(full);
+                    while (!string.IsNullOrEmpty(dir) &&
+                           !string.Equals(dir, root, StringComparison.OrdinalIgnoreCase) &&
+                           Directory.Exists(dir) &&
+                           Directory.GetFileSystemEntries(dir).Length == 0)
+                    {
+                        Directory.Delete(dir);
+                        dir = Path.GetDirectoryName(dir);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.Debug("Failed to commit orphan deletion '{0}': {1}", full, ex.Message);
+                }
+            }
+            config.PendingOrphansJson = string.Empty;
+            Plugin.Instance.SaveConfiguration();
+            _logger.Info("Committed deletion of {0} staged orphan(s)", removed);
+            return removed;
+        }
+
+        public void ClearPendingOrphans()
+        {
+            var config = Plugin.InstanceOrNull?.Configuration;
+            if (config == null) return;
+            config.PendingOrphansJson = string.Empty;
+            Plugin.Instance.SaveConfiguration();
         }
     }
 }

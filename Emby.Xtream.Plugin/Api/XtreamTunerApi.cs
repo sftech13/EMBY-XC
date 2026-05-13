@@ -172,6 +172,21 @@ namespace Emby.Xtream.Plugin.Api
     {
     }
 
+    [Route("/XC2EMBY/Sync/PendingOrphans", "GET", Summary = "Returns staged orphan paths waiting for review")]
+    public class GetPendingOrphans : IReturn<PendingOrphansResult>
+    {
+    }
+
+    [Route("/XC2EMBY/Sync/PendingOrphans", "POST", Summary = "Deletes all staged orphan files")]
+    public class CommitPendingOrphans : IReturn<SyncResult>
+    {
+    }
+
+    [Route("/XC2EMBY/Sync/PendingOrphans", "DELETE", Summary = "Dismisses staged orphans without deleting")]
+    public class DismissPendingOrphans : IReturn<SyncResult>
+    {
+    }
+
     [Route("/XC2EMBY/Logs", "GET", Summary = "Downloads sanitized plugin logs")]
     public class GetSanitizedLogs : IReturnVoid
     {
@@ -234,6 +249,13 @@ namespace Emby.Xtream.Plugin.Api
         public bool Success { get; set; }
         public string Message { get; set; }
         public int DeletedFolders { get; set; }
+    }
+
+    public class PendingOrphansResult
+    {
+        public bool Success { get; set; }
+        public int Count { get; set; }
+        public List<string> Paths { get; set; }
     }
 
     public class ListContentItemsResult
@@ -869,6 +891,37 @@ namespace Emby.Xtream.Plugin.Api
             {
                 Success = true,
                 Message = "Sync history cleared."
+            };
+        }
+
+        public object Get(GetPendingOrphans request)
+        {
+            var paths = Plugin.Instance.StrmSyncService.GetPendingOrphans();
+            return new PendingOrphansResult
+            {
+                Success = true,
+                Count = paths.Count,
+                Paths = paths
+            };
+        }
+
+        public object Post(CommitPendingOrphans request)
+        {
+            var removed = Plugin.Instance.StrmSyncService.CommitPendingOrphans();
+            return new SyncResult
+            {
+                Success = true,
+                Message = removed + " orphaned file(s) deleted."
+            };
+        }
+
+        public object Delete(DismissPendingOrphans request)
+        {
+            Plugin.Instance.StrmSyncService.ClearPendingOrphans();
+            return new SyncResult
+            {
+                Success = true,
+                Message = "Pending orphans dismissed."
             };
         }
 
