@@ -33,7 +33,7 @@ namespace Emby.Xtream.Plugin.Service
         //      "FHD - Inception"   → "Inception"
         //      "UHD Movie Name"    → "Movie Name"
         private static readonly Regex QualityPrefixRegex = new Regex(
-            @"^(4K|FHD|UHD|HDR|SDR|HQ)\s*[-–]?\s+",
+            @"^(4K|FHD|UHD|HDR|SDR|HQ)\s*[-–:]?\s+",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
         private static readonly Regex MultipleSpacesRegex = new Regex(
