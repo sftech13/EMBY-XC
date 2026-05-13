@@ -384,21 +384,25 @@ function (BaseView, loading) {
         view.querySelector('.vodCategoriesContainer').addEventListener('change', function (e) {
             if (e.target.classList.contains('vodCategoryCheckbox')) {
                 updateCategoryCountBadge(view, 'vod');
+                crossDisableVodCategories(view);
             }
         });
         view.querySelector('.documentaryCategoriesContainer').addEventListener('change', function (e) {
             if (e.target.classList.contains('documentaryCategoryCheckbox')) {
                 updateCategoryCountBadge(view, 'documentary');
+                crossDisableVodCategories(view);
             }
         });
         view.querySelector('.seriesCategoriesContainer').addEventListener('change', function (e) {
             if (e.target.classList.contains('seriesCategoryCheckbox')) {
                 updateCategoryCountBadge(view, 'series');
+                crossDisableSeriesCategories(view);
             }
         });
         view.querySelector('.docuSeriesCategoriesContainer').addEventListener('change', function (e) {
             if (e.target.classList.contains('docuSeriesCategoryCheckbox')) {
                 updateCategoryCountBadge(view, 'docuSeries');
+                crossDisableSeriesCategories(view);
             }
         });
         view.querySelector('.categoriesContainer').addEventListener('change', function (e) {
@@ -1371,6 +1375,7 @@ function (BaseView, loading) {
                     if (docStatusEl) docStatusEl.textContent = '';
                     updateCategoryCountBadge(view, 'documentary');
                     populateFolderCheckboxes(view, 'documentary', vodCats);
+                    crossDisableVodCategories(view);
                 }
             } catch (e) { /* ignore parse errors */ }
         }
@@ -1411,6 +1416,7 @@ function (BaseView, loading) {
                     if (docuStatusEl) docuStatusEl.textContent = '';
                     updateCategoryCountBadge(view, 'docuSeries');
                     populateFolderCheckboxes(view, 'docuSeries', seriesCats);
+                    crossDisableSeriesCategories(view);
                 }
             } catch (e) { /* ignore parse errors */ }
         }
@@ -1458,6 +1464,40 @@ function (BaseView, loading) {
             html += '</div>';
         }
         listEl.innerHTML = html;
+    }
+
+    // Disable checkboxes in dstClass whose IDs are already checked in srcClass.
+    // Re-enables any that are no longer checked in src.
+    function crossDisableCategories(view, srcClass, dstClass) {
+        var srcChecked = {};
+        var srcBoxes = view.querySelectorAll('.' + srcClass);
+        for (var i = 0; i < srcBoxes.length; i++) {
+            if (srcBoxes[i].checked) {
+                srcChecked[srcBoxes[i].getAttribute('data-category-id')] = true;
+            }
+        }
+        var dstBoxes = view.querySelectorAll('.' + dstClass);
+        for (var j = 0; j < dstBoxes.length; j++) {
+            var id = dstBoxes[j].getAttribute('data-category-id');
+            var shouldDisable = !!srcChecked[id] && !dstBoxes[j].checked;
+            dstBoxes[j].disabled = shouldDisable;
+            var label = dstBoxes[j].parentNode;
+            if (label) {
+                label.style.opacity = shouldDisable ? '0.4' : '';
+                label.style.cursor = shouldDisable ? 'not-allowed' : '';
+                label.title = shouldDisable ? 'Already selected in the other section' : '';
+            }
+        }
+    }
+
+    function crossDisableVodCategories(view) {
+        crossDisableCategories(view, 'vodCategoryCheckbox', 'documentaryCategoryCheckbox');
+        crossDisableCategories(view, 'documentaryCategoryCheckbox', 'vodCategoryCheckbox');
+    }
+
+    function crossDisableSeriesCategories(view) {
+        crossDisableCategories(view, 'seriesCategoryCheckbox', 'docuSeriesCategoryCheckbox');
+        crossDisableCategories(view, 'docuSeriesCategoryCheckbox', 'seriesCategoryCheckbox');
     }
 
     // ---- Live TV Categories ----
@@ -1566,6 +1606,7 @@ function (BaseView, loading) {
             view.querySelector('.btnSelectAllVodCategories').disabled = false;
             view.querySelector('.btnDeselectAllVodCategories').disabled = false;
             updateCategoryCountBadge(view, 'vod');
+            crossDisableVodCategories(view);
         }).catch(function () {
             loadingEl.style.display = 'none';
             listEl.innerHTML = '<div style="color:#cc0000;">Failed to load VOD categories. Save your connection settings first, then try again.</div>';
@@ -1578,6 +1619,7 @@ function (BaseView, loading) {
             checkboxes[i].checked = checked;
         }
         updateCategoryCountBadge(view, 'vod');
+        crossDisableVodCategories(view);
     }
 
     // ---- VOD Categories (multi/folder mode) ----
@@ -1682,6 +1724,7 @@ function (BaseView, loading) {
             checkboxes[i].checked = checked;
         }
         updateCategoryCountBadge(view, 'documentary');
+        crossDisableVodCategories(view);
     }
 
     function getSelectedDocumentaryCategoryIds(instance) {
@@ -1712,6 +1755,7 @@ function (BaseView, loading) {
             view.querySelector(options.deselectAll).disabled = false;
             updateCategoryCountBadge(view, options.countType);
             populateFolderCheckboxes(view, options.folderType, categories);
+            crossDisableVodCategories(view);
         }).catch(function () {
             loadingEl.style.display = 'none';
             listEl.innerHTML = '<div style="color:#cc0000;">' + options.failMessage + '</div>';
@@ -1828,6 +1872,7 @@ function (BaseView, loading) {
             checkboxes[i].checked = checked;
         }
         updateCategoryCountBadge(view, 'series');
+        crossDisableSeriesCategories(view);
     }
 
     // ---- Series Categories (multi/folder mode) ----
@@ -1929,6 +1974,7 @@ function (BaseView, loading) {
             checkboxes[i].checked = checked;
         }
         updateCategoryCountBadge(view, 'docuSeries');
+        crossDisableSeriesCategories(view);
     }
 
     function getSelectedDocuSeriesCategoryIds(instance) {
@@ -1959,6 +2005,7 @@ function (BaseView, loading) {
             view.querySelector(options.deselectAll).disabled = false;
             updateCategoryCountBadge(view, options.countType);
             populateFolderCheckboxes(view, options.folderType, categories);
+            crossDisableSeriesCategories(view);
         }).catch(function () {
             loadingEl.style.display = 'none';
             listEl.innerHTML = '<div style="color:#cc0000;">' + options.failMessage + '</div>';
