@@ -512,6 +512,7 @@ namespace Emby.Xtream.Plugin.Service
                         }
 
                         var providerTmdbId = IsValidTmdbId(movie.TmdbId) ? movie.TmdbId.Trim() : null;
+                        string providerImdbId = null;
                         if (string.IsNullOrEmpty(providerTmdbId) && enrichMovieTmdbIds)
                         {
                             var cacheKey = movie.StreamId.ToString(CultureInfo.InvariantCulture);
@@ -522,7 +523,9 @@ namespace Emby.Xtream.Plugin.Service
                             }
                             else
                             {
-                                providerTmdbId = await FetchVodDetailTmdbIdAsync(movie.StreamId, config, cancellationToken).ConfigureAwait(false);
+                                var vodDetail = await FetchVodDetailAsync(movie.StreamId, config, cancellationToken).ConfigureAwait(false);
+                                providerTmdbId = vodDetail?[0];
+                                providerImdbId = vodDetail?[1];
                                 if (IsValidTmdbId(providerTmdbId))
                                 {
                                     movieTmdbCache[cacheKey] = providerTmdbId.Trim();
@@ -599,7 +602,7 @@ namespace Emby.Xtream.Plugin.Service
                         var movieDir = Path.Combine(config.StrmLibraryPath, subFolder, folderName);
                         var strmPath = Path.Combine(movieDir, folderName + ".strm");
 
-                        if (localFilter != null && localFilter.ContainsMovie(providerTmdbId, cleanedName))
+                        if (localFilter != null && localFilter.ContainsMovie(providerTmdbId, providerImdbId, cleanedName))
                         {
                             if (File.Exists(strmPath))
                             {
@@ -1808,7 +1811,8 @@ namespace Emby.Xtream.Plugin.Service
             return allStreams;
         }
 
-        private async Task<string> FetchVodDetailTmdbIdAsync(
+        // Returns [0]=tmdbId, [1]=imdbId; either element may be null.
+        private async Task<string[]> FetchVodDetailAsync(
             int streamId, PluginConfiguration config, CancellationToken cancellationToken)
         {
             try
@@ -1824,6 +1828,9 @@ namespace Emby.Xtream.Plugin.Service
                 var json = await _httpClient.GetStringAsync(url).ConfigureAwait(false);
                 cancellationToken.ThrowIfCancellationRequested();
 
+                string tmdbId = null;
+                string imdbId = null;
+
                 using (var doc = STJ.JsonDocument.Parse(json))
                 {
                     STJ.JsonElement info;
@@ -1831,6 +1838,22 @@ namespace Emby.Xtream.Plugin.Service
                         info.ValueKind != STJ.JsonValueKind.Object)
                     {
                         return null;
+                    }
+
+                    STJ.JsonElement imdbVal;
+                    foreach (var imdbKey in new[] { "imdb_id", "imdb_code", "imdb" })
+                    {
+                        if (info.TryGetProperty(imdbKey, out imdbVal))
+                        {
+                            var raw = imdbVal.ValueKind == STJ.JsonValueKind.String
+                                ? imdbVal.GetString()
+                                : imdbVal.ToString();
+                            if (!string.IsNullOrWhiteSpace(raw) && raw.StartsWith("tt", StringComparison.OrdinalIgnoreCase))
+                            {
+                                imdbId = raw.Trim();
+                                break;
+                            }
+                        }
                     }
 
                     foreach (var key in new[] { "tmdb_id", "tmdb", "tmdbid" })
@@ -1844,9 +1867,14 @@ namespace Emby.Xtream.Plugin.Service
                             : value.ToString();
 
                         if (IsValidTmdbId(id))
-                            return id.Trim();
+                        {
+                            tmdbId = id.Trim();
+                            break;
+                        }
                     }
                 }
+
+                return new[] { tmdbId, imdbId };
             }
             catch (OperationCanceledException)
             {
@@ -1854,7 +1882,7 @@ namespace Emby.Xtream.Plugin.Service
             }
             catch (Exception ex)
             {
-                _logger.Debug("VOD detail TMDB lookup failed for stream {0}: {1}", streamId, ex.Message);
+                _logger.Debug("VOD detail lookup failed for stream {0}: {1}", streamId, ex.Message);
             }
 
             return null;
