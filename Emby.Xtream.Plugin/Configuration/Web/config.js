@@ -324,6 +324,20 @@ function (BaseView, loading) {
             deleteContent(view, 'DocuSeries');
         });
 
+        // Selective delete buttons
+        view.querySelector('.btnSelectiveDeleteMovies').addEventListener('click', function () {
+            openSelectiveDelete(view, 'Movies');
+        });
+        view.querySelector('.btnSelectiveDeleteDocumentaries').addEventListener('click', function () {
+            openSelectiveDelete(view, 'Documentaries');
+        });
+        view.querySelector('.btnSelectiveDeleteSeries').addEventListener('click', function () {
+            openSelectiveDelete(view, 'Series');
+        });
+        view.querySelector('.btnSelectiveDeleteDocuSeries').addEventListener('click', function () {
+            openSelectiveDelete(view, 'DocuSeries');
+        });
+
         view.querySelector('.chkCleanupOrphans').addEventListener('change', function () {
             view.querySelector('.orphanThresholdContainer').style.display = this.checked ? '' : 'none';
         });
@@ -486,6 +500,8 @@ function (BaseView, loading) {
                 .replace(/syncMoviesResult/g, 'syncDocumentariesResult')
                 .replace(/btnDeleteMovies/g, 'btnDeleteDocumentaries')
                 .replace(/deleteMoviesResult/g, 'deleteDocumentariesResult')
+                .replace(/btnSelectiveDeleteMovies/g, 'btnSelectiveDeleteDocumentaries')
+                .replace(/selectiveDeleteMoviesPanel/g, 'selectiveDeleteDocumentariesPanel')
                 .replace(/vodCategoryCheckbox/g, 'documentaryCategoryCheckbox')
                 .replace(/VOD Movies/g, 'Documentary Movies')
                 .replace(/VOD movies/g, 'documentary movies')
@@ -524,6 +540,8 @@ function (BaseView, loading) {
                 .replace(/syncSeriesResult/g, 'syncDocuSeriesResult')
                 .replace(/btnDeleteSeries/g, 'btnDeleteDocuSeries')
                 .replace(/deleteSeriesResult/g, 'deleteDocuSeriesResult')
+                .replace(/btnSelectiveDeleteSeries/g, 'btnSelectiveDeleteDocuSeries')
+                .replace(/selectiveDeleteSeriesPanel/g, 'selectiveDeleteDocuSeriesPanel')
                 .replace(/seriesCategoryCheckbox/g, 'docuSeriesCategoryCheckbox')
                 .replace(/Series \/ TV Shows/g, 'Docu Series')
                 .replace(/series\/TV shows/g, 'documentary series')
@@ -2225,6 +2243,159 @@ function (BaseView, loading) {
         }).catch(function () {
             setPillResult(resultEl, false, 'Stop request failed. Check server logs for details.');
         });
+    }
+
+    function openSelectiveDelete(view, type) {
+        var map = {
+            Movies:        { label: 'Movies',       panelClass: '.selectiveDeleteMoviesPanel' },
+            Documentaries: { label: 'Documentaries', panelClass: '.selectiveDeleteDocumentariesPanel' },
+            Series:        { label: 'TV Shows',      panelClass: '.selectiveDeleteSeriesPanel' },
+            DocuSeries:    { label: 'Docu-Series',   panelClass: '.selectiveDeleteDocuSeriesPanel' }
+        };
+        var entry = map[type];
+        var panel = view.querySelector(entry.panelClass);
+        if (!panel) return;
+
+        // Toggle: if already open with content, close it
+        if (panel.style.display !== 'none' && panel.style.display !== '') {
+            panel.style.display = 'none';
+            return;
+        }
+
+        panel.style.display = 'block';
+        panel.innerHTML =
+            '<div style="margin-top:0.6em; padding:0.8em; border:1px solid rgba(128,128,128,0.2); border-radius:6px;">' +
+            '<div style="display:flex; align-items:center; gap:0.5em; margin-bottom:0.5em;">' +
+            '<input type="text" class="sdSearchInput emby-input" placeholder="Search ' + entry.label + '..." style="flex:1; padding:0.3em 0.5em; font-size:0.9em;" />' +
+            '<button type="button" class="sdRefreshBtn button-secondary" style="font-size:0.8em; padding:0.3em 0.6em;">Refresh</button>' +
+            '<button type="button" class="sdCloseBtn button-secondary" style="font-size:0.8em; padding:0.3em 0.6em;">✕</button>' +
+            '</div>' +
+            '<div class="sdStatus" style="font-size:0.85em; opacity:0.5;">Loading...</div>' +
+            '<div class="sdList" style="max-height:260px; overflow-y:auto; margin:0.4em 0;"></div>' +
+            '<div style="display:flex; gap:0.5em; align-items:center; flex-wrap:wrap;">' +
+            '<button type="button" class="sdSelectAllBtn button-secondary" style="font-size:0.8em; padding:0.3em 0.6em;" disabled>Select all</button>' +
+            '<button type="button" class="sdDeselectAllBtn button-secondary" style="font-size:0.8em; padding:0.3em 0.6em;" disabled>Deselect all</button>' +
+            '<button type="button" class="sdDeleteBtn" style="background:#c0392b; color:white; border:none; border-radius:4px; padding:0.3em 0.8em; font-size:0.85em; cursor:pointer; font-weight:600;" disabled>Delete selected</button>' +
+            '<span class="sdDeleteResult" style="font-size:0.85em;"></span>' +
+            '</div>' +
+            '</div>';
+
+        var searchInput   = panel.querySelector('.sdSearchInput');
+        var statusEl      = panel.querySelector('.sdStatus');
+        var listEl        = panel.querySelector('.sdList');
+        var selectAllBtn  = panel.querySelector('.sdSelectAllBtn');
+        var deselectAllBtn = panel.querySelector('.sdDeselectAllBtn');
+        var deleteBtn     = panel.querySelector('.sdDeleteBtn');
+        var resultEl      = panel.querySelector('.sdDeleteResult');
+        var allNames      = [];
+
+        function renderList(filter) {
+            filter = (filter || '').toLowerCase();
+            var visible = filter ? allNames.filter(function (n) { return n.toLowerCase().indexOf(filter) >= 0; }) : allNames;
+            if (visible.length === 0) {
+                listEl.innerHTML = '<div style="opacity:0.5; font-size:0.85em; padding:0.3em;">No items match.</div>';
+                return;
+            }
+            var html = '';
+            for (var i = 0; i < visible.length; i++) {
+                html += '<div style="display:flex; align-items:center; padding:0.15em 0;">' +
+                    '<label style="display:flex; align-items:center; gap:0.4em; font-size:0.88em; cursor:pointer; width:100%;">' +
+                    '<input type="checkbox" class="sdItemCheckbox" data-name="' + escapeHtml(visible[i]) + '" style="flex-shrink:0;" />' +
+                    '<span style="word-break:break-word;">' + escapeHtml(visible[i]) + '</span>' +
+                    '</label></div>';
+            }
+            listEl.innerHTML = html;
+        }
+
+        function loadItems() {
+            statusEl.textContent = 'Loading...';
+            statusEl.style.opacity = '0.5';
+            listEl.innerHTML = '';
+            selectAllBtn.disabled = true;
+            deselectAllBtn.disabled = true;
+            deleteBtn.disabled = true;
+            allNames = [];
+
+            ApiClient.getJSON(ApiClient.getUrl('XC2EMBY/Content/Items', { type: type }))
+                .then(function (result) {
+                    if (!result.Success || !result.Names || result.Names.length === 0) {
+                        statusEl.textContent = result.Message || 'No items found.';
+                        statusEl.style.opacity = '0.5';
+                        return;
+                    }
+                    allNames = result.Names;
+                    statusEl.textContent = allNames.length + ' item(s)';
+                    statusEl.style.opacity = '1';
+                    renderList(searchInput.value);
+                    selectAllBtn.disabled = false;
+                    deselectAllBtn.disabled = false;
+                    deleteBtn.disabled = false;
+                })
+                .catch(function () {
+                    statusEl.textContent = 'Failed to load items.';
+                    statusEl.style.color = '#cc0000';
+                    statusEl.style.opacity = '1';
+                });
+        }
+
+        panel.querySelector('.sdCloseBtn').addEventListener('click', function () {
+            panel.style.display = 'none';
+        });
+        panel.querySelector('.sdRefreshBtn').addEventListener('click', loadItems);
+
+        searchInput.addEventListener('input', function () {
+            renderList(this.value);
+        });
+
+        selectAllBtn.addEventListener('click', function () {
+            var boxes = listEl.querySelectorAll('.sdItemCheckbox');
+            for (var i = 0; i < boxes.length; i++) boxes[i].checked = true;
+        });
+        deselectAllBtn.addEventListener('click', function () {
+            var boxes = listEl.querySelectorAll('.sdItemCheckbox');
+            for (var i = 0; i < boxes.length; i++) boxes[i].checked = false;
+        });
+
+        deleteBtn.addEventListener('click', function () {
+            var boxes = listEl.querySelectorAll('.sdItemCheckbox:checked');
+            var names = [];
+            for (var i = 0; i < boxes.length; i++) names.push(boxes[i].getAttribute('data-name'));
+            if (names.length === 0) {
+                resultEl.textContent = 'Nothing selected.';
+                return;
+            }
+
+            resultEl.innerHTML =
+                '<span style="font-size:0.88em; opacity:0.7;">Delete ' + names.length + ' item(s)?</span> ' +
+                '<button type="button" class="sdConfirmYes" style="background:#c0392b; color:white; border:none; border-radius:4px; padding:0.2em 0.6em; font-size:0.82em; cursor:pointer; font-weight:600; margin-left:0.4em;">Yes</button> ' +
+                '<button type="button" class="sdConfirmNo button-secondary" style="font-size:0.82em; padding:0.2em 0.5em; border:1px solid rgba(128,128,128,0.3); border-radius:4px; background:transparent; color:inherit; cursor:pointer; margin-left:0.2em;">Cancel</button>';
+
+            resultEl.querySelector('.sdConfirmNo').addEventListener('click', function () {
+                resultEl.innerHTML = '';
+            });
+
+            resultEl.querySelector('.sdConfirmYes').addEventListener('click', function () {
+                deleteBtn.disabled = true;
+                resultEl.innerHTML = '<span style="opacity:0.5; font-size:0.85em;">Deleting ' + names.length + ' item(s)...</span>';
+
+                ApiClient.ajax({
+                    type: 'DELETE',
+                    url: ApiClient.getUrl('XC2EMBY/Content/Items'),
+                    contentType: 'application/json',
+                    data: JSON.stringify({ Type: type, Names: names }),
+                    dataType: 'json'
+                }).then(function (result) {
+                    deleteBtn.disabled = false;
+                    setPillResult(resultEl, result.Success, result.Message);
+                    if (result.Success) loadItems();
+                }).catch(function () {
+                    deleteBtn.disabled = false;
+                    setPillResult(resultEl, false, 'Delete request failed.');
+                });
+            });
+        });
+
+        loadItems();
     }
 
     function deleteContent(view, type) {

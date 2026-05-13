@@ -111,6 +111,19 @@ namespace Emby.Xtream.Plugin.Api
     {
     }
 
+    [Route("/XC2EMBY/Content/Items", "GET", Summary = "Lists top-level STRM item folders for a content type")]
+    public class ListContentItems : IReturn<ListContentItemsResult>
+    {
+        public string Type { get; set; }
+    }
+
+    [Route("/XC2EMBY/Content/Items", "DELETE", Summary = "Deletes selected STRM item folders by name")]
+    public class DeleteContentItems : IReturn<DeleteContentResult>
+    {
+        public string Type { get; set; }
+        public List<string> Names { get; set; }
+    }
+
     [Route("/XC2EMBY/WritablePaths", "GET", Summary = "Returns writable mount points available to Emby")]
     public class GetWritablePaths : IReturn<List<string>>
     {
@@ -221,6 +234,13 @@ namespace Emby.Xtream.Plugin.Api
         public bool Success { get; set; }
         public string Message { get; set; }
         public int DeletedFolders { get; set; }
+    }
+
+    public class ListContentItemsResult
+    {
+        public bool Success { get; set; }
+        public string Message { get; set; }
+        public List<string> Names { get; set; }
     }
 
     public class SyncResult
@@ -1121,6 +1141,107 @@ namespace Emby.Xtream.Plugin.Api
         public object Delete(DeleteDocuSeriesContent request)
         {
             return DeleteContentFolder(StrmSyncService.GetDocuSeriesRootFolderName(Plugin.Instance.Configuration));
+        }
+
+        public object Get(ListContentItems request)
+        {
+            var result = new ListContentItemsResult { Names = new List<string>() };
+            try
+            {
+                var root = GetContentRoot(request.Type);
+                if (root == null)
+                {
+                    result.Success = false;
+                    result.Message = "Unknown content type: " + request.Type;
+                    return result;
+                }
+                if (!Directory.Exists(root))
+                {
+                    result.Success = true;
+                    result.Message = "No items found.";
+                    return result;
+                }
+                var dirs = Directory.GetDirectories(root, "*", SearchOption.TopDirectoryOnly);
+                Array.Sort(dirs, StringComparer.OrdinalIgnoreCase);
+                foreach (var d in dirs)
+                    result.Names.Add(Path.GetFileName(d));
+                result.Success = true;
+            }
+            catch (Exception ex)
+            {
+                result.Success = false;
+                result.Message = ex.Message;
+            }
+            return result;
+        }
+
+        public object Delete(DeleteContentItems request)
+        {
+            var result = new DeleteContentResult();
+            try
+            {
+                var root = GetContentRoot(request.Type);
+                if (root == null)
+                {
+                    result.Success = false;
+                    result.Message = "Unknown content type: " + request.Type;
+                    return result;
+                }
+                if (request.Names == null || request.Names.Count == 0)
+                {
+                    result.Success = true;
+                    result.Message = "No items selected.";
+                    return result;
+                }
+
+                int deleted = 0;
+                foreach (var name in request.Names)
+                {
+                    // Reject names that contain path separators or traversal sequences
+                    if (string.IsNullOrWhiteSpace(name) ||
+                        name.IndexOf(Path.DirectorySeparatorChar) >= 0 ||
+                        name.IndexOf(Path.AltDirectorySeparatorChar) >= 0 ||
+                        name.Contains(".."))
+                        continue;
+
+                    var target = Path.Combine(root, name);
+                    // Confirm the resolved path is a direct child of root
+                    var parent = Path.GetDirectoryName(target);
+                    if (!string.Equals(parent, root, StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    if (Directory.Exists(target))
+                    {
+                        Directory.Delete(target, true);
+                        deleted++;
+                    }
+                }
+
+                result.Success = true;
+                result.DeletedFolders = deleted;
+                result.Message = string.Format("Deleted {0} item(s).", deleted);
+            }
+            catch (Exception ex)
+            {
+                result.Success = false;
+                result.Message = ex.Message;
+            }
+            return result;
+        }
+
+        private string GetContentRoot(string type)
+        {
+            var config = Plugin.Instance.Configuration;
+            string folderName;
+            switch (type)
+            {
+                case "Movies":       folderName = StrmSyncService.GetMovieRootFolderName(config); break;
+                case "Documentaries": folderName = StrmSyncService.GetDocumentaryRootFolderName(config); break;
+                case "Series":       folderName = StrmSyncService.GetSeriesRootFolderName(config); break;
+                case "DocuSeries":   folderName = StrmSyncService.GetDocuSeriesRootFolderName(config); break;
+                default: return null;
+            }
+            return Path.Combine(config.StrmLibraryPath, folderName);
         }
 
         private static PluginConfiguration BuildDocumentaryMovieConfig(PluginConfiguration source)
