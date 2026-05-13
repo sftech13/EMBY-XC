@@ -54,7 +54,9 @@ namespace Emby.Xtream.Plugin.Service
         public int EpisodeFailed { get; set; }
         public int EpisodeDeleted { get; set; }
         public bool WasMovieSync { get; set; }
+        public bool WasDocumentarySync { get; set; }
         public bool WasSeriesSync { get; set; }
+        public bool WasDocuSeriesSync { get; set; }
         public List<string> AddedMovieTitles { get; set; } = new List<string>();
         public List<string> AddedSeriesTitles { get; set; } = new List<string>();
     }
@@ -786,7 +788,8 @@ namespace Emby.Xtream.Plugin.Service
                     StartTime = movieSyncStart,
                     EndTime = DateTime.UtcNow,
                     Success = movieSyncSuccess,
-                    WasMovieSync = true,
+                    WasMovieSync = !isDocumentaries,
+                    WasDocumentarySync = isDocumentaries,
                     MoviesTotal = mp.Total,
                     MoviesCompleted = mp.Completed,
                     MoviesAdded = mp.Added,
@@ -1290,7 +1293,8 @@ namespace Emby.Xtream.Plugin.Service
                     StartTime = seriesSyncStart,
                     EndTime = DateTime.UtcNow,
                     Success = seriesSyncSuccess,
-                    WasSeriesSync = true,
+                    WasSeriesSync = !isDocuSeries,
+                    WasDocuSeriesSync = isDocuSeries,
                     SeriesTotal = sp.Total,
                     SeriesCompleted = sp.Completed,
                     SeriesAdded = sp.Added,
