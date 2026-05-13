@@ -13,6 +13,10 @@ namespace Emby.Xtream.Plugin.Service
         private static readonly Regex StripParens = new Regex(@"\([^)]*\)", RegexOptions.Compiled);
         private static readonly Regex StripNonAlpha = new Regex(@"[^a-z0-9\s]", RegexOptions.Compiled);
         private static readonly Regex CollapseSpace = new Regex(@"\s+", RegexOptions.Compiled);
+        // Matches {tmdb-12345} in paths (Radarr/Sonarr optional TMDB tag)
+        private static readonly Regex PathTmdbTag = new Regex(@"[\{\[]tmdb-(\d+)[\}\]]", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        // Matches {imdb-tt12345} (Radarr file names) and [imdb-tt12345] (Sonarr folder names)
+        private static readonly Regex PathImdbTag = new Regex(@"[\{\[]imdb-(tt\d+)[\}\]]", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private readonly HashSet<string> _movieTmdbIds;
         private readonly HashSet<string> _movieImdbIds;
@@ -79,8 +83,14 @@ namespace Emby.Xtream.Plugin.Service
                     string id;
                     if (TryGetProviderId(item.ProviderIds, "Tmdb", out id))
                         movieTmdbIds.Add(id);
+                    else
+                        ExtractPathTmdbId(item.Path, movieTmdbIds);
+
                     if (TryGetProviderId(item.ProviderIds, "Imdb", out id))
                         movieImdbIds.Add(id);
+                    else
+                        ExtractPathImdbId(item.Path, movieImdbIds);
+
                     AddTitleKeys(movieTitles, item.Name, item.ProductionYear);
                 }
 
@@ -97,8 +107,14 @@ namespace Emby.Xtream.Plugin.Service
                     string id;
                     if (TryGetProviderId(item.ProviderIds, "Tmdb", out id))
                         seriesTmdbIds.Add(id);
+                    else
+                        ExtractPathTmdbId(item.Path, seriesTmdbIds);
+
                     if (TryGetProviderId(item.ProviderIds, "Imdb", out id))
                         seriesImdbIds.Add(id);
+                    else
+                        ExtractPathImdbId(item.Path, seriesImdbIds);
+
                     AddTitleKeys(seriesTitles, item.Name, item.ProductionYear);
                 }
 
@@ -265,6 +281,20 @@ namespace Emby.Xtream.Plugin.Service
             return string.Equals(normalizedPath, rootPath, StringComparison.OrdinalIgnoreCase) ||
                    normalizedPath.StartsWith(rootPath + System.IO.Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) ||
                    normalizedPath.StartsWith(rootPath + System.IO.Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static void ExtractPathTmdbId(string path, HashSet<string> set)
+        {
+            if (string.IsNullOrEmpty(path)) return;
+            var m = PathTmdbTag.Match(path);
+            if (m.Success) set.Add(m.Groups[1].Value);
+        }
+
+        private static void ExtractPathImdbId(string path, HashSet<string> set)
+        {
+            if (string.IsNullOrEmpty(path)) return;
+            var m = PathImdbTag.Match(path);
+            if (m.Success) set.Add(m.Groups[1].Value);
         }
 
         private static string NormalizePath(string path)
