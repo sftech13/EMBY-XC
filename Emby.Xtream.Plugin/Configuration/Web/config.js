@@ -1009,14 +1009,23 @@ function (BaseView, loading) {
         v.querySelector('.autoSyncDailyContainer').style.display    = mode === 'daily'    ? '' : 'none';
     }
 
-    function buildTriggers(config) {
+    // Stagger offsets (minutes) so each content type starts after the previous one.
+    // Movies is the base time; each subsequent type is offset to avoid concurrent provider connections.
+    var _taskKeyOffsets = {
+        'XtreamTunerSyncMovies':        0,
+        'XtreamTunerSyncDocumentaries': 30,
+        'XtreamTunerSyncSeries':        60,
+        'XtreamTunerSyncDocuSeries':    90
+    };
+
+    function buildTriggersForTask(config, offsetMinutes) {
         if (!config.AutoSyncEnabled) return [];
         if (config.AutoSyncMode === 'daily') {
             var parts = (config.AutoSyncDailyTime || '03:00').split(':');
-            var ticks = (parseInt(parts[0], 10) * 3600 + parseInt(parts[1] || '0', 10) * 60) * 10000000;
-            return [{ Type: 'DailyTrigger', TimeOfDayTicks: ticks }];
+            var baseSecs = parseInt(parts[0], 10) * 3600 + parseInt(parts[1] || '0', 10) * 60;
+            var totalSecs = (baseSecs + offsetMinutes * 60) % 86400;
+            return [{ Type: 'DailyTrigger', TimeOfDayTicks: totalSecs * 10000000 }];
         }
-        // interval
         var hours = Math.max(1, config.AutoSyncIntervalHours || 24);
         return [{ Type: 'IntervalTrigger', IntervalTicks: hours * 36000000000 }];
     }
@@ -1024,18 +1033,17 @@ function (BaseView, loading) {
     function applyScheduleToTasks(view, config, apiClient) {
         apiClient.ajax({ url: apiClient.getUrl('ScheduledTasks'), type: 'GET' })
             .then(function (tasks) {
-                var xtreamTasks = tasks.filter(function (t) {
-                    return t.Category === 'XC2EMBY';
-                });
-                var triggers = buildTriggers(config);
-                xtreamTasks.forEach(function (task) {
-                    apiClient.ajax({
-                        url: apiClient.getUrl('ScheduledTasks/' + task.Id + '/Triggers'),
-                        type: 'POST',
-                        contentType: 'application/json',
-                        data: JSON.stringify(triggers)
+                tasks.filter(function (t) { return t.Category === 'XC2EMBY'; })
+                    .forEach(function (task) {
+                        var offset = _taskKeyOffsets.hasOwnProperty(task.Key) ? _taskKeyOffsets[task.Key] : 0;
+                        var triggers = buildTriggersForTask(config, offset);
+                        apiClient.ajax({
+                            url: apiClient.getUrl('ScheduledTasks/' + task.Id + '/Triggers'),
+                            type: 'POST',
+                            contentType: 'application/json',
+                            data: JSON.stringify(triggers)
+                        });
                     });
-                });
             });
     }
 
