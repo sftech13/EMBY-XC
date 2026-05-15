@@ -16,6 +16,7 @@ using MediaBrowser.Model.Services;
 
 namespace Emby.Xtream.Plugin.Api
 {
+    // Emby calls these internally via its Live TV subsystem — must remain unauthenticated
     [Route("/XC2EMBY/Epg", "GET", Summary = "Gets XMLTV EPG data for Live TV channels")]
     public class GetEpgXml : IReturnVoid
     {
@@ -26,97 +27,117 @@ namespace Emby.Xtream.Plugin.Api
     {
     }
 
+    // All remaining endpoints require admin — non-admin users must not be able to trigger syncs or read config
+    [Authenticated(Roles = "Admin")]
     [Route("/XC2EMBY/Categories/Live", "GET", Summary = "Gets Live TV categories from Xtream API")]
     public class GetLiveCategories : IReturn<List<Category>>
     {
     }
 
+    [Authenticated(Roles = "Admin")]
     [Route("/XC2EMBY/RefreshCache", "POST", Summary = "Invalidates M3U and EPG caches")]
     public class RefreshCache : IReturnVoid
     {
     }
 
+    [Authenticated(Roles = "Admin")]
     [Route("/XC2EMBY/RefreshLogos", "POST", Summary = "Removes Live TV channel logos and refreshes guide data")]
     public class RefreshLogos : IReturn<RefreshLogosResult>
     {
     }
 
+    [Authenticated(Roles = "Admin")]
     [Route("/XC2EMBY/ClearCodecCache", "POST", Summary = "Clears per-channel codec cache so all channels are re-probed on next tune")]
     public class ClearCodecCache : IReturnVoid
     {
     }
 
+    [Authenticated(Roles = "Admin")]
     [Route("/XC2EMBY/Categories/Vod", "GET", Summary = "Gets VOD movie categories from Xtream API")]
     public class GetVodCategories : IReturn<List<Category>>
     {
     }
 
+    [Authenticated(Roles = "Admin")]
     [Route("/XC2EMBY/Categories/Series", "GET", Summary = "Gets Series categories from Xtream API")]
     public class GetSeriesCategories : IReturn<List<Category>>
     {
     }
 
+    [Authenticated(Roles = "Admin")]
     [Route("/XC2EMBY/Sync/Movies", "POST", Summary = "Triggers VOD movie STRM sync")]
     public class SyncMovies : IReturn<SyncResult>
     {
     }
 
+    [Authenticated(Roles = "Admin")]
     [Route("/XC2EMBY/Sync/Documentaries", "POST", Summary = "Triggers documentary movie STRM sync")]
     public class SyncDocumentaries : IReturn<SyncResult>
     {
     }
 
+    [Authenticated(Roles = "Admin")]
     [Route("/XC2EMBY/Sync/Series", "POST", Summary = "Triggers series STRM sync")]
     public class SyncSeries : IReturn<SyncResult>
     {
     }
 
+    [Authenticated(Roles = "Admin")]
     [Route("/XC2EMBY/Sync/DocuSeries", "POST", Summary = "Triggers documentary series STRM sync")]
     public class SyncDocuSeries : IReturn<SyncResult>
     {
     }
 
+    [Authenticated(Roles = "Admin")]
     [Route("/XC2EMBY/Sync/Stop", "POST", Summary = "Stops the active STRM sync")]
     public class StopSync : IReturn<SyncResult>
     {
     }
 
+    [Authenticated(Roles = "Admin")]
     [Route("/XC2EMBY/Sync/Status", "GET", Summary = "Gets current sync progress")]
     public class GetSyncStatus : IReturn<SyncStatusResult>
     {
     }
 
+    [Authenticated(Roles = "Admin")]
     [Route("/XC2EMBY/Dashboard", "GET", Summary = "Gets dashboard data including sync history and library stats")]
     public class GetDashboard : IReturn<DashboardResult>
     {
     }
 
+    [Authenticated(Roles = "Admin")]
     [Route("/XC2EMBY/Content/Movies", "DELETE", Summary = "Deletes all movie STRM content")]
     public class DeleteMovieContent : IReturn<DeleteContentResult>
     {
     }
 
+    [Authenticated(Roles = "Admin")]
     [Route("/XC2EMBY/Content/Documentaries", "DELETE", Summary = "Deletes all documentary movie STRM content")]
     public class DeleteDocumentaryContent : IReturn<DeleteContentResult>
     {
     }
 
+    [Authenticated(Roles = "Admin")]
     [Route("/XC2EMBY/Content/Series", "DELETE", Summary = "Deletes all series STRM content")]
     public class DeleteSeriesContent : IReturn<DeleteContentResult>
     {
     }
 
+    [Authenticated(Roles = "Admin")]
     [Route("/XC2EMBY/Content/DocuSeries", "DELETE", Summary = "Deletes all documentary series STRM content")]
     public class DeleteDocuSeriesContent : IReturn<DeleteContentResult>
     {
     }
 
+    [Authenticated(Roles = "Admin")]
     [Route("/XC2EMBY/Content/Items", "GET", Summary = "Lists top-level STRM item folders for a content type")]
     public class ListContentItems : IReturn<ListContentItemsResult>
     {
         public string Type { get; set; }
     }
 
+    [Authenticated(Roles = "Admin")]
     [Route("/XC2EMBY/Content/Items", "DELETE", Summary = "Deletes selected STRM item folders by name")]
     public class DeleteContentItems : IReturn<DeleteContentResult>
     {
@@ -124,96 +145,113 @@ namespace Emby.Xtream.Plugin.Api
         public List<string> Names { get; set; }
     }
 
+    [Authenticated(Roles = "Admin")]
     [Route("/XC2EMBY/WritablePaths", "GET", Summary = "Returns writable mount points available to Emby")]
     public class GetWritablePaths : IReturn<List<string>>
     {
     }
 
+    [Authenticated(Roles = "Admin")]
     [Route("/XC2EMBY/BrowsePath", "GET", Summary = "Lists subdirectories at the given path, or writable mounts if no path given")]
     public class BrowsePath : IReturn<BrowsePathResult>
     {
         public string Path { get; set; }
     }
 
+    [Authenticated(Roles = "Admin")]
     [Route("/XC2EMBY/ValidateStrmPath", "POST", Summary = "Validates that the STRM library path is writable")]
     public class ValidateStrmPath : IReturn<TestConnectionResult>
     {
         public string Path { get; set; }
     }
 
+    [Authenticated(Roles = "Admin")]
     [Route("/XC2EMBY/TestConnection", "POST", Summary = "Tests connection to Xtream server")]
     public class TestXtreamConnection : IReturn<TestConnectionResult>
     {
     }
 
+    [Authenticated(Roles = "Admin")]
     [Route("/XC2EMBY/CheckUpdate", "GET", Summary = "Checks GitHub for a newer plugin release")]
     public class CheckForUpdate : IReturn<UpdateCheckResult>
     {
         public bool? Beta { get; set; }
     }
 
+    [Authenticated(Roles = "Admin")]
     [Route("/XC2EMBY/Sync/FailedItems", "GET", Summary = "Returns items that failed during the last sync")]
     public class GetFailedItems : IReturn<List<FailedSyncItem>>
     {
     }
 
+    [Authenticated(Roles = "Admin")]
     [Route("/XC2EMBY/Sync/RetryFailed", "POST", Summary = "Retries all items that failed during the last sync")]
     public class RetryFailed : IReturn<SyncResult>
     {
     }
 
+    [Authenticated(Roles = "Admin")]
     [Route("/XC2EMBY/Sync/ClearFailedItems", "POST", Summary = "Clears failed sync items")]
     public class ClearFailedItems : IReturn<SyncResult>
     {
     }
 
+    [Authenticated(Roles = "Admin")]
     [Route("/XC2EMBY/Sync/ClearHistory", "POST", Summary = "Clears sync history")]
     public class ClearSyncHistory : IReturn<SyncResult>
     {
     }
 
+    [Authenticated(Roles = "Admin")]
     [Route("/XC2EMBY/Sync/PendingOrphans", "GET", Summary = "Returns staged orphan paths waiting for review")]
     public class GetPendingOrphans : IReturn<PendingOrphansResult>
     {
     }
 
+    [Authenticated(Roles = "Admin")]
     [Route("/XC2EMBY/Sync/PendingOrphans", "POST", Summary = "Deletes all staged orphan files")]
     public class CommitPendingOrphans : IReturn<SyncResult>
     {
     }
 
+    [Authenticated(Roles = "Admin")]
     [Route("/XC2EMBY/Sync/PendingOrphans", "DELETE", Summary = "Dismisses staged orphans without deleting")]
     public class DismissPendingOrphans : IReturn<SyncResult>
     {
     }
 
+    [Authenticated(Roles = "Admin")]
     [Route("/XC2EMBY/Logs", "GET", Summary = "Downloads sanitized plugin logs")]
     public class GetSanitizedLogs : IReturnVoid
     {
     }
 
+    [Authenticated(Roles = "Admin")]
     [Route("/XC2EMBY/GuideDiagnostics", "GET", Summary = "Returns Live TV channel to XMLTV guide mapping diagnostics")]
     public class GetGuideDiagnostics : IReturn<GuideDiagnosticsResult>
     {
         public bool ProblemsOnly { get; set; }
     }
 
+    [Authenticated(Roles = "Admin")]
     [Route("/XC2EMBY/InstallUpdate", "POST", Summary = "Downloads and installs the latest plugin update")]
     public class InstallUpdate : IReturn<InstallUpdateResult>
     {
         public bool? Beta { get; set; }
     }
 
+    [Authenticated(Roles = "Admin")]
     [Route("/XC2EMBY/RestartEmby", "POST", Summary = "Restarts the Emby server")]
     public class RestartEmby : IReturnVoid
     {
     }
 
+    [Authenticated(Roles = "Admin")]
     [Route("/XC2EMBY/TestTmdbLookup", "GET", Summary = "Tests TMDB fallback lookup")]
     public class TestTmdbLookup : IReturn<TestConnectionResult>
     {
         public string Name { get; set; }
-        public int? Year { get; set; }
+        public int ? Year { get; set; }
     }
 
     public class TestConnectionResult
