@@ -167,9 +167,7 @@ function (BaseView, loading) {
         });
 
         view.querySelector('.btnLoadCategories').addEventListener('click', function () {
-            saveConfig(self, function () {
-                loadCategories(self);
-            });
+            loadCategories(self);
         });
 
         view.querySelector('.btnSelectAllCategories').addEventListener('click', function () {
