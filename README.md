@@ -45,45 +45,25 @@
 
 ## Features Overview
 
-### Current Release: v1.1.32
+### Current Release: v1.1.46
 
-**v1.1.32**
-- Fixed "Other Showings" incorrectly linking unrelated programs in the guide OSD. Programs without an episode sub-title previously used a series-scoped ShowId, causing all episodes of a show (and in edge cases, completely unrelated programs) to appear as other showings of each other. The fallback now uses a unique per-channel per-airing key, matching Emby's own XMLTV provider behavior. Programs with an episode sub-title continue to use episode-scoped ShowId for accurate cross-channel airing discovery.
+**v1.1.46**
+- Mobile config page: tab bar is now horizontally scrollable (`overflow-x: auto`, `-webkit-overflow-scrolling: touch`) so all tabs are reachable on small screens without wrapping or clipping.
+- Added responsive breakpoint at 600px: dashboard grid collapses to a single column, history table switches to block-per-row layout for readability on phones.
 
-**v1.1.31**
-- Fixed: stopping one user's live stream was dropping all other users watching the same channel. Emby was sharing a single stream instance across viewers despite the sharing flag being off — setting `EnableStreamSharing=true` lets Emby track consumer count properly and only close the upstream connection when the last viewer stops.
+**v1.1.45**
+- Critical fix: the v1.1.44 shared `HttpClient` was being disposed by callers using `using` blocks, causing every HTTP request after the first to throw `ObjectDisposedException` ("Failed to load categories" in the UI).
+- Replaced the single shared instance with three static clients keyed by timeout (10 s / 30 s / 180 s). All `using` wrappers removed from the nine call sites across `XtreamTunerApi`, `LiveTvService`, `XtreamTunerHost`, and `XtreamListingsProvider`.
 
-**v1.1.30**
-- Fixed channel rescan scope: `TriggerChannelRescan()` (SaveTunerHost) is now only called from the "Refresh Channel & EPG Cache" button, not from guide-only refresh paths.
-- Fixed EPG name-fallback: `ListingsProviderId` is now nulled out when no XMLTV match exists, preventing Emby's name-matching engine from assigning wrong EPG to duplicate-named channels.
-
-**v1.1.29**
-- "Refresh Channel & EPG Cache" button now triggers a tuner channel rescan in addition to an EPG refresh, so newly added provider channels appear in Emby immediately without waiting for the cache to expire.
-
-**v1.1.28**
-- Channel cache TTL now respects the **Channel Cache Duration** setting (formerly M3U Cache Duration) instead of a hardcoded 6-hour value. Minimum 5 minutes. Label updated in the UI.
-
-**v1.1.27**
-- Live TV guide-affecting setting changes now automatically clear XC2EMBY caches and trigger an Emby guide refresh after save.
-- Fixed disabled Live TV categories continuing to appear until a manual guide/cache refresh or cache expiry.
-
-**v1.1.26**
-- Fixed Live TV category selections losing their checked state after saving, refreshing categories, or returning to the tab.
-- Updated category selection state immediately after save so refreshed category lists redraw from the latest saved choices.
-
-**v1.1.25**
-- Fixed series sync failure when provider returns `episodes` as an empty array `[]` instead of an object (e.g. Due South).
-- Fixed series sync failure when provider returns no detail data (empty array, null, or false) for a series (e.g. Obi-Wan Kenobi). Both cases are now skipped gracefully instead of appearing as failed items.
-
-**v1.1.24**
-- Version bump.
-
-**v1.1.23**
-- Refreshed the Dashboard, Settings, and Live TV tabs with clearer row-based controls and improved layout.
-- Added Dashboard and Live TV guide refresh actions for clearing XC2EMBY channel/guide caches and triggering Emby guide refresh.
-- Added optional Live TV channel-logo cache cleanup during guide refresh.
-- Added a new XC2EMBY plugin logo for Emby and the README.
-- Fixed provider parsing for mixed numeric/string `added` timestamps in live and VOD stream data — previously caused a complete channel list failure when any channel had a non-numeric value.
+**v1.1.44**
+- Full codebase audit and remediation: volatile fields and `Interlocked` CAS guards for all shared mutable state; `SemaphoreSlim` disposed via `using`; lock added around `_cachedChannels`.
+- EPG guide matching: O(N×M) linear scan replaced with a pre-indexed `Dictionary<string, List<XElement>>` keyed by channel — eliminates repeated full-document walks on large XMLTV feeds.
+- All hand-rolled string-walking JSON parsers replaced with `JsonDocument.Parse`.
+- Dead code, dead comments, and vestigial compatibility stubs removed throughout.
+- Admin API endpoints secured: `[Authenticated(Roles = "Admin")]` added to all 22 configuration and management endpoints; EPG and M3U playlist endpoints remain unauthenticated for player compatibility.
+- Introduced `XtreamUrlBuilder` static class to deduplicate `BuildStreamUrl` and `NormalizeGuideKey` logic shared between `LiveTvService` and `XtreamTunerHost`.
+- NFO writer: `EscapeXml` now escapes single-quote (`'` → `&apos;`).
+- `LogSanitizer`: credential-scrubbing delimiter changed from `\x00` to `\x1F` (ASCII Unit Separator) to avoid embedded-null issues in log output.
 
 ### Live TV
 - Registers as a native Emby tuner host — channels appear in Live TV just like any other tuner
