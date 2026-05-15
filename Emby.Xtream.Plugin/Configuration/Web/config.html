@@ -426,6 +426,37 @@
                         }
                     }
 
+                    /* ---- Mobile tab bar ---- */
+                    .configTabs {
+                        overflow-x: auto;
+                        -webkit-overflow-scrolling: touch;
+                        scrollbar-width: none;
+                    }
+                    .configTabs::-webkit-scrollbar { display: none; }
+                    .tabBtn {
+                        flex-shrink: 0;
+                        white-space: nowrap;
+                    }
+                    @media (max-width: 600px) {
+                        .tabBtn {
+                            padding: 0.55em 0.9em !important;
+                            font-size: 0.88em !important;
+                        }
+                        .dashboard-grid {
+                            grid-template-columns: 1fr;
+                        }
+                        .dashboard-history-table thead { display: none; }
+                        .dashboard-history-table td {
+                            display: block;
+                            padding: 0.25em 0.4em;
+                        }
+                        .dashboard-history-table tr {
+                            display: block;
+                            border-bottom: 1px solid rgba(128,128,128,0.15);
+                            padding: 0.4em 0;
+                        }
+                    }
+
                     /* ---- Browse modal ---- */
                     .strmBrowserModal {
                         --browser-bg:  var(--paper-color, var(--background, #1f1f1f));
