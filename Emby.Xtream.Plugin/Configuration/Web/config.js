@@ -2975,8 +2975,13 @@ function (BaseView, loading) {
             var apiUrl = ApiClient.getUrl('XC2EMBY/Sync/Status');
             ApiClient.getJSON(apiUrl).then(function (status) {
                 var movieProg = status.Movies;
+                var docProg   = status.Documentaries;
                 var seriesProg = status.Series;
-                var isRunning = (movieProg && movieProg.IsRunning) || (seriesProg && seriesProg.IsRunning);
+                var docuProg  = status.DocuSeries;
+                var isRunning = (movieProg && movieProg.IsRunning) ||
+                                (docProg   && docProg.IsRunning)   ||
+                                (seriesProg && seriesProg.IsRunning) ||
+                                (docuProg  && docuProg.IsRunning);
 
                 if (!isRunning) {
                     stopDashboardProgressPolling();
@@ -2985,7 +2990,10 @@ function (BaseView, loading) {
                     return;
                 }
 
-                var active = (movieProg && movieProg.IsRunning) ? movieProg : seriesProg;
+                var active = (movieProg  && movieProg.IsRunning)  ? movieProg  :
+                             (docProg    && docProg.IsRunning)    ? docProg    :
+                             (seriesProg && seriesProg.IsRunning) ? seriesProg :
+                             docuProg;
                 var total = active.Total || 0;
                 var completed = active.Completed || 0;
                 var pct = total > 0 ? Math.round((completed / total) * 100) : 0;

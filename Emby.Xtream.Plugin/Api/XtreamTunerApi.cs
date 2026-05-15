@@ -1105,7 +1105,8 @@ namespace Emby.Xtream.Plugin.Api
                 PluginVersion = GetPluginDisplayVersion(),
                 LastSync = history.Count > 0 ? history[0] : null,
                 History = history,
-                IsRunning = syncService.MovieProgress.IsRunning || syncService.SeriesProgress.IsRunning,
+                IsRunning = syncService.MovieProgress.IsRunning || syncService.DocumentariesProgress.IsRunning ||
+                            syncService.SeriesProgress.IsRunning || syncService.DocuSeriesProgress.IsRunning,
                 AutoSyncOn = config.AutoSyncEnabled,
                 NextSyncTime = nextSyncTime,
                 LibraryStats = new LibraryStats
