@@ -427,48 +427,46 @@ namespace Emby.Xtream.Plugin.Api
                 "{0}/player_api.php?username={1}&password={2}&action=get_vod_categories",
                 config.BaseUrl, Uri.EscapeDataString(config.Username), Uri.EscapeDataString(config.Password));
 
-            using (var httpClient = Plugin.CreateHttpClient())
+            var httpClient = Plugin.CreateHttpClient();
+            var json = await httpClient.GetStringAsync(url).ConfigureAwait(false);
+            var jsonOptions = new System.Text.Json.JsonSerializerOptions
             {
-                var json = await httpClient.GetStringAsync(url).ConfigureAwait(false);
-                var jsonOptions = new System.Text.Json.JsonSerializerOptions
-                {
-                    NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString,
-                    PropertyNameCaseInsensitive = true,
-                };
-                var categories = XtreamResponseParser.DeserializeCategories(json, jsonOptions);
-                var sorted = categories.OrderBy(c => c.CategoryName).ToList();
+                NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString,
+                PropertyNameCaseInsensitive = true,
+            };
+            var categories = XtreamResponseParser.DeserializeCategories(json, jsonOptions);
+            var sorted = categories.OrderBy(c => c.CategoryName).ToList();
 
-                // Fallback: derive categories from VOD stream list when server returns empty
-                if (sorted.Count == 0)
-                {
-                    var streamsUrl = string.Format(
-                        System.Globalization.CultureInfo.InvariantCulture,
-                        "{0}/player_api.php?username={1}&password={2}&action=get_vod_streams",
-                        config.BaseUrl, Uri.EscapeDataString(config.Username), Uri.EscapeDataString(config.Password));
+            // Fallback: derive categories from VOD stream list when server returns empty
+            if (sorted.Count == 0)
+            {
+                var streamsUrl = string.Format(
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    "{0}/player_api.php?username={1}&password={2}&action=get_vod_streams",
+                    config.BaseUrl, Uri.EscapeDataString(config.Username), Uri.EscapeDataString(config.Password));
 
-                    var streamsJson = await httpClient.GetStringAsync(streamsUrl).ConfigureAwait(false);
-                    var vodStreams = System.Text.Json.JsonSerializer.Deserialize<List<VodStreamInfo>>(streamsJson, jsonOptions)
-                        ?? new List<VodStreamInfo>();
+                var streamsJson = await httpClient.GetStringAsync(streamsUrl).ConfigureAwait(false);
+                var vodStreams = System.Text.Json.JsonSerializer.Deserialize<List<VodStreamInfo>>(streamsJson, jsonOptions)
+                    ?? new List<VodStreamInfo>();
 
-                    sorted = vodStreams
-                        .Where(s => s.CategoryId.HasValue)
-                        .GroupBy(s => s.CategoryId.Value)
-                        .Select(g => new Category
-                        {
-                            CategoryId = g.Key,
-                            CategoryName = "Category " + g.Key,
-                        })
-                        .OrderBy(c => c.CategoryName)
-                        .ToList();
-                }
-
-                // Cache for instant UI loading
-                config.CachedVodCategories = System.Text.Json.JsonSerializer.Serialize(
-                    sorted.Select(c => new { c.CategoryId, c.CategoryName }).ToList());
-                Plugin.Instance.SaveConfiguration();
-
-                return sorted;
+                sorted = vodStreams
+                    .Where(s => s.CategoryId.HasValue)
+                    .GroupBy(s => s.CategoryId.Value)
+                    .Select(g => new Category
+                    {
+                        CategoryId = g.Key,
+                        CategoryName = "Category " + g.Key,
+                    })
+                    .OrderBy(c => c.CategoryName)
+                    .ToList();
             }
+
+            // Cache for instant UI loading
+            config.CachedVodCategories = System.Text.Json.JsonSerializer.Serialize(
+                sorted.Select(c => new { c.CategoryId, c.CategoryName }).ToList());
+            Plugin.Instance.SaveConfiguration();
+
+            return sorted;
         }
 
         public async Task<object> Get(GetSeriesCategories request)
@@ -486,48 +484,46 @@ namespace Emby.Xtream.Plugin.Api
                 PropertyNameCaseInsensitive = true,
             };
 
-            using (var httpClient = Plugin.CreateHttpClient())
+            var httpClient2 = Plugin.CreateHttpClient();
+            var url2 = string.Format(
+                System.Globalization.CultureInfo.InvariantCulture,
+                "{0}/player_api.php?username={1}&password={2}&action=get_series_categories",
+                config.BaseUrl, Uri.EscapeDataString(config.Username), Uri.EscapeDataString(config.Password));
+
+            var json2 = await httpClient2.GetStringAsync(url2).ConfigureAwait(false);
+            var categories2 = XtreamResponseParser.DeserializeCategories(json2, jsonOptions);
+            var sorted2 = categories2.OrderBy(c => c.CategoryName).ToList();
+
+            // Fallback: derive categories from series list when server returns empty
+            if (sorted2.Count == 0)
             {
-                var url = string.Format(
+                var seriesUrl = string.Format(
                     System.Globalization.CultureInfo.InvariantCulture,
-                    "{0}/player_api.php?username={1}&password={2}&action=get_series_categories",
+                    "{0}/player_api.php?username={1}&password={2}&action=get_series",
                     config.BaseUrl, Uri.EscapeDataString(config.Username), Uri.EscapeDataString(config.Password));
 
-                var json = await httpClient.GetStringAsync(url).ConfigureAwait(false);
-                var categories = XtreamResponseParser.DeserializeCategories(json, jsonOptions);
-                var sorted = categories.OrderBy(c => c.CategoryName).ToList();
+                var seriesJson = await httpClient2.GetStringAsync(seriesUrl).ConfigureAwait(false);
+                var seriesList = XtreamResponseParser.DeserializeSeriesList(seriesJson, jsonOptions);
 
-                // Fallback: derive categories from series list when server returns empty
-                if (sorted.Count == 0)
-                {
-                    var seriesUrl = string.Format(
-                        System.Globalization.CultureInfo.InvariantCulture,
-                        "{0}/player_api.php?username={1}&password={2}&action=get_series",
-                        config.BaseUrl, Uri.EscapeDataString(config.Username), Uri.EscapeDataString(config.Password));
-
-                    var seriesJson = await httpClient.GetStringAsync(seriesUrl).ConfigureAwait(false);
-                    var seriesList = XtreamResponseParser.DeserializeSeriesList(seriesJson, jsonOptions);
-
-                    sorted = seriesList
-                        .Where(s => s.CategoryId.HasValue)
-                        .GroupBy(s => s.CategoryId.Value)
-                        .Select(g => new Category
-                        {
-                            CategoryId = g.Key,
-                            CategoryName = g.FirstOrDefault(s => !string.IsNullOrEmpty(s.CategoryName))?.CategoryName
-                                ?? "Category " + g.Key,
-                        })
-                        .OrderBy(c => c.CategoryName)
-                        .ToList();
-                }
-
-                // Cache for instant UI loading
-                config.CachedSeriesCategories = System.Text.Json.JsonSerializer.Serialize(
-                    sorted.Select(c => new { c.CategoryId, c.CategoryName }).ToList());
-                Plugin.Instance.SaveConfiguration();
-
-                return sorted;
+                sorted2 = seriesList
+                    .Where(s => s.CategoryId.HasValue)
+                    .GroupBy(s => s.CategoryId.Value)
+                    .Select(g => new Category
+                    {
+                        CategoryId = g.Key,
+                        CategoryName = g.FirstOrDefault(s => !string.IsNullOrEmpty(s.CategoryName))?.CategoryName
+                            ?? "Category " + g.Key,
+                    })
+                    .OrderBy(c => c.CategoryName)
+                    .ToList();
             }
+
+            // Cache for instant UI loading
+            config.CachedSeriesCategories = System.Text.Json.JsonSerializer.Serialize(
+                sorted2.Select(c => new { c.CategoryId, c.CategoryName }).ToList());
+            Plugin.Instance.SaveConfiguration();
+
+            return sorted2;
         }
 
         public async Task<object> Post(SyncMovies request)
@@ -1612,55 +1608,53 @@ namespace Emby.Xtream.Plugin.Api
                     "{0}/player_api.php?username={1}&password={2}",
                     config.BaseUrl, Uri.EscapeDataString(config.Username), Uri.EscapeDataString(config.Password));
 
-                using (var httpClient = Plugin.CreateHttpClient())
+                var testHttpClient = Plugin.CreateHttpClient();
+                var response = await testHttpClient.GetStringAsync(url).ConfigureAwait(false);
+
+                try
                 {
-                    var response = await httpClient.GetStringAsync(url).ConfigureAwait(false);
-
-                    try
+                    using (var doc = System.Text.Json.JsonDocument.Parse(response))
                     {
-                        using (var doc = System.Text.Json.JsonDocument.Parse(response))
+                        if (doc.RootElement.TryGetProperty("user_info", out var userInfo))
                         {
-                            if (doc.RootElement.TryGetProperty("user_info", out var userInfo))
+                            var auth = 0;
+                            if (userInfo.TryGetProperty("auth", out var authEl))
                             {
-                                var auth = 0;
-                                if (userInfo.TryGetProperty("auth", out var authEl))
-                                {
-                                    if (authEl.ValueKind == System.Text.Json.JsonValueKind.Number)
-                                        auth = authEl.GetInt32();
-                                    else if (authEl.ValueKind == System.Text.Json.JsonValueKind.String
-                                             && int.TryParse(authEl.GetString(), out var n))
-                                        auth = n;
-                                }
+                                if (authEl.ValueKind == System.Text.Json.JsonValueKind.Number)
+                                    auth = authEl.GetInt32();
+                                else if (authEl.ValueKind == System.Text.Json.JsonValueKind.String
+                                         && int.TryParse(authEl.GetString(), out var n))
+                                    auth = n;
+                            }
 
-                                string status = null;
-                                if (userInfo.TryGetProperty("status", out var statusEl))
-                                    status = statusEl.GetString();
+                            string status = null;
+                            if (userInfo.TryGetProperty("status", out var statusEl))
+                                status = statusEl.GetString();
 
-                                if (auth == 1)
-                                {
-                                    result.Success = true;
-                                    result.Message = "Connection successful!";
-                                }
-                                else
-                                {
-                                    result.Success = false;
-                                    result.Message = string.Format(
-                                        "Authentication failed: account status is '{0}'.",
-                                        status ?? "unknown");
-                                }
+                            if (auth == 1)
+                            {
+                                result.Success = true;
+                                result.Message = "Connection successful!";
                             }
                             else
                             {
                                 result.Success = false;
-                                result.Message = "Server responded but returned an unexpected format. Verify the server URL.";
+                                result.Message = string.Format(
+                                    "Authentication failed: account status is '{0}'.",
+                                    status ?? "unknown");
                             }
                         }
+                        else
+                        {
+                            result.Success = false;
+                            result.Message = "Server responded but returned an unexpected format. Verify the server URL.";
+                        }
                     }
-                    catch (System.Text.Json.JsonException)
-                    {
-                        result.Success = false;
-                        result.Message = "Server did not return a valid Xtream API response. Verify the server URL.";
-                    }
+                }
+                catch (System.Text.Json.JsonException)
+                {
+                    result.Success = false;
+                    result.Message = "Server did not return a valid Xtream API response. Verify the server URL.";
                 }
             }
             catch (Exception ex)

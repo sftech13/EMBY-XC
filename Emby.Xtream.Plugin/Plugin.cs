@@ -18,7 +18,9 @@ namespace Emby.Xtream.Plugin
     public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages, IHasThumbImage
     {
         private static volatile Plugin _instance;
-        private static readonly System.Net.Http.HttpClient _sharedHttpClient = new System.Net.Http.HttpClient(new System.Net.Http.HttpClientHandler { AllowAutoRedirect = true });
+        private static readonly System.Net.Http.HttpClient _sharedHttpClient10  = new System.Net.Http.HttpClient(new System.Net.Http.HttpClientHandler { AllowAutoRedirect = true }) { Timeout = TimeSpan.FromSeconds(10)  };
+        private static readonly System.Net.Http.HttpClient _sharedHttpClient30  = new System.Net.Http.HttpClient(new System.Net.Http.HttpClientHandler { AllowAutoRedirect = true }) { Timeout = TimeSpan.FromSeconds(30)  };
+        private static readonly System.Net.Http.HttpClient _sharedHttpClient180 = new System.Net.Http.HttpClient(new System.Net.Http.HttpClientHandler { AllowAutoRedirect = true }) { Timeout = TimeSpan.FromSeconds(180) };
         private const string LegacyConfigFileName = "Emby.Xtream.Plugin.xml";
         private const string CurrentConfigFileName = "XC2EMBY.Plugin.xml";
         private readonly IApplicationHost _applicationHost;
@@ -74,13 +76,11 @@ namespace Emby.Xtream.Plugin
         /// <summary>Exposes the protected base-class ApplicationPaths for callers outside this assembly.</summary>
         public IApplicationPaths PluginPaths => ApplicationPaths;
 
-        /// <summary>
-        /// Returns the shared HttpClient. The timeoutSeconds parameter is ignored for the shared instance;
-        /// callers that need a different timeout should set it before use or use a dedicated client.
-        /// </summary>
         public static HttpClient CreateHttpClient(int timeoutSeconds = 10)
         {
-            return _sharedHttpClient;
+            if (timeoutSeconds >= 180) return _sharedHttpClient180;
+            if (timeoutSeconds >= 30)  return _sharedHttpClient30;
+            return _sharedHttpClient10;
         }
 
         public LiveTvService LiveTvService => _liveTvService;

@@ -422,17 +422,15 @@ namespace Emby.Xtream.Plugin.Service
 
         private static async Task<List<Client.Models.LiveStreamInfo>> FetchAllChannelsDirectAsync(PluginConfiguration config)
         {
-            using (var httpClient = Plugin.CreateHttpClient(30))
-            {
-                var url = string.Format(
-                    CultureInfo.InvariantCulture,
-                    "{0}/player_api.php?username={1}&password={2}&action=get_live_streams",
-                    config.BaseUrl, Uri.EscapeDataString(config.Username ?? string.Empty), Uri.EscapeDataString(config.Password ?? string.Empty));
+            var httpClient = Plugin.CreateHttpClient(30);
+            var url = string.Format(
+                CultureInfo.InvariantCulture,
+                "{0}/player_api.php?username={1}&password={2}&action=get_live_streams",
+                config.BaseUrl, Uri.EscapeDataString(config.Username ?? string.Empty), Uri.EscapeDataString(config.Password ?? string.Empty));
 
-                var json = await httpClient.GetStringAsync(url).ConfigureAwait(false);
-                return STJ.JsonSerializer.Deserialize<List<Client.Models.LiveStreamInfo>>(json, JsonOptions)
-                    ?? new List<Client.Models.LiveStreamInfo>();
-            }
+            var json = await httpClient.GetStringAsync(url).ConfigureAwait(false);
+            return STJ.JsonSerializer.Deserialize<List<Client.Models.LiveStreamInfo>>(json, JsonOptions)
+                ?? new List<Client.Models.LiveStreamInfo>();
         }
 
         protected override Task<List<MediaSourceInfo>> GetChannelStreamMediaSources(

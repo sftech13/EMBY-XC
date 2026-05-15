@@ -139,13 +139,11 @@ namespace Emby.Xtream.Plugin.Service
                 "{0}/player_api.php?username={1}&password={2}&action=get_live_categories",
                 config.BaseUrl, Uri.EscapeDataString(config.Username ?? string.Empty), Uri.EscapeDataString(config.Password ?? string.Empty));
 
-            using (var httpClient = Plugin.CreateHttpClient())
-            {
-                var json = await httpClient.GetStringAsync(url).ConfigureAwait(false);
-                var categories = STJ.JsonSerializer.Deserialize<List<Category>>(json, JsonOptions)
-                    ?? new List<Category>();
-                return categories.OrderBy(c => c.CategoryName).ToList();
-            }
+            var httpClient = Plugin.CreateHttpClient();
+            var json = await httpClient.GetStringAsync(url).ConfigureAwait(false);
+            var categories = STJ.JsonSerializer.Deserialize<List<Category>>(json, JsonOptions)
+                ?? new List<Category>();
+            return categories.OrderBy(c => c.CategoryName).ToList();
         }
 
         /// <summary>
@@ -239,12 +237,10 @@ namespace Emby.Xtream.Plugin.Service
                 "{0}/player_api.php?username={1}&password={2}&action=get_live_streams",
                 config.BaseUrl, Uri.EscapeDataString(config.Username ?? string.Empty), Uri.EscapeDataString(config.Password ?? string.Empty));
 
-            using (var httpClient = Plugin.CreateHttpClient(30))
-            {
-                var json = await httpClient.GetStringAsync(url).ConfigureAwait(false);
-                return STJ.JsonSerializer.Deserialize<List<LiveStreamInfo>>(json, JsonOptions)
-                    ?? new List<LiveStreamInfo>();
-            }
+            var httpClient = Plugin.CreateHttpClient(30);
+            var json = await httpClient.GetStringAsync(url).ConfigureAwait(false);
+            return STJ.JsonSerializer.Deserialize<List<LiveStreamInfo>>(json, JsonOptions)
+                ?? new List<LiveStreamInfo>();
         }
 
         private static string GenerateM3U(
@@ -641,12 +637,10 @@ namespace Emby.Xtream.Plugin.Service
                     var filterEndUnix = now.AddDays(config.EpgDaysToFetch).ToUnixTimeSeconds();
 
                     Dictionary<string, List<EpgProgram>> xmltvData;
-                    using (var httpClient = Plugin.CreateHttpClient(180))
+                    var epgHttpClient = Plugin.CreateHttpClient(180);
+                    using (var stream = await epgHttpClient.GetStreamAsync(url).ConfigureAwait(false))
                     {
-                        using (var stream = await httpClient.GetStreamAsync(url).ConfigureAwait(false))
-                        {
-                            xmltvData = XmltvParser.Parse(stream, now.ToUnixTimeSeconds(), filterEndUnix);
-                        }
+                        xmltvData = XmltvParser.Parse(stream, now.ToUnixTimeSeconds(), filterEndUnix);
                     }
 
                     _xmltvCache = xmltvData;
@@ -682,11 +676,9 @@ namespace Emby.Xtream.Plugin.Service
                 "{0}/player_api.php?username={1}&password={2}&action=get_simple_data_table&stream_id={3}",
                 config.BaseUrl, Uri.EscapeDataString(config.Username ?? string.Empty), Uri.EscapeDataString(config.Password ?? string.Empty), streamId);
 
-            using (var httpClient = Plugin.CreateHttpClient())
-            {
-                var json = await httpClient.GetStringAsync(url).ConfigureAwait(false);
-                return STJ.JsonSerializer.Deserialize<EpgListings>(json, JsonOptions);
-            }
+            var httpClient = Plugin.CreateHttpClient();
+            var json = await httpClient.GetStringAsync(url).ConfigureAwait(false);
+            return STJ.JsonSerializer.Deserialize<EpgListings>(json, JsonOptions);
         }
 
         private static string FormatXmltvTime(long unixTimestamp)

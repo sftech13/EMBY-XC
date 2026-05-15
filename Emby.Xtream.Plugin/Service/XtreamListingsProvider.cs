@@ -245,8 +245,8 @@ namespace Emby.Xtream.Plugin.Service
                     return _cachedXml;
 
                 XDocument loadedDoc;
-                using (var httpClient = Plugin.CreateHttpClient(180))
-                using (var stream = await httpClient.GetStreamAsync(url).ConfigureAwait(false))
+                var xmlHttpClient = Plugin.CreateHttpClient(180);
+                using (var stream = await xmlHttpClient.GetStreamAsync(url).ConfigureAwait(false))
                 {
                     loadedDoc = XDocument.Load(stream);
                 }
