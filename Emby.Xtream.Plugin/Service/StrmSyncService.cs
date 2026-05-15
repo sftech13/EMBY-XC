@@ -122,6 +122,7 @@ namespace Emby.Xtream.Plugin.Service
         private SyncProgress _docuSeriesProgress = new SyncProgress();
         private SyncProgress _seriesProgress = new SyncProgress();
         private SyncProgress _episodeProgress = new SyncProgress();
+        private SyncProgress _retryProgress = new SyncProgress();
 
         private static void ReportTaskProgress(SyncProgress syncProgress, IProgress<double> taskProgress)
         {
@@ -271,10 +272,11 @@ namespace Emby.Xtream.Plugin.Service
             return Path.IsPathRooted(value) ? value : SanitizeFileName(value);
         }
 
-        public SyncProgress MovieProgress => _movieProgress;
+        public SyncProgress MovieProgress        => _movieProgress;
         public SyncProgress DocumentariesProgress => _documentariesProgress;
-        public SyncProgress DocuSeriesProgress => _docuSeriesProgress;
-        public SyncProgress SeriesProgress => _seriesProgress;
+        public SyncProgress DocuSeriesProgress   => _docuSeriesProgress;
+        public SyncProgress SeriesProgress       => _seriesProgress;
+        public SyncProgress RetryProgress        => _retryProgress;
 
         public bool StopActiveSync()
         {
@@ -1353,7 +1355,7 @@ namespace Emby.Xtream.Plugin.Service
             if (items.Count == 0) return;
 
             var config = Plugin.Instance.Configuration;
-            _movieProgress = new SyncProgress { IsRunning = true, Phase = "Retrying failed items", Total = items.Count };
+            _retryProgress = new SyncProgress { IsRunning = true, Phase = "Retrying failed items", Total = items.Count };
 
             try
             {
@@ -1375,13 +1377,13 @@ namespace Emby.Xtream.Plugin.Service
                             await RetrySeriesItemAsync(item, config, cancellationToken).ConfigureAwait(false);
 
                         lock (succeededLock) { succeeded.Add(item); }
-                        Interlocked.Increment(ref _movieProgress.Completed);
+                        Interlocked.Increment(ref _retryProgress.Completed);
                     }
                     catch (Exception ex)
                     {
                         _logger.Error("Retry still failed for '{0}': {1}", item.Name, ex.Message);
-                        Interlocked.Increment(ref _movieProgress.Failed);
-                        Interlocked.Increment(ref _movieProgress.Completed);
+                        Interlocked.Increment(ref _retryProgress.Failed);
+                        Interlocked.Increment(ref _retryProgress.Completed);
                     }
                     finally
                     {
@@ -1399,8 +1401,8 @@ namespace Emby.Xtream.Plugin.Service
             }
             finally
             {
-                _movieProgress.IsRunning = false;
-                _movieProgress.Phase = "Retry complete";
+                _retryProgress.IsRunning = false;
+                _retryProgress.Phase = "Retry complete";
             }
         }
 
@@ -1440,7 +1442,7 @@ namespace Emby.Xtream.Plugin.Service
 
                 if (!fileExists)
                 {
-                    Interlocked.Increment(ref _movieProgress.Added);
+                    Interlocked.Increment(ref _retryProgress.Added);
                 }
             }
 
@@ -1516,7 +1518,7 @@ namespace Emby.Xtream.Plugin.Service
 
                         if (!fileExists)
                         {
-                            Interlocked.Increment(ref _episodeProgress.Added);
+                            Interlocked.Increment(ref _retryProgress.Added);
                         }
                     }
                 }

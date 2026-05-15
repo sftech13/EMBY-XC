@@ -778,26 +778,6 @@ namespace Emby.Xtream.Plugin.Service
                 as_.DisplayTitle = BuildAudioDisplayTitle(info.AudioCodec, info.AudioChannels);
                 streams.Add(as_);
             }
-            // Emby represents ATSC A53 CC (H264 SEI video side data) as a Subtitle stream
-            // with Codec=eia_608 and Index=100. This is the exact format Emby uses when it
-            // probes MKV/TS files with embedded CC — matching it here triggers Emby's
-            // AppendClosedCaptionSplitter pipeline which extracts CC to WebVTT for HLS.
-            if (info.HasA53ClosedCaptions)
-            {
-                streams.Add(new MediaStream
-                {
-                    Type                   = MediaStreamType.Subtitle,
-                    Codec                  = "eia_608",
-                    Index                  = 100,
-                    Title                  = "Closed Captions 1",
-                    DisplayTitle           = "CC",
-                    IsDefault              = true,
-                    IsForced               = false,
-                    IsExternal             = false,
-                    SupportsExternalStream = true,
-                    Language               = "eng",
-                });
-            }
             return streams;
         }
 

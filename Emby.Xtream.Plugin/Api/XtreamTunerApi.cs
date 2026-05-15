@@ -169,6 +169,11 @@ namespace Emby.Xtream.Plugin.Api
     [Route("/XC2EMBY/TestConnection", "POST", Summary = "Tests connection to Xtream server")]
     public class TestXtreamConnection : IReturn<TestConnectionResult>
     {
+        // Optional: pass current form values so the test works before the user saves.
+        // If omitted, the server falls back to the saved plugin configuration.
+        public string BaseUrl  { get; set; }
+        public string Username { get; set; }
+        public string Password { get; set; }
     }
 
     [Authenticated(Roles = "Admin")]
@@ -889,7 +894,7 @@ namespace Emby.Xtream.Plugin.Api
                 return new SyncResult { Success = false, Message = "No failed items to retry." };
 
             await syncService.RetryFailedAsync(CancellationToken.None).ConfigureAwait(false);
-            var p = syncService.MovieProgress;
+            var p = syncService.RetryProgress;
             return new SyncResult
             {
                 Success = true,
@@ -951,7 +956,7 @@ namespace Emby.Xtream.Plugin.Api
             };
         }
 
-        public object Get(GetDashboard request)
+        public async Task<object> Get(GetDashboard request)
         {
             var syncService = Plugin.Instance.StrmSyncService;
             var config = Plugin.Instance.Configuration;
@@ -1054,11 +1059,9 @@ namespace Emby.Xtream.Plugin.Api
                     !string.IsNullOrEmpty(config.Username) &&
                     !string.IsNullOrEmpty(config.Password))
                 {
-                    liveTvChannels = Plugin.Instance.LiveTvService
+                    liveTvChannels = (await Plugin.Instance.LiveTvService
                         .GetFilteredChannelsAsync(CancellationToken.None)
-                        .GetAwaiter()
-                        .GetResult()
-                        .Count;
+                        .ConfigureAwait(false)).Count;
                 }
             }
             catch
@@ -1592,9 +1595,14 @@ namespace Emby.Xtream.Plugin.Api
             var config = Plugin.Instance.Configuration;
             var result = new TestConnectionResult();
 
-            if (string.IsNullOrEmpty(config.BaseUrl) ||
-                string.IsNullOrEmpty(config.Username) ||
-                string.IsNullOrEmpty(config.Password))
+            // Use values from the request body first (pre-save test), fall back to saved config.
+            var baseUrl  = !string.IsNullOrEmpty(request?.BaseUrl)  ? request.BaseUrl.TrimEnd('/')  : config.BaseUrl;
+            var username = !string.IsNullOrEmpty(request?.Username) ? request.Username : config.Username;
+            var password = !string.IsNullOrEmpty(request?.Password) ? request.Password : config.Password;
+
+            if (string.IsNullOrEmpty(baseUrl) ||
+                string.IsNullOrEmpty(username) ||
+                string.IsNullOrEmpty(password))
             {
                 result.Success = false;
                 result.Message = "Please configure server URL, username, and password first.";
@@ -1606,7 +1614,7 @@ namespace Emby.Xtream.Plugin.Api
                 var url = string.Format(
                     System.Globalization.CultureInfo.InvariantCulture,
                     "{0}/player_api.php?username={1}&password={2}",
-                    config.BaseUrl, Uri.EscapeDataString(config.Username), Uri.EscapeDataString(config.Password));
+                    baseUrl, Uri.EscapeDataString(username), Uri.EscapeDataString(password));
 
                 var testHttpClient = Plugin.CreateHttpClient();
                 var response = await testHttpClient.GetStringAsync(url).ConfigureAwait(false);
@@ -1640,6 +1648,7 @@ namespace Emby.Xtream.Plugin.Api
                             {
                                 result.Success = false;
                                 result.Message = string.Format(
+                                    CultureInfo.InvariantCulture,
                                     "Authentication failed: account status is '{0}'.",
                                     status ?? "unknown");
                             }

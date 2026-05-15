@@ -159,7 +159,7 @@ namespace Emby.Xtream.Plugin.Service
 
         private static async Task<StreamCodecInfo> ProbeAsync(string url, ILogger logger)
         {
-            var ffprobe = FindFfprobe(logger);
+            var ffprobe = await FindFfprobeAsync(logger).ConfigureAwait(false);
             if (string.IsNullOrEmpty(ffprobe))
             {
                 logger?.Warn("[XtreamProbe] ffprobe not found — install ffprobe to enable codec auto-detection");
@@ -200,58 +200,7 @@ namespace Emby.Xtream.Plugin.Service
                 output = readTask.IsCompleted ? readTask.Result : string.Empty;
             }
 
-            var info = ParseOutput(output);
-            if (info != null && !string.IsNullOrEmpty(info.VideoCodec))
-            {
-                // ATSC A53 Part 4 CC is embedded in H264 SEI NAL units — not visible via
-                // -show_streams (reports closed_captions:0). Frame-level probe is required.
-                info.HasA53ClosedCaptions = await CheckA53CcAsync(url, ffprobe, logger)
-                    .ConfigureAwait(false);
-            }
-            return info;
-        }
-
-        private static async Task<bool> CheckA53CcAsync(string url, string ffprobe, ILogger logger)
-        {
-            logger?.Warn("StreamProbeService: CheckA53Cc opens a secondary stream connection per channel for codec detection");
-            // Read first 30 video frames' side_data to detect ATSC A53 CC.
-            var args = string.Format(
-                "-v quiet -print_format json -show_frames -select_streams v:0 -read_intervals \"%+#30\"" +
-                " -analyzeduration 3000000 -probesize 2000000 -i \"{0}\"",
-                url.Replace("\"", "\\\""));
-
-            string output;
-            using (var proc = new Process())
-            {
-                proc.StartInfo = new ProcessStartInfo
-                {
-                    FileName               = ffprobe,
-                    Arguments              = args,
-                    UseShellExecute        = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError  = true,
-                    CreateNoWindow         = true,
-                };
-
-                proc.Start();
-                var readTask = proc.StandardOutput.ReadToEndAsync();
-
-                await Task.WhenAny(readTask, Task.Delay(12000)).ConfigureAwait(false);
-
-                if (!proc.HasExited)
-                {
-                    try { proc.Kill(); } catch { }
-                }
-
-                output = readTask.IsCompleted ? readTask.Result : string.Empty;
-            }
-
-            var hasCC = !string.IsNullOrEmpty(output) &&
-                        output.IndexOf("ATSC A53 Part 4 Closed Captions",
-                            StringComparison.OrdinalIgnoreCase) >= 0;
-            if (hasCC)
-                logger?.Info("[XtreamProbe] Detected ATSC A53 CC in stream {0}", url);
-            return hasCC;
+            return ParseOutput(output);
         }
 
         private static StreamCodecInfo ParseOutput(string json)
@@ -315,7 +264,7 @@ namespace Emby.Xtream.Plugin.Service
             catch { return null; }
         }
 
-        private static string FindFfprobe(ILogger logger)
+        private static async Task<string> FindFfprobeAsync(ILogger logger)
         {
             if (_ffprobePath != null)
                 return string.IsNullOrEmpty(_ffprobePath) ? null : _ffprobePath;
@@ -340,7 +289,7 @@ namespace Emby.Xtream.Plugin.Service
                 }
             }
 
-            // Fall back to PATH by trying to run it.
+            // Fall back to PATH — use async read + timeout so we don't block the thread-pool.
             try
             {
                 using (var p = Process.Start(new ProcessStartInfo
@@ -355,7 +304,9 @@ namespace Emby.Xtream.Plugin.Service
                 {
                     if (p != null)
                     {
-                        p.WaitForExit(3000);
+                        var readTask = p.StandardOutput.ReadToEndAsync();
+                        await Task.WhenAny(readTask, Task.Delay(3000)).ConfigureAwait(false);
+                        if (!p.HasExited) { try { p.Kill(); } catch { } }
                         if (p.ExitCode == 0)
                         {
                             _ffprobePath = "ffprobe";
@@ -381,9 +332,6 @@ namespace Emby.Xtream.Plugin.Service
         public string AudioCodec    { get; set; }
         public int    AudioChannels { get; set; }
         public string AudioLanguage { get; set; }
-
-        /// <summary>True when ATSC A53 Part 4 CC was detected in H264 SEI frame side data.</summary>
-        public bool HasA53ClosedCaptions { get; set; }
 
         /// <summary>Unix seconds (UTC) when this entry was probed.</summary>
         public long CachedAt { get; set; }

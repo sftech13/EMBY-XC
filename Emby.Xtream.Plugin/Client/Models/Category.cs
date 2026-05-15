@@ -11,8 +11,5 @@ namespace Emby.Xtream.Plugin.Client.Models
         [JsonPropertyName("category_name")]
         public string CategoryName { get; set; } = string.Empty;
 
-        [JsonPropertyName("parent_id")]
-        [JsonConverter(typeof(FlexibleInt32Converter))]
-        public int ParentId { get; set; }
     }
 }

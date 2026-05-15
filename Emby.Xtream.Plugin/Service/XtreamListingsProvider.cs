@@ -478,36 +478,14 @@ namespace Emby.Xtream.Plugin.Service
             }
         }
 
-        // XMLTV format: "20260413120000 +0000"  (no colon in offset)
-        private static readonly Regex XmltvDateRx =
-            new Regex(@"^(\d{14})\s*([+-]\d{4})?$", RegexOptions.Compiled);
-
         private static bool TryParseXmltvDate(string input, out DateTimeOffset result)
         {
             result = default(DateTimeOffset);
             if (string.IsNullOrEmpty(input)) return false;
-
-            var m = XmltvDateRx.Match(input.Trim());
-            if (!m.Success) return false;
-
-            if (!DateTime.TryParseExact(m.Groups[1].Value, "yyyyMMddHHmmss",
-                    CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt))
-                return false;
-
-            TimeSpan offset = TimeSpan.Zero;
-            if (m.Groups[2].Success)
-            {
-                var off = m.Groups[2].Value;
-                int sign = off[0] == '+' ? 1 : -1;
-                int hours, mins;
-                if (!int.TryParse(off.Substring(1, 2), out hours))
-                    hours = 0;
-                if (!int.TryParse(off.Substring(3, 2), out mins))
-                    mins = 0;
-                offset = new TimeSpan(sign * hours, sign * mins, 0);
-            }
-
-            result = new DateTimeOffset(dt, offset).ToUniversalTime();
+            var unix = Client.XmltvParser.ParseXmltvTimestamp(input);
+            // unix == 0 means parse failure (epoch timestamps don't appear in TV guide data)
+            if (unix == 0) return false;
+            result = DateTimeOffset.FromUnixTimeSeconds(unix);
             return true;
         }
     }

@@ -1020,7 +1020,10 @@ function (BaseView, loading) {
         if (!config.AutoSyncEnabled) return [];
         if (config.AutoSyncMode === 'daily') {
             var parts = (config.AutoSyncDailyTime || '03:00').split(':');
-            var baseSecs = parseInt(parts[0], 10) * 3600 + parseInt(parts[1] || '0', 10) * 60;
+            var h = parseInt(parts[0], 10), m = parseInt(parts[1] || '0', 10);
+            if (isNaN(h)) h = 3;
+            if (isNaN(m)) m = 0;
+            var baseSecs = h * 3600 + m * 60;
             var totalSecs = (baseSecs + offsetMinutes * 60) % 86400;
             return [{ Type: 'DailyTrigger', TimeOfDayTicks: totalSecs * 10000000 }];
         }
@@ -1227,7 +1230,7 @@ function (BaseView, loading) {
         var resultEl = view.querySelector('.connectionTestResult');
         resultEl.innerHTML = '<span style="opacity:0.5;">Testing connection...</span>';
 
-        var url = view.querySelector('.txtBaseUrl').value.replace(/\/+$/, '');
+        var url  = view.querySelector('.txtBaseUrl').value.replace(/\/+$/, '');
         var user = view.querySelector('.txtUsername').value;
         var pass = view.querySelector('.txtPassword').value;
 
@@ -1236,47 +1239,18 @@ function (BaseView, loading) {
             return;
         }
 
-        var testUrl = url + '/player_api.php?username=' + encodeURIComponent(user) + '&password=' + encodeURIComponent(pass);
-        var xhr = new XMLHttpRequest();
-        xhr.open('GET', testUrl, true);
-        xhr.timeout = 10000;
-
-        xhr.onload = function () {
-            if (xhr.status >= 200 && xhr.status < 300) {
-                try {
-                    var resp = JSON.parse(xhr.responseText);
-                    if (resp.user_info) {
-                        var status = resp.user_info.status || 'unknown';
-                        var msg = 'Connected as ' + user + ' — status: ' + status;
-                        if (resp.user_info.active_cons !== undefined) {
-                            msg += ', ' + resp.user_info.active_cons;
-                            if (resp.user_info.max_connections !== undefined) {
-                                msg += '/' + resp.user_info.max_connections;
-                            }
-                            msg += ' active streams';
-                        }
-                        setPillResult(resultEl, true, msg);
-                    } else {
-                        setPillResult(resultEl, true, 'Connection successful!');
-                    }
-                } catch (e) {
-                    setPillResult(resultEl, true, 'Connection successful (non-JSON response).');
-                }
-                saveConfig(instance);
-            } else {
-                setPillResult(resultEl, false, 'Connection failed (HTTP ' + xhr.status + ').');
-            }
-        };
-
-        xhr.onerror = function () {
-            setPillResult(resultEl, false, 'Connection failed. Check URL and ensure server is reachable.');
-        };
-
-        xhr.ontimeout = function () {
-            setPillResult(resultEl, false, 'Connection timed out.');
-        };
-
-        xhr.send();
+        // Route through the Emby server endpoint so credentials never appear in the
+        // browser Network tab as a direct request to the provider.
+        ApiClient.ajax({
+            url: ApiClient.getUrl('XC2EMBY/TestConnection'),
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ BaseUrl: url, Username: user, Password: pass })
+        }).then(function (result) {
+            setPillResult(resultEl, result.Success, result.Message);
+        }).catch(function () {
+            setPillResult(resultEl, false, 'Connection test request failed. Check the Emby server logs.');
+        });
     }
 
     // ---- Folder browser ----
