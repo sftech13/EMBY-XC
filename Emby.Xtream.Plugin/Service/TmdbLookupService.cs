@@ -19,11 +19,11 @@ namespace Emby.Xtream.Plugin.Service
         private IProviderManager _providerManager;
         private MethodInfo _searchMethod;
         private Type _movieInfoType;
-        private bool _resolveAttempted;
+        private int _resolveAttempted;
 
         private MethodInfo _seriesSearchMethod;
         private Type _seriesInfoType;
-        private bool _seriesResolveAttempted;
+        private int _seriesResolveAttempted;
 
         public TmdbLookupService(ILogger logger)
         {
@@ -180,12 +180,10 @@ namespace Emby.Xtream.Plugin.Service
                 return true;
             }
 
-            if (_seriesResolveAttempted)
+            if (Interlocked.CompareExchange(ref _seriesResolveAttempted, 1, 0) != 0)
             {
                 return false;
             }
-
-            _seriesResolveAttempted = true;
 
             try
             {
@@ -256,12 +254,10 @@ namespace Emby.Xtream.Plugin.Service
                 return true;
             }
 
-            if (_resolveAttempted)
+            if (Interlocked.CompareExchange(ref _resolveAttempted, 1, 0) != 0)
             {
                 return false;
             }
-
-            _resolveAttempted = true;
 
             try
             {

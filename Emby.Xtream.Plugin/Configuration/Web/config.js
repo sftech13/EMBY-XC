@@ -2153,7 +2153,7 @@ function (BaseView, loading) {
             fetchAndRenderSyncProgress(view, type).catch(function () {
                 // Ignore poll errors; the POST completion will handle cleanup
             });
-        }, 150);
+        }, 1000);
 
         return intervalId;
     }
@@ -2550,7 +2550,7 @@ function (BaseView, loading) {
             var html = '<div style="font-size:0.85em; margin-bottom:0.4em; opacity:0.7;">' + result.Count + ' file(s) staged for deletion:</div>';
             html += '<div style="max-height:180px; overflow-y:auto; font-size:0.82em; font-family:monospace; opacity:0.65; border:1px solid rgba(128,128,128,0.2); border-radius:4px; padding:0.4em 0.6em;">';
             for (var i = 0; i < paths.length; i++) {
-                html += '<div style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + escHtml(paths[i]) + '</div>';
+                html += '<div style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + escapeHtml(paths[i]) + '</div>';
             }
             html += '</div>';
             content.innerHTML = html;
@@ -2606,8 +2606,8 @@ function (BaseView, loading) {
                 var time = item.FailedAt ? formatTimeAgo(new Date(item.FailedAt)) : '';
                 return '<tr>' +
                     '<td style="padding:0.4em 0.6em; opacity:0.7;">' + (item.ItemType || '') + '</td>' +
-                    '<td style="padding:0.4em 0.6em;">' + escHtml(item.Name || '') + '</td>' +
-                    '<td style="padding:0.4em 0.6em; opacity:0.7; font-size:0.85em;">' + escHtml(item.ErrorMessage || '') + '</td>' +
+                    '<td style="padding:0.4em 0.6em;">' + escapeHtml(item.Name || '') + '</td>' +
+                    '<td style="padding:0.4em 0.6em; opacity:0.7; font-size:0.85em;">' + escapeHtml(item.ErrorMessage || '') + '</td>' +
                     '<td style="padding:0.4em 0.6em; opacity:0.6; font-size:0.85em; white-space:nowrap;">' + time + '</td>' +
                     '</tr>';
             }).join('');
@@ -2623,8 +2623,8 @@ function (BaseView, loading) {
         });
     }
 
-    function escHtml(str) {
-        return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    function escapeHtml(str) {
+        return escapeHtml(str);
     }
 
     function retryFailed(view) {

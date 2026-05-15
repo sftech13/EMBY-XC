@@ -47,6 +47,6 @@ namespace Emby.Xtream.Plugin.Service
         }
 
         private static string EscapeXml(string s)
-            => s.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;").Replace("\"", "&quot;");
+            => s.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;").Replace("\"", "&quot;").Replace("'", "&apos;");
     }
 }

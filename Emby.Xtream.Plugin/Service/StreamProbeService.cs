@@ -130,7 +130,10 @@ namespace Emby.Xtream.Plugin.Service
                     }
                 }
                 catch { }
-                _loaded = true;
+                finally
+                {
+                    _loaded = true;
+                }
             }
         }
 
@@ -210,6 +213,7 @@ namespace Emby.Xtream.Plugin.Service
 
         private static async Task<bool> CheckA53CcAsync(string url, string ffprobe, ILogger logger)
         {
+            logger?.Warn("StreamProbeService: CheckA53Cc opens a secondary stream connection per channel for codec detection");
             // Read first 30 video frames' side_data to detect ATSC A53 CC.
             var args = string.Format(
                 "-v quiet -print_format json -show_frames -select_streams v:0 -read_intervals \"%+#30\"" +

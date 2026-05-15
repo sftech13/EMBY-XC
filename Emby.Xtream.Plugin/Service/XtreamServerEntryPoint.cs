@@ -424,8 +424,13 @@ namespace Emby.Xtream.Plugin.Service
 
             task.GetAwaiter().GetResult();
 
-            var result = task.GetType().GetProperty("Result")?.GetValue(task);
-            var items = result?.GetType().GetProperty("Items")?.GetValue(result) as IEnumerable;
+            var resultProp = task.GetType().GetProperty("Result");
+            if (resultProp == null) return new List<BaseItem>();
+            var result = resultProp.GetValue(task);
+            if (result == null) return new List<BaseItem>();
+            var itemsProp = result.GetType().GetProperty("Items");
+            if (itemsProp == null) return new List<BaseItem>();
+            var items = itemsProp.GetValue(result) as IEnumerable;
             if (items == null)
                 return new List<BaseItem>();
 

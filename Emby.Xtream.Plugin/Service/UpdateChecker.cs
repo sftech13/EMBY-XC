@@ -95,15 +95,14 @@ namespace Emby.Xtream.Plugin.Service
                         releaseJson = await httpClient.GetStringAsync(GitHubApiUrl).ConfigureAwait(false);
                     }
 
-                    var tagName = ExtractJsonString(releaseJson, "tag_name");
-                    var htmlUrl = ExtractJsonString(releaseJson, "html_url");
-                    var body = ExtractJsonString(releaseJson, "body");
-                    var publishedAt = ExtractJsonString(releaseJson, "published_at");
+                    string tagName, htmlUrl, body, publishedAt, downloadUrl;
+                    bool isPreRelease;
+                    TryParseReleaseInfo(releaseJson, out tagName, out htmlUrl, out body, out publishedAt, out downloadUrl, out isPreRelease);
 
                     result = CompareVersions(currentVersion, tagName, htmlUrl, body, publishedAt);
-                    result.DownloadUrl = ExtractDllDownloadUrl(releaseJson, DllAssetName);
+                    result.DownloadUrl = downloadUrl;
                     result.UpdateInstalled = _updateInstalled;
-                    result.IsPreRelease = ExtractJsonBool(releaseJson, "prerelease");
+                    result.IsPreRelease = isPreRelease;
 
                     // Suppress update banner if this version was already installed
                     if (result.UpdateAvailable && !_updateInstalled)
@@ -184,6 +183,53 @@ namespace Emby.Xtream.Plugin.Service
             var parts = version.Split('.');
             if (parts.Length == 1) return version + ".0";
             return version;
+        }
+
+        private static void TryParseReleaseInfo(string json, out string tagName, out string htmlUrl, out string body, out string publishedAt, out string downloadUrl, out bool prerelease)
+        {
+            tagName = null;
+            htmlUrl = null;
+            body = null;
+            publishedAt = null;
+            downloadUrl = null;
+            prerelease = false;
+
+            if (string.IsNullOrEmpty(json)) return;
+
+            try
+            {
+                using (var doc = System.Text.Json.JsonDocument.Parse(json))
+                {
+                    var root = doc.RootElement;
+                    System.Text.Json.JsonElement t;
+                    if (root.TryGetProperty("tag_name", out t)) tagName = t.GetString();
+                    if (root.TryGetProperty("html_url", out t)) htmlUrl = t.GetString();
+                    if (root.TryGetProperty("body", out t)) body = t.GetString();
+                    if (root.TryGetProperty("published_at", out t)) publishedAt = t.GetString();
+                    if (root.TryGetProperty("prerelease", out t) && t.ValueKind == System.Text.Json.JsonValueKind.True)
+                        prerelease = true;
+
+                    System.Text.Json.JsonElement assets;
+                    if (root.TryGetProperty("assets", out assets) && assets.ValueKind == System.Text.Json.JsonValueKind.Array)
+                    {
+                        foreach (var asset in assets.EnumerateArray())
+                        {
+                            System.Text.Json.JsonElement nameEl;
+                            if (asset.TryGetProperty("name", out nameEl) &&
+                                string.Equals(nameEl.GetString(), DllAssetName, StringComparison.OrdinalIgnoreCase))
+                            {
+                                System.Text.Json.JsonElement urlEl;
+                                if (asset.TryGetProperty("browser_download_url", out urlEl))
+                                {
+                                    downloadUrl = urlEl.GetString();
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
         }
 
         private static string ExtractJsonString(string json, string key)

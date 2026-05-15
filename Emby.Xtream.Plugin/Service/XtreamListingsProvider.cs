@@ -29,7 +29,8 @@ namespace Emby.Xtream.Plugin.Service
         public string Type => ProviderType;
         public string SetupUrl => string.Empty;
 
-        private XDocument _cachedXml;
+        private volatile XDocument _cachedXml;
+        private volatile Dictionary<string, List<XElement>> _programmeIndex;
         private DateTimeOffset _cacheExpiry = DateTimeOffset.MinValue;
         private readonly SemaphoreSlim _cacheLock = new SemaphoreSlim(1, 1);
 
@@ -49,12 +50,16 @@ namespace Emby.Xtream.Plugin.Service
             if (doc == null)
                 return new List<ProgramInfo>();
 
+            var index = _programmeIndex;
             var programs = new List<ProgramInfo>();
 
-            foreach (var prog in doc.Descendants("programme"))
+            List<XElement> channelProgs;
+            if (index == null || !index.TryGetValue(channelId, out channelProgs))
+                channelProgs = new List<XElement>();
+
+            foreach (var prog in channelProgs)
             {
-                if (!string.Equals(prog.Attribute("channel")?.Value, channelId, StringComparison.OrdinalIgnoreCase))
-                    continue;
+                // channelId already matches since we indexed by it
 
                 var startStr = prog.Attribute("start")?.Value;
                 var stopStr = prog.Attribute("stop")?.Value;
@@ -77,8 +82,8 @@ namespace Emby.Xtream.Plugin.Service
                     c.IndexOf("sport", StringComparison.OrdinalIgnoreCase) >= 0);
                 var isNews       = genres.Any(c =>
                     c.IndexOf("news", StringComparison.OrdinalIgnoreCase) >= 0);
-                var seriesKey    = NormalizeGuideKey(title);
-                var episodeKey   = NormalizeGuideKey(episodeTitle);
+                var seriesKey    = XtreamUrlBuilder.NormalizeGuideKey(title);
+                var episodeKey   = XtreamUrlBuilder.NormalizeGuideKey(episodeTitle);
 
                 // ShowId drives PresentationUniqueKey → "Other Showings".
                 // Scope it to series+episode when a sub-title is available so that
@@ -152,18 +157,6 @@ namespace Emby.Xtream.Plugin.Service
             return programs;
         }
 
-        private static string BuildShowId(string channelId, string showKey)
-        {
-            if (string.IsNullOrEmpty(showKey))
-                showKey = "unknown";
-
-            return string.Format(
-                CultureInfo.InvariantCulture,
-                "{0}::{1}",
-                channelId ?? string.Empty,
-                showKey);
-        }
-
         private static readonly Regex OnscreenEpRx =
             new Regex(@"[Ss](\d+)\s*[Ee](\d+)", RegexOptions.Compiled);
 
@@ -186,14 +179,6 @@ namespace Emby.Xtream.Plugin.Service
             if (string.IsNullOrEmpty(value)) return value;
             var stripped = EpgQualifierRx.Replace(value, string.Empty).Trim();
             return string.IsNullOrEmpty(stripped) ? value : stripped;
-        }
-
-        private static string NormalizeGuideKey(string value)
-        {
-            if (string.IsNullOrWhiteSpace(value))
-                return null;
-
-            return Regex.Replace(value.Trim().ToLowerInvariant(), @"\s+", " ");
         }
 
         public Task Validate(
@@ -259,11 +244,29 @@ namespace Emby.Xtream.Plugin.Service
                 if (string.IsNullOrEmpty(url))
                     return _cachedXml;
 
+                XDocument loadedDoc;
                 using (var httpClient = Plugin.CreateHttpClient(180))
                 using (var stream = await httpClient.GetStreamAsync(url).ConfigureAwait(false))
                 {
-                    _cachedXml = XDocument.Load(stream);
+                    loadedDoc = XDocument.Load(stream);
                 }
+
+                // Build programme index keyed by channel attribute for O(1) per-channel lookups.
+                var newIndex = new Dictionary<string, List<XElement>>(StringComparer.OrdinalIgnoreCase);
+                foreach (var prog in loadedDoc.Descendants("programme"))
+                {
+                    var chAttr = prog.Attribute("channel")?.Value;
+                    if (string.IsNullOrEmpty(chAttr)) continue;
+                    List<XElement> list;
+                    if (!newIndex.TryGetValue(chAttr, out list))
+                    {
+                        list = new List<XElement>();
+                        newIndex[chAttr] = list;
+                    }
+                    list.Add(prog);
+                }
+                _cachedXml = loadedDoc;
+                _programmeIndex = newIndex;
 
                 var cfg = Plugin.Instance.Configuration;
                 var hours = cfg.EpgCacheMinutes > 0 ? cfg.EpgCacheMinutes / 60.0 : 0.5;
@@ -496,8 +499,11 @@ namespace Emby.Xtream.Plugin.Service
             {
                 var off = m.Groups[2].Value;
                 int sign = off[0] == '+' ? 1 : -1;
-                int hours = int.Parse(off.Substring(1, 2));
-                int mins = int.Parse(off.Substring(3, 2));
+                int hours, mins;
+                if (!int.TryParse(off.Substring(1, 2), out hours))
+                    hours = 0;
+                if (!int.TryParse(off.Substring(3, 2), out mins))
+                    mins = 0;
                 offset = new TimeSpan(sign * hours, sign * mins, 0);
             }
 

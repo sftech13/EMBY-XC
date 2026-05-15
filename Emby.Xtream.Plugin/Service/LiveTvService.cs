@@ -34,11 +34,11 @@ namespace Emby.Xtream.Plugin.Service
             = new Dictionary<int, (List<EpgProgram>, DateTime)>();
 
         // XMLTV bulk EPG cache: epg_channel_id → programs (populated from /xmltv.php)
-        private Dictionary<string, List<EpgProgram>> _xmltvCache;
-        private DateTime _xmltvCacheTime = DateTime.MinValue;
-        private bool _xmltvFailed;
-        private DateTime _xmltvFailTime = DateTime.MinValue;
-        private Dictionary<int, string> _epgChannelIdByStreamId = new Dictionary<int, string>();
+        private volatile Dictionary<string, List<EpgProgram>> _xmltvCache;
+        private long _xmltvCacheTimeTicks = DateTime.MinValue.Ticks;
+        private volatile bool _xmltvFailed;
+        private long _xmltvFailTimeTicks = DateTime.MinValue.Ticks;
+        private volatile Dictionary<int, string> _epgChannelIdByStreamId = new Dictionary<int, string>();
 
         private string _cachedM3U;
         private string _cachedEpgXml;
@@ -162,9 +162,9 @@ namespace Emby.Xtream.Plugin.Service
                 _perChannelEpgCache = new Dictionary<int, (List<EpgProgram>, DateTime)>();
             }
             _xmltvCache = null;
-            _xmltvCacheTime = DateTime.MinValue;
+            Interlocked.Exchange(ref _xmltvCacheTimeTicks, DateTime.MinValue.Ticks);
             _xmltvFailed = false;
-            _xmltvFailTime = DateTime.MinValue;
+            Interlocked.Exchange(ref _xmltvFailTimeTicks, DateTime.MinValue.Ticks);
             _epgChannelIdByStreamId = new Dictionary<int, string>();
             _logger.Info("Live TV cache invalidated");
         }
@@ -390,62 +390,70 @@ namespace Emby.Xtream.Plugin.Service
             CancellationToken cancellationToken)
         {
             var allPrograms = new List<EpgProgram>();
-            var semaphore = new SemaphoreSlim(5);
 
             var now = DateTimeOffset.UtcNow;
             var endTime = now.AddDays(config.EpgDaysToFetch);
 
-            var tasks = channels.Select(async channel =>
+            List<Task<List<EpgProgram>>> taskList;
+            var semaphore = new SemaphoreSlim(5);
+            try
             {
-                await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
-                try
+                taskList = channels.Select(async channel =>
                 {
-                    var epgListings = await FetchEpgForChannelAsync(channel.StreamId, cancellationToken).ConfigureAwait(false);
-
-                    if (epgListings == null || epgListings.Listings == null)
+                    await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+                    try
                     {
+                        var epgListings = await FetchEpgForChannelAsync(channel.StreamId, cancellationToken).ConfigureAwait(false);
+
+                        if (epgListings == null || epgListings.Listings == null)
+                        {
+                            return new List<EpgProgram>();
+                        }
+
+                        // Warm the per-channel cache so GetProgramsInternal finds hits without re-fetching.
+                        lock (_perChannelEpgLock)
+                        {
+                            _perChannelEpgCache[channel.StreamId] = (epgListings.Listings, DateTime.UtcNow);
+                        }
+
+                        var channelId = !string.IsNullOrEmpty(channel.EpgChannelId)
+                            ? channel.EpgChannelId
+                            : channel.StreamId.ToString(CultureInfo.InvariantCulture);
+
+                        foreach (var program in epgListings.Listings)
+                        {
+                            if (string.IsNullOrEmpty(program.ChannelId))
+                            {
+                                program.ChannelId = channelId;
+                            }
+                        }
+
+                        var nowUnix = now.ToUnixTimeSeconds();
+                        var endUnix = endTime.ToUnixTimeSeconds();
+                        return epgListings.Listings
+                            .Where(p => p.StopTimestamp > nowUnix && p.StartTimestamp < endUnix)
+                            .ToList();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Debug("Failed to fetch EPG for channel {0}: {1}", channel.StreamId, ex.Message);
                         return new List<EpgProgram>();
                     }
-
-                    // Warm the per-channel cache so GetProgramsInternal finds hits without re-fetching.
-                    lock (_perChannelEpgLock)
+                    finally
                     {
-                        _perChannelEpgCache[channel.StreamId] = (epgListings.Listings, DateTime.UtcNow);
+                        semaphore.Release();
                     }
+                }).ToList();
 
-                    var channelId = !string.IsNullOrEmpty(channel.EpgChannelId)
-                        ? channel.EpgChannelId
-                        : channel.StreamId.ToString(CultureInfo.InvariantCulture);
-
-                    foreach (var program in epgListings.Listings)
-                    {
-                        if (string.IsNullOrEmpty(program.ChannelId))
-                        {
-                            program.ChannelId = channelId;
-                        }
-                    }
-
-                    var nowUnix = now.ToUnixTimeSeconds();
-                    var endUnix = endTime.ToUnixTimeSeconds();
-                    return epgListings.Listings
-                        .Where(p => p.StopTimestamp > nowUnix && p.StartTimestamp < endUnix)
-                        .ToList();
-                }
-                catch (Exception ex)
+                var results = await Task.WhenAll(taskList).ConfigureAwait(false);
+                foreach (var result in results)
                 {
-                    _logger.Debug("Failed to fetch EPG for channel {0}: {1}", channel.StreamId, ex.Message);
-                    return new List<EpgProgram>();
+                    allPrograms.AddRange(result);
                 }
-                finally
-                {
-                    semaphore.Release();
-                }
-            });
-
-            var results = await Task.WhenAll(tasks).ConfigureAwait(false);
-            foreach (var result in results)
+            }
+            finally
             {
-                allPrograms.AddRange(result);
+                semaphore.Dispose();
             }
 
             _logger.Info("Fetched {0} EPG programs for {1} channels", allPrograms.Count, channels.Count);
@@ -474,7 +482,7 @@ namespace Emby.Xtream.Plugin.Service
             }
 
             // 2. Try XMLTV bulk cache if available and fresh
-            var xmltvCacheFresh = _xmltvCache != null && DateTime.UtcNow - _xmltvCacheTime < cacheTtl;
+            var xmltvCacheFresh = _xmltvCache != null && DateTime.UtcNow - new DateTime(Interlocked.Read(ref _xmltvCacheTimeTicks), DateTimeKind.Utc) < cacheTtl;
             if (xmltvCacheFresh)
             {
                 var programs = PopulateFromXmltvCache(streamId);
@@ -483,7 +491,7 @@ namespace Emby.Xtream.Plugin.Service
 
             // 3. If XMLTV cache is stale, try fetching it — but throttle retries after a failure
             //    to once per cache TTL window (prevents hammering a down server).
-            var xmltvRetryAllowed = !_xmltvFailed || (DateTime.UtcNow - _xmltvFailTime) >= cacheTtl;
+            var xmltvRetryAllowed = !_xmltvFailed || (DateTime.UtcNow - new DateTime(Interlocked.Read(ref _xmltvFailTimeTicks), DateTimeKind.Utc)) >= cacheTtl;
             if (!xmltvCacheFresh && xmltvRetryAllowed)
             {
                 var xmltvOk = await TryFetchXmltvEpgAsync(cancellationToken).ConfigureAwait(false);
@@ -549,10 +557,10 @@ namespace Emby.Xtream.Plugin.Service
             var config = Plugin.Instance.Configuration;
             var cacheTtl = TimeSpan.FromMinutes(config.EpgCacheMinutes);
 
-            var xmltvCacheFresh = _xmltvCache != null && DateTime.UtcNow - _xmltvCacheTime < cacheTtl;
+            var xmltvCacheFresh = _xmltvCache != null && DateTime.UtcNow - new DateTime(Interlocked.Read(ref _xmltvCacheTimeTicks), DateTimeKind.Utc) < cacheTtl;
             if (!xmltvCacheFresh)
             {
-                var xmltvRetryAllowed = !_xmltvFailed || (DateTime.UtcNow - _xmltvFailTime) >= cacheTtl;
+                var xmltvRetryAllowed = !_xmltvFailed || (DateTime.UtcNow - new DateTime(Interlocked.Read(ref _xmltvFailTimeTicks), DateTimeKind.Utc)) >= cacheTtl;
                 if (xmltvRetryAllowed)
                     await TryFetchXmltvEpgAsync(cancellationToken).ConfigureAwait(false);
             }
@@ -573,10 +581,10 @@ namespace Emby.Xtream.Plugin.Service
             var config = Plugin.Instance.Configuration;
             var cacheTtl = TimeSpan.FromMinutes(config.EpgCacheMinutes);
 
-            var xmltvCacheFresh = _xmltvCache != null && DateTime.UtcNow - _xmltvCacheTime < cacheTtl;
+            var xmltvCacheFresh = _xmltvCache != null && DateTime.UtcNow - new DateTime(Interlocked.Read(ref _xmltvCacheTimeTicks), DateTimeKind.Utc) < cacheTtl;
             if (!xmltvCacheFresh)
             {
-                var xmltvRetryAllowed = !_xmltvFailed || (DateTime.UtcNow - _xmltvFailTime) >= cacheTtl;
+                var xmltvRetryAllowed = !_xmltvFailed || (DateTime.UtcNow - new DateTime(Interlocked.Read(ref _xmltvFailTimeTicks), DateTimeKind.Utc)) >= cacheTtl;
                 if (xmltvRetryAllowed)
                     await TryFetchXmltvEpgAsync(cancellationToken).ConfigureAwait(false);
             }
@@ -598,7 +606,7 @@ namespace Emby.Xtream.Plugin.Service
                 var cacheTtl = TimeSpan.FromMinutes(config.EpgCacheMinutes);
 
                 // Already fresh?
-                if (_xmltvCache != null && DateTime.UtcNow - _xmltvCacheTime < cacheTtl)
+                if (_xmltvCache != null && DateTime.UtcNow - new DateTime(Interlocked.Read(ref _xmltvCacheTimeTicks), DateTimeKind.Utc) < cacheTtl)
                     return true;
 
                 string url;
@@ -643,7 +651,7 @@ namespace Emby.Xtream.Plugin.Service
 
                     _xmltvCache = xmltvData;
                     _epgChannelIdByStreamId = mapping;
-                    _xmltvCacheTime = DateTime.UtcNow;
+                    Interlocked.Exchange(ref _xmltvCacheTimeTicks, DateTime.UtcNow.Ticks);
                     _xmltvFailed = false;
 
                     _logger.Info("XMLTV EPG fetched: {0} channels with program data", _xmltvCache.Count);
@@ -652,7 +660,7 @@ namespace Emby.Xtream.Plugin.Service
                 catch (Exception ex)
                 {
                     _xmltvFailed = true;
-                    _xmltvFailTime = DateTime.UtcNow;
+                    Interlocked.Exchange(ref _xmltvFailTimeTicks, DateTime.UtcNow.Ticks);
                     var isCustom = config.EpgSource == EpgSourceMode.CustomUrl;
                     _logger.Warn(isCustom
                         ? "Custom EPG URL fetch failed — no fallback: {0}"

@@ -18,7 +18,7 @@ namespace Emby.Xtream.Plugin.Service
         private readonly ILogger _logger;
         private HttpResponseMessage _response;
         private Stream _stream;
-        private bool _disposed;
+        private volatile bool _disposed;
         private bool _needsReconnect;
 
         public XtreamLiveStream(MediaSourceInfo mediaSource, string tunerHostId, HttpClient httpClient, ILogger logger = null)

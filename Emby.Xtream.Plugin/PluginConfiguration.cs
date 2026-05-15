@@ -26,8 +26,6 @@ namespace Emby.Xtream.Plugin
         // EPG / Guide Data
         public EpgSourceMode EpgSource { get; set; } = EpgSourceMode.XtreamServer;
         public string CustomEpgUrl { get; set; } = string.Empty;
-        // Back-compat: migrate EnableEpg (bool) → EpgSource on first load
-        [Obsolete("Use EpgSource instead")] public bool EnableEpg { get; set; } = true;
         public int EpgCacheMinutes { get; set; } = 30;
         public int EpgDaysToFetch { get; set; } = 2;
         public int M3UCacheMinutes { get; set; } = 15;
@@ -38,7 +36,7 @@ namespace Emby.Xtream.Plugin
         public bool IncludeGroupTitleInM3U { get; set; } = true;
         // Categories in this list are excluded from the guide tag filter.
         // All categories are included by default; add names here to permanently exclude.
-        public System.Collections.Generic.List<string> ExcludedLiveCategories { get; set; } = new System.Collections.Generic.List<string>();
+        public string[] ExcludedLiveCategories { get; set; } = new string[0];
 
         // Channel name cleaning
         public string ChannelRemoveTerms { get; set; } = string.Empty;
@@ -109,13 +107,13 @@ namespace Emby.Xtream.Plugin
         public double OrphanSafetyThreshold { get; set; } = 0.20;
 
         /// <summary>When true, orphans are staged for review instead of deleted automatically.</summary>
-        public bool EnableOrphanPreview { get; set; } = false;
+        public bool EnableOrphanPreview { get; set; }
 
         /// <summary>JSON array of relative paths staged for orphan deletion (relative to StrmLibraryPath).</summary>
         public string PendingOrphansJson { get; set; } = string.Empty;
 
         // Auto-sync schedule
-        public bool   AutoSyncEnabled       { get; set; } = false;
+        public bool   AutoSyncEnabled       { get; set; }
         public string AutoSyncMode          { get; set; } = "interval"; // "interval" | "daily"
         public int    AutoSyncIntervalHours { get; set; } = 24;
         public string AutoSyncDailyTime     { get; set; } = "03:00";    // HH:mm server local time

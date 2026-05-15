@@ -47,12 +47,12 @@ namespace Emby.Xtream.Plugin.Service
             for (int i = versionMatches.Count - 1; i >= 0; i--)
             {
                 var vm = versionMatches[i];
-                s = s.Substring(0, vm.Index) + "\x00VER" + i + "\x00" + s.Substring(vm.Index + vm.Length);
+                s = s.Substring(0, vm.Index) + "\x1FVER" + i + "\x00" + s.Substring(vm.Index + vm.Length);
             }
             s = IpRegex.Replace(s, "<ip-redacted>");
             for (int i = 0; i < versionMatches.Count; i++)
             {
-                s = s.Replace("\x00VER" + i + "\x00", versionMatches[i].Value);
+                s = s.Replace("\x1FVER" + i + "\x00", versionMatches[i].Value);
             }
 
             // Redact Xtream credentials in URLs: /live/user/pass/, /movie/user/pass/, /series/user/pass/

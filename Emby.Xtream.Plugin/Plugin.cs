@@ -18,10 +18,10 @@ namespace Emby.Xtream.Plugin
     public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages, IHasThumbImage
     {
         private static volatile Plugin _instance;
+        private static readonly System.Net.Http.HttpClient _sharedHttpClient = new System.Net.Http.HttpClient(new System.Net.Http.HttpClientHandler { AllowAutoRedirect = true });
         private const string LegacyConfigFileName = "Emby.Xtream.Plugin.xml";
         private const string CurrentConfigFileName = "XC2EMBY.Plugin.xml";
         private readonly IApplicationHost _applicationHost;
-        private readonly IApplicationPaths _applicationPaths;
         private LiveTvService _liveTvService;
         private StrmSyncService _strmSyncService;
 
@@ -30,7 +30,6 @@ namespace Emby.Xtream.Plugin
         {
             _instance = this;
             _applicationHost = applicationHost;
-            _applicationPaths = applicationPaths;
             _liveTvService = new LiveTvService(logManager.GetLogger("XtreamTuner.LiveTv"));
             _strmSyncService = new StrmSyncService(logManager.GetLogger("XtreamTuner.StrmSync"));
             TryMigrateLegacyConfiguration(logManager.GetLogger("XtreamTuner.Plugin"));
@@ -55,7 +54,7 @@ namespace Emby.Xtream.Plugin
                     }
                 }
                 catch { /* best-effort pre-warm, ignore errors */ }
-            });
+            }).ContinueWith(t => { /* fire-and-forget: swallow any unhandled task exceptions */ }, System.Threading.Tasks.TaskContinuationOptions.OnlyOnFaulted);
         }
 
         public override string Name => "XC2EMBY";
@@ -72,23 +71,16 @@ namespace Emby.Xtream.Plugin
 
         public IApplicationHost ApplicationHost => _applicationHost;
 
-        public new IApplicationPaths ApplicationPaths => _applicationPaths;
+        /// <summary>Exposes the protected base-class ApplicationPaths for callers outside this assembly.</summary>
+        public IApplicationPaths PluginPaths => ApplicationPaths;
 
         /// <summary>
-        /// Creates an HttpClient configured with the plugin's User-Agent setting.
+        /// Returns the shared HttpClient. The timeoutSeconds parameter is ignored for the shared instance;
+        /// callers that need a different timeout should set it before use or use a dedicated client.
         /// </summary>
         public static HttpClient CreateHttpClient(int timeoutSeconds = 10)
         {
-            var handler = new System.Net.Http.HttpClientHandler
-            {
-                AllowAutoRedirect = true,
-                MaxAutomaticRedirections = 10,
-            };
-            var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(timeoutSeconds) };
-            var ua = _instance?.Configuration?.HttpUserAgent;
-            if (!string.IsNullOrEmpty(ua))
-                client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", ua);
-            return client;
+            return _sharedHttpClient;
         }
 
         public LiveTvService LiveTvService => _liveTvService;
@@ -151,12 +143,12 @@ namespace Emby.Xtream.Plugin
         {
             try
             {
-                if (string.IsNullOrWhiteSpace(_applicationPaths?.PluginsPath))
+                if (string.IsNullOrWhiteSpace(ApplicationPaths?.PluginsPath))
                 {
                     return;
                 }
 
-                var configDir = Path.Combine(_applicationPaths.PluginsPath, "configurations");
+                var configDir = Path.Combine(ApplicationPaths.PluginsPath, "configurations");
                 var legacyPath = Path.Combine(configDir, LegacyConfigFileName);
                 var currentPath = Path.Combine(configDir, CurrentConfigFileName);
 
@@ -309,6 +301,9 @@ namespace Emby.Xtream.Plugin
             target.SyncParallelism = source.SyncParallelism;
             target.CleanupOrphans = source.CleanupOrphans;
             target.OrphanSafetyThreshold = source.OrphanSafetyThreshold;
+            target.EnableOrphanPreview = source.EnableOrphanPreview;
+            target.PendingOrphansJson = source.PendingOrphansJson;
+            target.ExcludedLiveCategories = source.ExcludedLiveCategories;
             target.AutoSyncEnabled = source.AutoSyncEnabled;
             target.AutoSyncMode = source.AutoSyncMode;
             target.AutoSyncIntervalHours = source.AutoSyncIntervalHours;

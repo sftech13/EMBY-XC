@@ -99,6 +99,8 @@ namespace Emby.Xtream.Plugin.Service
                 SyncParallelism = source.SyncParallelism,
                 CleanupOrphans = source.CleanupOrphans,
                 OrphanSafetyThreshold = source.OrphanSafetyThreshold,
+                EnableOrphanPreview = source.EnableOrphanPreview,
+                PendingOrphansJson = source.PendingOrphansJson,
                 LastSeriesSyncTimestamp = source.LastDocuSeriesSyncTimestamp,
                 SeriesEpisodeHashesJson = source.DocuSeriesEpisodeHashesJson,
                 StrmNamingVersion = source.StrmNamingVersion,

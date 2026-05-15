@@ -38,8 +38,9 @@ namespace Emby.Xtream.Plugin.Service
         private volatile Dictionary<string, int> _tunerChannelIdToStreamId = new Dictionary<string, int>();
         private List<ChannelInfo> _cachedChannels;
         private DateTime _cacheTime = DateTime.MinValue;
-        private volatile bool _isRefreshing;
-        public int CachedChannelCount => _cachedChannels?.Count ?? 0;
+        private readonly object _channelCacheLock = new object();
+        private int _isRefreshing;
+        public int CachedChannelCount { get { lock (_channelCacheLock) { return _cachedChannels?.Count ?? 0; } } }
 
         public XtreamTunerHost(IServerApplicationHost applicationHost)
             : base(applicationHost)
@@ -95,7 +96,7 @@ namespace Emby.Xtream.Plugin.Service
             // them IsSeries causes Emby to cross-link unrelated live programs as
             // "Other Airings" of each other.
             var isSeries = !isMovie && !isSports && !p.IsLive && episodeTitle != null;
-            var seriesKey = NormalizeGuideKey(title);
+            var seriesKey = XtreamUrlBuilder.NormalizeGuideKey(title);
 
             return new ProgramInfo
             {
@@ -138,14 +139,6 @@ namespace Emby.Xtream.Plugin.Service
                 showKey);
         }
 
-        private static string NormalizeGuideKey(string value)
-        {
-            if (string.IsNullOrWhiteSpace(value))
-                return null;
-
-            return string.Join(" ", value.Trim().ToLowerInvariant().Split(new[] { ' ', '\t', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries));
-        }
-
         protected override async Task<List<ChannelInfo>> GetChannelsInternal(
             TunerHostInfo tuner, CancellationToken cancellationToken)
         {
@@ -154,12 +147,19 @@ namespace Emby.Xtream.Plugin.Service
             if (!config.EnableLiveTv)
                 return new List<ChannelInfo>();
 
-            var cached = _cachedChannels;
+            List<ChannelInfo> cached;
+            DateTime cacheTime;
+            lock (_channelCacheLock)
+            {
+                cached = _cachedChannels;
+                cacheTime = _cacheTime;
+            }
+
             if (cached != null)
             {
                 var cacheDuration = TimeSpan.FromMinutes(
                     Math.Max(MinCacheDuration.TotalMinutes, config.M3UCacheMinutes));
-                var age = DateTime.UtcNow - _cacheTime;
+                var age = DateTime.UtcNow - cacheTime;
                 if (age < cacheDuration)
                 {
                     // Cache is fresh — return immediately.
@@ -169,10 +169,11 @@ namespace Emby.Xtream.Plugin.Service
 
                 // Cache is stale — return it immediately so Emby doesn't block,
                 // and kick off a background refresh.
-                if (!_isRefreshing)
+                if (Interlocked.CompareExchange(ref _isRefreshing, 1, 0) == 0)
                 {
                     Logger.Info("Channel cache stale ({0:0}m old), refreshing in background", age.TotalMinutes);
-                    _ = Task.Run(() => RefreshChannelCacheAsync(tuner));
+                    _ = Task.Run(() => RefreshChannelCacheAsync(tuner))
+                        .ContinueWith(t => Logger.Warn("Background channel refresh failed: " + t.Exception?.GetBaseException()?.Message), TaskContinuationOptions.OnlyOnFaulted);
                 }
                 return cached;
             }
@@ -180,13 +181,12 @@ namespace Emby.Xtream.Plugin.Service
             // No cache at all (first run or after ClearCaches) — must fetch synchronously.
             Logger.Info("Channel cache cold, fetching from Xtream API");
             await RefreshChannelCacheAsync(tuner).ConfigureAwait(false);
-            return _cachedChannels ?? new List<ChannelInfo>();
+            lock (_channelCacheLock) { return _cachedChannels ?? new List<ChannelInfo>(); }
         }
 
         private async Task RefreshChannelCacheAsync(TunerHostInfo tuner)
         {
-            if (_isRefreshing) return;
-            _isRefreshing = true;
+            if (Interlocked.CompareExchange(ref _isRefreshing, 1, 0) != 0) return;
             try
             {
                 var config = Plugin.Instance.Configuration;
@@ -223,7 +223,7 @@ namespace Emby.Xtream.Plugin.Service
                 var listingsProviderId = XtreamServerEntryPoint.Instance?.GetListingsProviderId();
 
                 var excludedCategories = new HashSet<string>(
-                    config.ExcludedLiveCategories ?? new System.Collections.Generic.List<string>(),
+                    config.ExcludedLiveCategories ?? new string[0],
                     StringComparer.OrdinalIgnoreCase);
 
                 var newIdMap = new Dictionary<string, int>(channels.Count);
@@ -320,9 +320,12 @@ namespace Emby.Xtream.Plugin.Service
                     });
                 }
 
-                _tunerChannelIdToStreamId = newIdMap;
-                _cachedChannels = result;
-                _cacheTime = DateTime.UtcNow;
+                lock (_channelCacheLock)
+                {
+                    _tunerChannelIdToStreamId = newIdMap;
+                    _cachedChannels = result;
+                    _cacheTime = DateTime.UtcNow;
+                }
                 Logger.Info("Channel cache refreshed: {0} channels", result.Count);
                 Logger.Info("Guide mapping diagnostics: missing epg_channel_id={0}, epg_channel_id not in XMLTV={1}, XMLTV channel has no programmes={2}",
                     missingEpgId, missingXmltvId, noPrograms);
@@ -337,7 +340,7 @@ namespace Emby.Xtream.Plugin.Service
             }
             finally
             {
-                _isRefreshing = false;
+                Interlocked.Exchange(ref _isRefreshing, 0);
             }
         }
 
@@ -442,7 +445,7 @@ namespace Emby.Xtream.Plugin.Service
             }
 
             var config = Plugin.Instance.Configuration;
-            var streamUrl = BuildStreamUrl(config, streamId);
+            var streamUrl = XtreamUrlBuilder.BuildStreamUrl(config, streamId);
             var mediaSource = CreateMediaSourceInfo(streamId, streamUrl, config.HttpUserAgent);
 
             return Task.FromResult(new List<MediaSourceInfo> { mediaSource });
@@ -460,7 +463,7 @@ namespace Emby.Xtream.Plugin.Service
             }
 
             var config = Plugin.Instance.Configuration;
-            var streamUrl = BuildStreamUrl(config, streamId);
+            var streamUrl = XtreamUrlBuilder.BuildStreamUrl(config, streamId);
             var mediaSource = CreateMediaSourceInfo(streamId, streamUrl, config.HttpUserAgent);
 
             var httpClient = Plugin.CreateHttpClient();
@@ -495,20 +498,15 @@ namespace Emby.Xtream.Plugin.Service
                     ? new Dictionary<string, string>()
                     : new Dictionary<string, string> { ["User-Agent"] = ua };
 
-                var entries = new System.Text.StringBuilder();
-                entries.Append('[');
-                var first = true;
+                var entryList = new List<object>(channels.Count);
                 foreach (var c in channels)
                 {
-                    if (!first) entries.Append(',');
-                    first = false;
-
                     int streamId;
                     int.TryParse(c.TunerChannelId, System.Globalization.NumberStyles.None,
                         System.Globalization.CultureInfo.InvariantCulture, out streamId);
-                    var streamUrl = streamId > 0 ? BuildStreamUrl(config, streamId) : string.Empty;
+                    var streamUrl = streamId > 0 ? XtreamUrlBuilder.BuildStreamUrl(config, streamId) : string.Empty;
 
-                    entries.Append(STJ.JsonSerializer.Serialize(new
+                    entryList.Add(new
                     {
                         TvgId    = c.ListingsChannelId ?? string.Empty,
                         EpgUrls  = new string[0],
@@ -524,13 +522,12 @@ namespace Emby.Xtream.Plugin.Service
                         ImageUrl    = c.ImageUrl ?? string.Empty,
                         Tags        = c.Tags ?? new string[0],
                         EpgShift    = "PT0S",
-                    }));
+                    });
                 }
-                entries.Append(']');
 
                 var cacheFile = Path.Combine(liveTvPath, "tuner_" + tuner.Id + "_channels");
                 var tmp = cacheFile + ".tmp";
-                File.WriteAllText(tmp, entries.ToString());
+                File.WriteAllText(tmp, STJ.JsonSerializer.Serialize(entryList));
                 if (File.Exists(cacheFile)) File.Delete(cacheFile);
                 File.Move(tmp, cacheFile);
 
@@ -544,9 +541,12 @@ namespace Emby.Xtream.Plugin.Service
 
         public new void ClearCaches()
         {
-            _cachedChannels = null;
-            _cacheTime = DateTime.MinValue;
-            _tunerChannelIdToStreamId = new Dictionary<string, int>();
+            lock (_channelCacheLock)
+            {
+                _cachedChannels = null;
+                _cacheTime = DateTime.MinValue;
+                _tunerChannelIdToStreamId = new Dictionary<string, int>();
+            }
             ClearPersistentEmbyChannelCaches();
             Logger.Info("Xtream tuner caches cleared");
         }
@@ -605,7 +605,7 @@ namespace Emby.Xtream.Plugin.Service
 
         private string ResolveEmbyLiveTvDataPath(bool createIfMissing)
         {
-            var applicationPaths = Plugin.Instance?.ApplicationPaths;
+            var applicationPaths = Plugin.Instance?.PluginPaths;
             if (applicationPaths == null)
                 return null;
 
@@ -688,15 +688,6 @@ namespace Emby.Xtream.Plugin.Service
 
             // Fallback: parse directly (before channel list is loaded)
             return int.TryParse(id, NumberStyles.None, CultureInfo.InvariantCulture, out streamId);
-        }
-
-        private string BuildStreamUrl(PluginConfiguration config, int streamId)
-        {
-            var extension = string.Equals(config.LiveTvOutputFormat, "ts", StringComparison.OrdinalIgnoreCase)
-                ? "ts" : "m3u8";
-            return string.Format(CultureInfo.InvariantCulture,
-                "{0}/live/{1}/{2}/{3}.{4}",
-                config.BaseUrl, config.Username, config.Password, streamId, extension);
         }
 
         private MediaSourceInfo CreateMediaSourceInfo(int streamId, string streamUrl, string userAgent = null)

@@ -18,17 +18,17 @@ namespace Emby.Xtream.Plugin.Service
 {
     public class SyncProgress
     {
-        public string Phase = string.Empty;
+        public volatile string Phase = string.Empty;
         public int Total;
         public int Completed;
         public int Skipped;
         public int Failed;
         public int Added;
         public int Deleted;
-        public bool IsRunning;
+        public volatile bool IsRunning;
 
         /// <summary>Set when sync exits early (e.g. invalid folder configuration).</summary>
-        public string AbortReason = string.Empty;
+        public volatile string AbortReason = string.Empty;
     }
 
     public class SyncHistoryEntry
@@ -89,8 +89,9 @@ namespace Emby.Xtream.Plugin.Service
             @"\((\d{4})\)\s*$",
             RegexOptions.Compiled);
 
-        private static readonly int MaxHistoryEntries = 10;
+        private const int MaxHistoryEntries = 10;
         private static readonly HttpClient SharedHttpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        private static readonly object _sharedClientHeaderLock = new object();
 
         // Increment when naming logic changes so existing installs force a full re-sync on next run.
         internal const int CurrentStrmNamingVersion = 1;
@@ -98,9 +99,12 @@ namespace Emby.Xtream.Plugin.Service
         private static void ApplyUserAgentToSharedClient()
         {
             var ua = Plugin.InstanceOrNull?.Configuration?.HttpUserAgent;
-            SharedHttpClient.DefaultRequestHeaders.Remove("User-Agent");
-            if (!string.IsNullOrEmpty(ua))
-                SharedHttpClient.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", ua);
+            lock (_sharedClientHeaderLock)
+            {
+                SharedHttpClient.DefaultRequestHeaders.Remove("User-Agent");
+                if (!string.IsNullOrEmpty(ua))
+                    SharedHttpClient.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", ua);
+            }
         }
 
         private readonly ILogger _logger;
@@ -116,7 +120,6 @@ namespace Emby.Xtream.Plugin.Service
         private SyncProgress _movieProgress = new SyncProgress();
         private SyncProgress _documentariesProgress = new SyncProgress();
         private SyncProgress _docuSeriesProgress = new SyncProgress();
-        private SyncProgress _docuEpisodeProgress = new SyncProgress();
         private SyncProgress _seriesProgress = new SyncProgress();
         private SyncProgress _episodeProgress = new SyncProgress();
 
@@ -644,29 +647,23 @@ namespace Emby.Xtream.Plugin.Service
                             "{0}/movie/{1}/{2}/{3}.{4}",
                             config.BaseUrl, config.Username, config.Password, movie.StreamId, ext);
 
-                        var strmEntries = new List<Tuple<string, string>>();
-                        strmEntries.Add(Tuple.Create(strmPath, streamUrl));
-
                         Directory.CreateDirectory(movieDir);
                         var isAnyNewFile = false;
-                        foreach (var entry in strmEntries)
                         {
                             cancellationToken.ThrowIfCancellationRequested();
-                            var itemPath = entry.Item1;
-                            var itemUrl = entry.Item2;
-                            var fileExists = File.Exists(itemPath);
+                            var fileExists = File.Exists(strmPath);
 
                             // Skip write if file content is already up to date (avoids Emby library re-scan)
-                            if (!fileExists || File.ReadAllText(itemPath) != itemUrl)
+                            if (!fileExists || File.ReadAllText(strmPath) != streamUrl)
                             {
-                                File.WriteAllText(itemPath, itemUrl);
+                                File.WriteAllText(strmPath, streamUrl);
                                 if (!fileExists)
                                 {
                                     Interlocked.Increment(ref mp.Added);
                                     isAnyNewFile = true;
                                 }
                             }
-                            lock (writtenPaths) { writtenPaths.Add(itemPath); }
+                            lock (writtenPaths) { writtenPaths.Add(strmPath); }
                         }
                         if (isAnyNewFile)
                         {
@@ -817,7 +814,8 @@ namespace Emby.Xtream.Plugin.Service
             CheckAndUpgradeNamingVersion(config, saveConfig);
             var sp = new SyncProgress { IsRunning = true, Phase = "Starting series sync" };
             var ep = new SyncProgress { IsRunning = true };
-            if (isDocuSeries) { _docuSeriesProgress = sp; _docuEpisodeProgress = ep; } else { _seriesProgress = sp; _episodeProgress = ep; }
+            if (isDocuSeries) { _docuSeriesProgress = sp; } else { _seriesProgress = sp; }
+            _episodeProgress = ep;
             lock (_failedItemsLock) { _failedItems.RemoveAll(i => i.ItemType == "Series"); }
             var seriesSyncStart = DateTime.UtcNow;
             var seriesSyncSuccess = true;
@@ -1478,12 +1476,14 @@ namespace Emby.Xtream.Plugin.Service
                 ? ContentNameCleaner.CleanContentName(item.Name, config.ContentRemoveTerms)
                 : item.Name;
 
-            var seriesDir = Path.Combine(config.StrmLibraryPath, GetSeriesRootFolderName(config), SanitizeFileName(cleanedName));
+            var seriesName = SanitizeFileName(cleanedName);
+            var seriesDir = Path.Combine(config.StrmLibraryPath, GetSeriesRootFolderName(config), seriesName);
             Directory.CreateDirectory(seriesDir);
 
             foreach (var kvp in detail.Episodes)
             {
-                var seasonNum = kvp.Key;
+                int seasonNum;
+                if (!int.TryParse(kvp.Key, out seasonNum) || seasonNum < 1) seasonNum = 1;
                 var episodes = kvp.Value;
                 if (episodes == null) continue;
 
@@ -1493,9 +1493,13 @@ namespace Emby.Xtream.Plugin.Service
                 foreach (var ep in episodes)
                 {
                     if (ep == null) continue;
-                    var epFile = string.Format(CultureInfo.InvariantCulture,
-                        "S{0:D2}E{1:D2}.strm", seasonNum, ep.EpisodeNum);
-                    var epPath = Path.Combine(seasonDir, epFile);
+                    var episodeNum = ep.EpisodeNum > 0 ? ep.EpisodeNum : 1;
+                    var rawTitle = StripEpisodeTitleDuplicate(ep.Title, seriesName, seasonNum, episodeNum);
+                    var epTitle = !string.IsNullOrWhiteSpace(rawTitle) ? " - " + SanitizeFileName(rawTitle) : string.Empty;
+                    var fileNameBase = string.Format(CultureInfo.InvariantCulture,
+                        "{0} - S{1:D2}E{2:D2}{3}", seriesName, seasonNum, episodeNum, epTitle);
+                    if (fileNameBase.Length > 240) fileNameBase = fileNameBase.Substring(0, 240);
+                    var epPath = Path.Combine(seasonDir, fileNameBase + ".strm");
 
                     var ext = !string.IsNullOrEmpty(ep.ContainerExtension) ? ep.ContainerExtension : "mp4";
                     var epUrl = string.Format(CultureInfo.InvariantCulture,
@@ -2101,7 +2105,7 @@ namespace Emby.Xtream.Plugin.Service
                 var full = string.IsNullOrEmpty(root)
                     ? rel
                     : Path.Combine(root, rel.TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-                if (!File.Exists(full)) { removed++; continue; }
+                if (!File.Exists(full)) { continue; }
                 try
                 {
                     File.Delete(full);

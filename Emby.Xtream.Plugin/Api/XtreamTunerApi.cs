@@ -246,14 +246,6 @@ namespace Emby.Xtream.Plugin.Api
     {
     }
 
-    [Authenticated(Roles = "Admin")]
-    [Route("/XC2EMBY/TestTmdbLookup", "GET", Summary = "Tests TMDB fallback lookup")]
-    public class TestTmdbLookup : IReturn<TestConnectionResult>
-    {
-        public string Name { get; set; }
-        public int ? Year { get; set; }
-    }
-
     public class TestConnectionResult
     {
         public bool Success { get; set; }
@@ -1423,121 +1415,6 @@ namespace Emby.Xtream.Plugin.Api
             return result;
         }
 
-        public async Task<object> Get(TestTmdbLookup request)
-        {
-            var result = new TestConnectionResult();
-            try
-            {
-                var host = Plugin.Instance?.ApplicationHost;
-                if (host == null)
-                {
-                    result.Message = "ApplicationHost is null";
-                    return result;
-                }
-
-                var providerManager = host.Resolve<MediaBrowser.Controller.Providers.IProviderManager>();
-                if (providerManager == null)
-                {
-                    result.Message = "IProviderManager resolved to null";
-                    return result;
-                }
-
-                result.Message = "IProviderManager resolved: " + providerManager.GetType().FullName;
-
-                var name = request.Name ?? "Apocalypto";
-                var movieType = typeof(MediaBrowser.Controller.Entities.Movies.Movie);
-                var lookupInfoType = typeof(MediaBrowser.Controller.Providers.ItemLookupInfo);
-
-                // Find MovieInfo type at runtime (not in compile-time SDK)
-                Type movieInfoType = null;
-                foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
-                {
-                    try
-                    {
-                        foreach (var t in asm.GetTypes())
-                        {
-                            if (t.Name == "MovieInfo" && lookupInfoType.IsAssignableFrom(t))
-                            {
-                                movieInfoType = t;
-                                break;
-                            }
-                        }
-                        if (movieInfoType != null) break;
-                    }
-                    catch { }
-                }
-
-                result.Message += " | MovieInfoType: " + (movieInfoType != null ? movieInfoType.FullName : "NOT FOUND");
-
-                if (movieInfoType != null)
-                {
-                    var searchInfo = Activator.CreateInstance(movieInfoType);
-                    movieInfoType.GetProperty("Name").SetValue(searchInfo, name);
-                    if (request.Year.HasValue)
-                        movieInfoType.GetProperty("Year").SetValue(searchInfo, request.Year);
-
-                    var queryType = typeof(MediaBrowser.Controller.Providers.RemoteSearchQuery<>).MakeGenericType(movieInfoType);
-                    var queryObj = Activator.CreateInstance(queryType);
-                    queryType.GetProperty("SearchInfo").SetValue(queryObj, searchInfo);
-                    queryType.GetProperty("IncludeDisabledProviders").SetValue(queryObj, true);
-
-                    // Use GetMethods() filtering to avoid AmbiguousMatchException
-                    var methods = typeof(MediaBrowser.Controller.Providers.IProviderManager).GetMethods();
-                    System.Reflection.MethodInfo method = null;
-                    foreach (var m in methods)
-                    {
-                        if (m.Name == "GetRemoteSearchResults" && m.IsGenericMethodDefinition && m.GetGenericArguments().Length == 2)
-                        {
-                            method = m;
-                            break;
-                        }
-                    }
-
-                    if (method == null)
-                    {
-                        result.Message += " | GetRemoteSearchResults method not found";
-                        return result;
-                    }
-
-                    var genericMethod = method.MakeGenericMethod(movieType, movieInfoType);
-                    var task = (Task)genericMethod.Invoke(providerManager, new object[] { queryObj, CancellationToken.None });
-                    await task.ConfigureAwait(false);
-
-                    var resultProp = task.GetType().GetProperty("Result");
-                    var searchResults = resultProp.GetValue(task) as System.Collections.IEnumerable;
-                    var count = 0;
-                    MediaBrowser.Model.Providers.RemoteSearchResult firstResult = null;
-                    foreach (var item in searchResults)
-                    {
-                        if (count == 0) firstResult = item as MediaBrowser.Model.Providers.RemoteSearchResult;
-                        count++;
-                    }
-
-                    result.Message += " | Results: " + count;
-                    if (firstResult != null)
-                    {
-                        result.Message += " | First: " + firstResult.Name;
-                        result.Success = true;
-                        if (firstResult.ProviderIds != null)
-                        {
-                            foreach (var kvp in firstResult.ProviderIds)
-                                result.Message += " | " + kvp.Key + "=" + kvp.Value;
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                result.Message = "Exception: [" + ex.GetType().FullName + "] " + ex.Message;
-                if (ex.InnerException != null)
-                {
-                    result.Message += " | Inner: [" + ex.InnerException.GetType().FullName + "] " + ex.InnerException.Message;
-                }
-            }
-
-            return result;
-        }
-
         public void Post(RefreshCache request)
         {
             Plugin.Instance.LiveTvService.InvalidateCache();
@@ -1831,7 +1708,7 @@ namespace Emby.Xtream.Plugin.Api
                 if (string.IsNullOrEmpty(currentDll) || !File.Exists(currentDll))
                 {
                     // Fallback for Docker/single-file: use Emby's PluginsPath
-                    var pluginsDir = Plugin.Instance.ApplicationPaths.PluginsPath;
+                    var pluginsDir = Plugin.Instance.PluginPaths.PluginsPath;
                     if (!string.IsNullOrEmpty(pluginsDir))
                     {
                         currentDll = Path.Combine(pluginsDir, "XC2EMBY.Plugin.dll");
@@ -1945,7 +1822,7 @@ namespace Emby.Xtream.Plugin.Api
         public object Get(GetSanitizedLogs request)
         {
             var config = Plugin.Instance.Configuration;
-            var logDir = Plugin.Instance.ApplicationPaths.LogDirectoryPath;
+            var logDir = Plugin.Instance.PluginPaths.LogDirectoryPath;
             var lines = new List<string>();
 
             try
