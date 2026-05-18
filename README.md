@@ -45,25 +45,22 @@
 
 ## Features Overview
 
-### Current Release: v1.1.46
+### Current Release: v1.1.49
 
-**v1.1.46**
-- Mobile config page: tab bar is now horizontally scrollable (`overflow-x: auto`, `-webkit-overflow-scrolling: touch`) so all tabs are reachable on small screens without wrapping or clipping.
-- Added responsive breakpoint at 600px: dashboard grid collapses to a single column, history table switches to block-per-row layout for readability on phones.
+**v1.1.49**
+- Hotfix: XMLTV timestamps without a space before the timezone offset (e.g. `20260513120000+0100`) had their timezone silently ignored, shifting all guide programs by the offset amount. `ParseXmltvTimestamp` now splits on `+`/`-` at position ≥14 when no space is present, restoring correct UTC conversion for all providers.
 
-**v1.1.45**
-- Critical fix: the v1.1.44 shared `HttpClient` was being disposed by callers using `using` blocks, causing every HTTP request after the first to throw `ObjectDisposedException` ("Failed to load categories" in the UI).
-- Replaced the single shared instance with three static clients keyed by timeout (10 s / 30 s / 180 s). All `using` wrappers removed from the nine call sites across `XtreamTunerApi`, `LiveTvService`, `XtreamTunerHost`, and `XtreamListingsProvider`.
+**v1.1.48**
+- Fixed guide going blank during active live streams.
+- Config UX improvements.
 
-**v1.1.44**
-- Full codebase audit and remediation: volatile fields and `Interlocked` CAS guards for all shared mutable state; `SemaphoreSlim` disposed via `using`; lock added around `_cachedChannels`.
-- EPG guide matching: O(N×M) linear scan replaced with a pre-indexed `Dictionary<string, List<XElement>>` keyed by channel — eliminates repeated full-document walks on large XMLTV feeds.
-- All hand-rolled string-walking JSON parsers replaced with `JsonDocument.Parse`.
-- Dead code, dead comments, and vestigial compatibility stubs removed throughout.
-- Admin API endpoints secured: `[Authenticated(Roles = "Admin")]` added to all 22 configuration and management endpoints; EPG and M3U playlist endpoints remain unauthenticated for player compatibility.
-- Introduced `XtreamUrlBuilder` static class to deduplicate `BuildStreamUrl` and `NormalizeGuideKey` logic shared between `LiveTvService` and `XtreamTunerHost`.
-- NFO writer: `EscapeXml` now escapes single-quote (`'` → `&apos;`).
-- `LogSanitizer`: credential-scrubbing delimiter changed from `\x00` to `\x1F` (ASCII Unit Separator) to avoid embedded-null issues in log output.
+**v1.1.47**
+- Security: `testXtreamConnection` now routes through the Emby server (`/XC2EMBY/TestConnection`) instead of making a direct browser-to-provider request — credentials no longer leave the server.
+- Async: `GetDashboard` and `FindFfprobe` are now fully async; removed blocking `.GetAwaiter().GetResult()` and `WaitForExit` calls.
+- Retry progress tracked in its own `RetryProgress` bucket instead of mixing into movie stats.
+- Removed secondary per-channel HTTP stream opened for ATSC A53 CC detection.
+- Dead fields removed: `ParentId` on `Category`, `HasTvArchive` on `LiveStreamInfo`, hidden compat checkbox in config HTML.
+- Sync button uses `button-secondary` class to match other Quick Actions buttons.
 
 ### Live TV
 - Registers as a native Emby tuner host — channels appear in Live TV just like any other tuner
