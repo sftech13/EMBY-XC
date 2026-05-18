@@ -213,8 +213,33 @@ namespace Emby.Xtream.Plugin.Client
 
             value = value.Trim();
             var spaceIdx = value.IndexOf(' ');
-            var datePart = spaceIdx > 0 ? value.Substring(0, spaceIdx) : value;
-            var tzPart = spaceIdx > 0 ? value.Substring(spaceIdx + 1).Trim() : null;
+            string datePart, tzPart;
+            if (spaceIdx > 0)
+            {
+                datePart = value.Substring(0, spaceIdx);
+                tzPart = value.Substring(spaceIdx + 1).Trim();
+            }
+            else if (value.Length > 14)
+            {
+                // Handle "20260513120000+0100" — timezone immediately follows digits, no space.
+                var tzIdx = value.IndexOf('+', 14);
+                if (tzIdx < 0) tzIdx = value.IndexOf('-', 14);
+                if (tzIdx > 0)
+                {
+                    datePart = value.Substring(0, tzIdx);
+                    tzPart = value.Substring(tzIdx);
+                }
+                else
+                {
+                    datePart = value;
+                    tzPart = null;
+                }
+            }
+            else
+            {
+                datePart = value;
+                tzPart = null;
+            }
 
             if (datePart.Length < 14)
                 return 0;
