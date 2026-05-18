@@ -666,8 +666,12 @@
                     <div class="inputContainer">
                         <input class="txtUsername" type="text" is="emby-input" label="Username" />
                     </div>
-                    <div class="inputContainer">
-                        <input class="txtPassword" type="password" is="emby-input" label="Password" />
+                    <div style="display:flex; gap:0.5em; align-items:flex-end;">
+                        <div class="inputContainer" style="flex:1; margin-bottom:0;">
+                            <input class="txtPassword" type="password" is="emby-input" label="Password" />
+                        </div>
+                        <button class="btnTogglePassword button-secondary" type="button" is="emby-button"
+                                style="flex-shrink:0; margin-bottom:4px; min-width:4.5em;" title="Show/hide password">Show</button>
                     </div>
                     <div class="inputContainer">
                         <input class="txtHttpUserAgent" type="text" is="emby-input" label="User-Agent (optional)" />

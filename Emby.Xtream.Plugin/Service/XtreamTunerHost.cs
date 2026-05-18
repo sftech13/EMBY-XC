@@ -545,8 +545,20 @@ namespace Emby.Xtream.Plugin.Service
                 _cacheTime = DateTime.MinValue;
                 _tunerChannelIdToStreamId = new Dictionary<string, int>();
             }
+            // Do NOT delete Emby's disk channel cache files here. Those files are Emby's
+            // reference for what channels exist. If streams are active, Emby defers its
+            // rescan until they end, leaving the guide black for the entire duration.
+            // Clearing the in-memory cache is enough: Emby will re-ask the plugin for
+            // channels on its next rescan and then update the disk files itself.
+            Logger.Info("Xtream tuner in-memory caches cleared");
+        }
+
+        // Call this only at startup (before any streams can exist) when a full
+        // disk-level reset is needed, e.g. after a version migration.
+        public void ClearCachesAndDiskFiles()
+        {
+            ClearCaches();
             ClearPersistentEmbyChannelCaches();
-            Logger.Info("Xtream tuner caches cleared");
         }
 
         private void ClearPersistentEmbyChannelCaches()

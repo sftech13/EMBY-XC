@@ -166,6 +166,13 @@ function (BaseView, loading) {
             testXtreamConnection(self);
         });
 
+        view.querySelector('.btnTogglePassword').addEventListener('click', function () {
+            var input = view.querySelector('.txtPassword');
+            var showing = input.type === 'text';
+            input.type = showing ? 'password' : 'text';
+            this.textContent = showing ? 'Show' : 'Hide';
+        });
+
         view.querySelector('.btnLoadCategories').addEventListener('click', function () {
             loadCategories(self);
         });
@@ -1245,6 +1252,7 @@ function (BaseView, loading) {
             url: ApiClient.getUrl('XC2EMBY/TestConnection'),
             type: 'POST',
             contentType: 'application/json',
+            dataType: 'json',
             data: JSON.stringify({ BaseUrl: url, Username: user, Password: pass })
         }).then(function (result) {
             setPillResult(resultEl, result.Success, result.Message);
@@ -3076,7 +3084,7 @@ function (BaseView, loading) {
     function setPillResult(el, isSuccess, message) {
         var cls = isSuccess ? 'success' : 'error';
         var icon = isSuccess ? '\u2713' : '\u2717';
-        el.innerHTML = '<span class="result-pill ' + cls + '">' + icon + '  ' + escapeHtml(message) + '</span>';
+        el.innerHTML = '<span class="result-pill ' + cls + '">' + icon + '  ' + escapeHtml(message != null ? message : '') + '</span>';
     }
 
 
