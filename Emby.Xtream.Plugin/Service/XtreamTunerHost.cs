@@ -213,13 +213,27 @@ namespace Emby.Xtream.Plugin.Service
                     ? XtreamListingsProvider.Instance.GetXmltvProgramCountsAsync(CancellationToken.None)
                     : Task.FromResult(new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase));
 
-                await Task.WhenAll(channelsFetch, categoriesFetch, xmltvIdsFetch, xmltvAliasesFetch, xmltvProgramCountsFetch).ConfigureAwait(false);
+                // channels/categories are fast and mandatory.
+                await Task.WhenAll(channelsFetch, categoriesFetch).ConfigureAwait(false);
+
+                // XMLTV tasks download/parse 264 MB of XML on cold start — can take many seconds.
+                // Wait up to 10 s so we don't block the channel registration indefinitely.
+                // If they time out we proceed without them: xmltvIds==null makes XmltvIdExists
+                // return true for all non-empty IDs so channels still get ListingsChannelId set.
+                var xmltvAll = Task.WhenAll(xmltvIdsFetch, xmltvAliasesFetch, xmltvProgramCountsFetch);
+                await Task.WhenAny(xmltvAll, Task.Delay(TimeSpan.FromSeconds(10))).ConfigureAwait(false);
 
                 var channels = channelsFetch.Result;
                 var categoryMap = categoriesFetch.Result;
-                var xmltvIds = xmltvIdsFetch.Result;
-                var xmltvAliases = xmltvAliasesFetch.Result;
-                var xmltvProgramCounts = xmltvProgramCountsFetch.Result;
+                var xmltvIds = xmltvIdsFetch.Status == TaskStatus.RanToCompletion ? xmltvIdsFetch.Result : null;
+                var xmltvAliases = xmltvAliasesFetch.Status == TaskStatus.RanToCompletion
+                    ? xmltvAliasesFetch.Result
+                    : new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+                var xmltvProgramCounts = xmltvProgramCountsFetch.Status == TaskStatus.RanToCompletion
+                    ? xmltvProgramCountsFetch.Result
+                    : new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                if (xmltvIds == null)
+                    Logger.Info("XMLTV channel IDs not ready within 10 s; channels will use raw epg_channel_id values");
                 var listingsProviderId = XtreamServerEntryPoint.Instance?.GetListingsProviderId();
 
                 var excludedCategories = new HashSet<string>(

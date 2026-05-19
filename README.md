@@ -45,7 +45,10 @@
 
 ## Features Overview
 
-### Current Release: v1.1.49
+### Current Release: v1.1.50
+
+**v1.1.50**
+- Fixed Live TV guide showing 0 channels after Emby restart. `RefreshChannelCacheAsync` was blocked indefinitely waiting for the XMLTV download/parse (264 MB XML via `XDocument.Load`) to complete before building the channel list. The XMLTV tasks now have a 10-second timeout — channels are registered immediately and XMLTV ID matching is applied on the next refresh cycle once the feed is loaded.
 
 **v1.1.49**
 - Hotfix: XMLTV timestamps without a space before the timezone offset (e.g. `20260513120000+0100`) had their timezone silently ignored, shifting all guide programs by the offset amount. `ParseXmltvTimestamp` now splits on `+`/`-` at position ≥14 when no space is present, restoring correct UTC conversion for all providers.
@@ -53,14 +56,6 @@
 **v1.1.48**
 - Fixed guide going blank during active live streams.
 - Config UX improvements.
-
-**v1.1.47**
-- Security: `testXtreamConnection` now routes through the Emby server (`/XC2EMBY/TestConnection`) instead of making a direct browser-to-provider request — credentials no longer leave the server.
-- Async: `GetDashboard` and `FindFfprobe` are now fully async; removed blocking `.GetAwaiter().GetResult()` and `WaitForExit` calls.
-- Retry progress tracked in its own `RetryProgress` bucket instead of mixing into movie stats.
-- Removed secondary per-channel HTTP stream opened for ATSC A53 CC detection.
-- Dead fields removed: `ParentId` on `Category`, `HasTvArchive` on `LiveStreamInfo`, hidden compat checkbox in config HTML.
-- Sync button uses `button-secondary` class to match other Quick Actions buttons.
 
 ### Live TV
 - Registers as a native Emby tuner host — channels appear in Live TV just like any other tuner

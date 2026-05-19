@@ -1616,8 +1616,12 @@ namespace Emby.Xtream.Plugin.Api
                     "{0}/player_api.php?username={1}&password={2}",
                     baseUrl, Uri.EscapeDataString(username), Uri.EscapeDataString(password));
 
-                var testHttpClient = Plugin.CreateHttpClient();
-                var response = await testHttpClient.GetStringAsync(url).ConfigureAwait(false);
+                string response;
+                using (var handler = new System.Net.Http.HttpClientHandler { AllowAutoRedirect = true })
+                using (var testHttpClient = new System.Net.Http.HttpClient(handler) { Timeout = TimeSpan.FromSeconds(10) })
+                {
+                    response = await testHttpClient.GetStringAsync(url).ConfigureAwait(false);
+                }
 
                 try
                 {
