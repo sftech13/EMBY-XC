@@ -45,7 +45,10 @@
 
 ## Features Overview
 
-### Current Release: v1.1.50
+### Current Release: v1.1.51
+
+**v1.1.51**
+- Fixed guide going blank and Live TV dropping for active users when a cache refresh is triggered while streams are playing. The refresh now uses a soft cache invalidation — the existing channel list remains available while new data fetches in the background, then swaps in atomically. Previously, `ClearCaches()` nulled the channel list before Emby could re-fetch it; Emby defers channel rescans while streams are active, so the guide stayed blank until all users stopped watching or Emby restarted.
 
 **v1.1.50**
 - Fixed Live TV guide showing 0 channels after Emby restart. `RefreshChannelCacheAsync` was blocked indefinitely waiting for the XMLTV download/parse (264 MB XML via `XDocument.Load`) to complete before building the channel list. The XMLTV tasks now have a 10-second timeout — channels are registered immediately and XMLTV ID matching is applied on the next refresh cycle once the feed is loaded.

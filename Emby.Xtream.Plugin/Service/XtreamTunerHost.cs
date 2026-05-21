@@ -551,6 +551,18 @@ namespace Emby.Xtream.Plugin.Service
             }
         }
 
+        // Marks the channel cache as stale without nulling it out.
+        // Old channel data remains available while a background refresh runs,
+        // so active streams and the guide stay intact during a cache refresh.
+        public void InvalidateChannelCacheTime()
+        {
+            lock (_channelCacheLock)
+            {
+                _cacheTime = DateTime.MinValue;
+            }
+            Logger.Info("Xtream tuner channel cache marked stale (data preserved for active streams)");
+        }
+
         public new void ClearCaches()
         {
             lock (_channelCacheLock)
