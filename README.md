@@ -45,7 +45,10 @@
 
 ## Features Overview
 
-### Current Release: v1.1.52
+### Current Release: v1.1.53
+
+**v1.1.53**
+- Fixed Channel Cache Duration input allowing values below the enforced 5-minute minimum. HTML `min` attribute updated from `1` to `5` to match code behavior.
 
 **v1.1.52**
 - Fixed two channel cache bugs that caused the guide to blank or fail to update after a cache refresh while users were actively watching.
