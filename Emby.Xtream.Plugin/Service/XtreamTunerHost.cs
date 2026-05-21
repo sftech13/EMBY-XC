@@ -40,6 +40,9 @@ namespace Emby.Xtream.Plugin.Service
         private DateTime _cacheTime = DateTime.MinValue;
         private readonly object _channelCacheLock = new object();
         private int _isRefreshing;
+        // Set by InvalidateChannelCacheTime() so RefreshChannelCacheAsync can fire a second
+        // TriggerChannelRescan() once fresh data is ready, propagating it to Emby's DB.
+        private volatile bool _explicitInvalidate;
         public int CachedChannelCount { get { lock (_channelCacheLock) { return _cachedChannels?.Count ?? 0; } } }
 
         public XtreamTunerHost(IServerApplicationHost applicationHost)
@@ -169,12 +172,13 @@ namespace Emby.Xtream.Plugin.Service
 
                 // Cache is stale — return it immediately so Emby doesn't block,
                 // and kick off a background refresh.
-                if (Interlocked.CompareExchange(ref _isRefreshing, 1, 0) == 0)
-                {
-                    Logger.Info("Channel cache stale ({0:0}m old), refreshing in background", age.TotalMinutes);
-                    _ = Task.Run(() => RefreshChannelCacheAsync(tuner))
-                        .ContinueWith(t => Logger.Warn("Background channel refresh failed: " + t.Exception?.GetBaseException()?.Message), TaskContinuationOptions.OnlyOnFaulted);
-                }
+                // NOTE: do NOT set _isRefreshing here. RefreshChannelCacheAsync owns its
+                // own CAS guard. Setting it in the caller first causes RefreshChannelCacheAsync
+                // to see _isRefreshing=1, exit early without running its finally block, and
+                // leave _isRefreshing permanently stuck at 1 — silently killing all future refreshes.
+                Logger.Info("Channel cache stale ({0:0}m old), refreshing in background", age.TotalMinutes);
+                _ = Task.Run(() => RefreshChannelCacheAsync(tuner))
+                    .ContinueWith(t => Logger.Warn("Background channel refresh failed: " + t.Exception?.GetBaseException()?.Message), TaskContinuationOptions.OnlyOnFaulted);
                 return cached;
             }
 
@@ -347,6 +351,19 @@ namespace Emby.Xtream.Plugin.Service
                     Logger.Info("Guide mapping diagnostic sample: {0}", sample);
 
                 WritePersistentChannelCache(tuner, result, config);
+
+                // If this refresh was triggered by an explicit RefreshCache call (not just
+                // auto-staleness), queue a second Emby channel rescan now that fresh data
+                // is in _cachedChannels. The first rescan (fired by TriggerChannelRescan in
+                // the API handler) got old data because the refresh hadn't completed yet.
+                // This second rescan picks up the fresh list and propagates it to Emby's DB.
+                if (_explicitInvalidate)
+                {
+                    _explicitInvalidate = false;
+                    Logger.Info("Explicit cache refresh complete; queuing follow-up channel rescan to propagate fresh data");
+                    try { XtreamServerEntryPoint.Instance?.TriggerChannelRescan(); }
+                    catch (Exception rescanEx) { Logger.Warn("Follow-up rescan failed: {0}", rescanEx.Message); }
+                }
             }
             catch (Exception ex)
             {
@@ -554,12 +571,15 @@ namespace Emby.Xtream.Plugin.Service
         // Marks the channel cache as stale without nulling it out.
         // Old channel data remains available while a background refresh runs,
         // so active streams and the guide stay intact during a cache refresh.
+        // Sets _explicitInvalidate so RefreshChannelCacheAsync fires a second
+        // TriggerChannelRescan once fresh data is ready.
         public void InvalidateChannelCacheTime()
         {
             lock (_channelCacheLock)
             {
                 _cacheTime = DateTime.MinValue;
             }
+            _explicitInvalidate = true;
             Logger.Info("Xtream tuner channel cache marked stale (data preserved for active streams)");
         }
 

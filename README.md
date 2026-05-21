@@ -45,7 +45,12 @@
 
 ## Features Overview
 
-### Current Release: v1.1.51
+### Current Release: v1.1.52
+
+**v1.1.52**
+- Fixed two channel cache bugs that caused the guide to blank or fail to update after a cache refresh while users were actively watching.
+  1. **CAS race (`_isRefreshing` stuck at 1)**: `GetChannelsInternal`'s stale path set `_isRefreshing=1` before firing `Task.Run(RefreshChannelCacheAsync)`. Inside the task, `RefreshChannelCacheAsync`'s own CAS guard saw the flag already set and exited early — skipping the `finally` block and leaving `_isRefreshing` permanently at 1. All subsequent refreshes were silently dead until Emby restarted.
+  2. **Fresh data never reaching Emby's DB**: Even with the soft invalidation introduced in v1.1.51, the background refresh updated `_cachedChannels` but nothing triggered a second `RefreshChannelsScheduledTask` to propagate that data into `BaseTunerHost._channelCache` and Emby's library DB. Added `_explicitInvalidate` flag: after a successful background refresh triggered by an explicit `RefreshCache` call, `TriggerChannelRescan()` fires again so Emby immediately picks up the fresh channel list.
 
 **v1.1.51**
 - Fixed guide going blank and Live TV dropping for active users when a cache refresh is triggered while streams are playing. The refresh now uses a soft cache invalidation — the existing channel list remains available while new data fetches in the background, then swaps in atomically. Previously, `ClearCaches()` nulled the channel list before Emby could re-fetch it; Emby defers channel rescans while streams are active, so the guide stayed blank until all users stopped watching or Emby restarted.
