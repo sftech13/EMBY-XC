@@ -45,7 +45,10 @@
 
 ## Features Overview
 
-### Current Release: v1.1.54
+### Current Release: v1.1.55
+
+**v1.1.55**
+- Fixed channel group tags (MLB, ESPN, NFL, etc.) never appearing in the Emby Live TV guide tag filter. The XC API returns `category_id` as a JSON string (e.g. `"53"`) rather than an integer. `LiveStreamInfo.CategoryId` was declared as `int?` with no converter, so System.Text.Json silently nulled it on every deserialization — all channels had `CategoryId = null`, `Tags` was never set, and Emby's `SetTags()` call was never reached. Fixed by adding `[JsonConverter(typeof(FlexibleNullableInt32Converter))]` to `LiveStreamInfo.CategoryId` (same converter already used on `Category.CategoryId`).
 
 **v1.1.54**
 - Fixed "Refresh Channel & EPG Cache" button silently deadlocking on the second click. `BaseTunerHost.ValdidateOptions` (Emby base class) calls `GetChannelsInternal()` while holding `_channelInfoLock`. The `_explicitInvalidate` callback in `RefreshChannelCacheAsync` calls `TriggerChannelRescan()` → `SaveTunerHost()` → tries to re-acquire the same lock → deadlock. Fixed by overriding `ValdidateOptions` to return `Task.CompletedTask` (same pattern as Emby's own M3U plugin). Credentials are validated via the `TestXtreamConnection` endpoint instead.
