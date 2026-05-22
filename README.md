@@ -45,7 +45,10 @@
 
 ## Features Overview
 
-### Current Release: v1.1.53
+### Current Release: v1.1.54
+
+**v1.1.54**
+- Fixed "Refresh Channel & EPG Cache" button silently deadlocking on the second click. `BaseTunerHost.ValdidateOptions` (Emby base class) calls `GetChannelsInternal()` while holding `_channelInfoLock`. The `_explicitInvalidate` callback in `RefreshChannelCacheAsync` calls `TriggerChannelRescan()` → `SaveTunerHost()` → tries to re-acquire the same lock → deadlock. Fixed by overriding `ValdidateOptions` to return `Task.CompletedTask` (same pattern as Emby's own M3U plugin). Credentials are validated via the `TestXtreamConnection` endpoint instead.
 
 **v1.1.53**
 - Fixed Channel Cache Duration input allowing values below the enforced 5-minute minimum. HTML `min` attribute updated from `1` to `5` to match code behavior.

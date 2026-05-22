@@ -23,6 +23,7 @@ CLAUDE.local.md
 CLAUDE.md
 BUGS.md
 .claude/
+.codex
 
 # Test artifacts
 .playwright-mcp/

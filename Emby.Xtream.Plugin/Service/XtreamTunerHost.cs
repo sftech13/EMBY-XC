@@ -76,6 +76,13 @@ namespace Emby.Xtream.Plugin.Service
         // EPG is provided entirely by XtreamListingsProvider — no GetProgramsInternal override.
         public override bool SupportsGuideData(TunerHostInfo tuner) => true;
 
+        // Skip the base-class validation (which calls GetChannelsInternal while _channelInfoLock
+        // is held) to prevent a deadlock when TriggerChannelRescan() calls SaveTunerHost().
+        public override Task ValdidateOptions(TunerHostInfo tuner, CancellationToken cancellationToken)
+        {
+            return Task.CompletedTask;
+        }
+
         /// <summary>
         /// Converts a single <see cref="EpgProgram"/> into a <see cref="ProgramInfo"/> ready for
         /// Emby. Extracted as an internal static so it can be unit-tested without Emby DI.
