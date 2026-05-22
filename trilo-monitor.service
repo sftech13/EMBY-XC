@@ -1,0 +1,14 @@
+[Unit]
+Description=Trilo.tv connection monitor
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/home/sftech13/scripts/XC2EMBYgit/monitor_trilo.sh
+Restart=always
+RestartSec=5
+StandardOutput=null
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
