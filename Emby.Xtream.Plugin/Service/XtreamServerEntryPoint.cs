@@ -365,6 +365,7 @@ namespace Emby.Xtream.Plugin.Service
 
             try
             {
+                var libraryManager = _appHost.Resolve<ILibraryManager>();
                 var channels = GetInternalLiveTvChannels();
                 result.ChannelsScanned = channels.Count;
 
@@ -376,6 +377,7 @@ namespace Emby.Xtream.Plugin.Service
                             continue;
 
                         channel.DeleteImage(ImageType.Primary, 0);
+                        libraryManager?.UpdateItem(channel, channel.GetParent(), ItemUpdateType.ImageUpdate, null);
                         result.LogosDeleted++;
                     }
                     catch
