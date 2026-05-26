@@ -45,7 +45,10 @@
 
 ## Features Overview
 
-### Current Release: v1.1.55
+### Current Release: v1.1.56
+
+**v1.1.56**
+- Added **"XC2EMBY - Refresh Live TV"** scheduled task. Runs every 4 hours by default (configurable in Dashboard → Scheduled Tasks). Invalidates the channel and EPG caches, triggers a channel rescan so Emby re-reads channel tags from the plugin, and refreshes the guide data. Previously, channel tags (and the guide category filter) would only update after a manual "Refresh Channel & EPG Cache" button click or an overnight Emby guide refresh.
 
 **v1.1.55**
 - Fixed channel group tags (MLB, ESPN, NFL, etc.) never appearing in the Emby Live TV guide tag filter. The XC API returns `category_id` as a JSON string (e.g. `"53"`) rather than an integer. `LiveStreamInfo.CategoryId` was declared as `int?` with no converter, so System.Text.Json silently nulled it on every deserialization — all channels had `CategoryId = null`, `Tags` was never set, and Emby's `SetTags()` call was never reached. Fixed by adding `[JsonConverter(typeof(FlexibleNullableInt32Converter))]` to `LiveStreamInfo.CategoryId` (same converter already used on `Category.CategoryId`).
