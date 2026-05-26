@@ -407,36 +407,15 @@ namespace Emby.Xtream.Plugin.Service
 
         private List<BaseItem> GetInternalLiveTvChannels()
         {
-            var method = _liveTvManager.GetType().GetMethod(
-                "GetInternalChannels",
-                BindingFlags.Public | BindingFlags.Instance);
-
-            if (method == null)
+            var libraryManager = _appHost.Resolve<ILibraryManager>();
+            if (libraryManager == null)
                 return new List<BaseItem>();
 
-            var task = method.Invoke(_liveTvManager, new object[]
+            return libraryManager.GetItemList(new InternalItemsQuery
             {
-                new InternalItemsQuery(),
-                true,
-                CancellationToken.None
-            }) as System.Threading.Tasks.Task;
-
-            if (task == null)
-                return new List<BaseItem>();
-
-            task.GetAwaiter().GetResult();
-
-            var resultProp = task.GetType().GetProperty("Result");
-            if (resultProp == null) return new List<BaseItem>();
-            var result = resultProp.GetValue(task);
-            if (result == null) return new List<BaseItem>();
-            var itemsProp = result.GetType().GetProperty("Items");
-            if (itemsProp == null) return new List<BaseItem>();
-            var items = itemsProp.GetValue(result) as IEnumerable;
-            if (items == null)
-                return new List<BaseItem>();
-
-            return items.OfType<BaseItem>().ToList();
+                IncludeItemTypes = new[] { "LiveTvChannel" },
+                Recursive = true
+            }).ToList();
         }
 
         private IEnumerable<T> GetExisting<T>(string fieldName)
