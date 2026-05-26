@@ -164,6 +164,7 @@ namespace Emby.Xtream.Plugin.Service
             _xmltvFailed = false;
             Interlocked.Exchange(ref _xmltvFailTimeTicks, DateTime.MinValue.Ticks);
             _epgChannelIdByStreamId = new Dictionary<int, string>();
+            XtreamListingsProvider.Instance?.InvalidateCache();
             _logger.Info("Live TV cache invalidated");
         }
 

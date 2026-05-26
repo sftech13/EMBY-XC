@@ -36,6 +36,11 @@ namespace Emby.Xtream.Plugin.Service
 
         public XtreamListingsProvider() { _instance = this; }
 
+        public void InvalidateCache()
+        {
+            _cacheExpiry = DateTimeOffset.MinValue;
+        }
+
         public async Task<List<ProgramInfo>> GetProgramsAsync(
             ListingsProviderInfo info,
             string channelId,
