@@ -453,9 +453,29 @@ namespace Emby.Xtream.Plugin.Service
             }
             catch (Exception ex)
             {
-                Logger.Warn("Failed to fetch live categories: {0}", ex.Message);
+                Logger.Warn("Failed to fetch live categories ({0}); falling back to cached categories", ex.Message);
+                try
+                {
+                    var cached = Plugin.Instance?.Configuration?.CachedLiveCategories;
+                    if (!string.IsNullOrEmpty(cached))
+                    {
+                        var cachedCats = STJ.JsonSerializer.Deserialize<List<CategoryCacheDto>>(cached);
+                        if (cachedCats != null && cachedCats.Count > 0)
+                        {
+                            Logger.Info("FetchCategoryMapAsync: using {0} cached categories as fallback", cachedCats.Count);
+                            return cachedCats.ToDictionary(c => c.CategoryId, c => c.CategoryName ?? string.Empty);
+                        }
+                    }
+                }
+                catch { }
                 return new Dictionary<int, string>();
             }
+        }
+
+        private sealed class CategoryCacheDto
+        {
+            public int CategoryId { get; set; }
+            public string CategoryName { get; set; }
         }
 
         private static async Task<List<Client.Models.LiveStreamInfo>> FetchAllChannelsDirectAsync(PluginConfiguration config)
