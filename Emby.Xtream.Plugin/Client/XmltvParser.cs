@@ -2,8 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Xml;
+using System.Xml.Linq;
 using Emby.Xtream.Plugin.Client.Models;
 
 namespace Emby.Xtream.Plugin.Client
@@ -53,6 +55,75 @@ namespace Emby.Xtream.Plugin.Client
                     }
                     list.Add(program);
                 }
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Derives program data from an already-loaded XDocument instead of re-fetching the stream.
+        /// Called by LiveTvService after XDocument.Load() so both caches share one HTTP download.
+        /// </summary>
+        internal static Dictionary<string, List<EpgProgram>> ParseDocument(
+            XDocument doc,
+            long? filterStartUnix,
+            long? filterEndUnix)
+        {
+            var result = new Dictionary<string, List<EpgProgram>>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var prog in doc.Descendants("programme"))
+            {
+                var channelAttr = prog.Attribute("channel")?.Value;
+                if (string.IsNullOrEmpty(channelAttr)) continue;
+
+                var startAttr = prog.Attribute("start")?.Value;
+                var stopAttr = prog.Attribute("stop")?.Value;
+                if (string.IsNullOrEmpty(startAttr) || string.IsNullOrEmpty(stopAttr)) continue;
+
+                var startUnix = ParseXmltvTimestamp(startAttr);
+                var stopUnix = ParseXmltvTimestamp(stopAttr);
+                if (startUnix == 0 && stopUnix == 0) continue;
+
+                if (filterEndUnix.HasValue && startUnix >= filterEndUnix.Value) continue;
+                if (filterStartUnix.HasValue && stopUnix <= filterStartUnix.Value) continue;
+
+                var cats = prog.Elements("category")
+                    .Select(c => c.Value)
+                    .Where(c => !string.IsNullOrWhiteSpace(c))
+                    .ToList();
+
+                var onscreen = prog.Elements("episode-num")
+                    .FirstOrDefault(e => string.Equals(
+                        e.Attribute("system")?.Value, "onscreen", StringComparison.OrdinalIgnoreCase));
+
+                var ratingEl = prog.Element("rating");
+
+                var program = new EpgProgram
+                {
+                    ChannelId         = channelAttr,
+                    StartTimestamp    = startUnix,
+                    StopTimestamp     = stopUnix,
+                    IsPlainText       = true,
+                    Title             = prog.Element("title")?.Value,
+                    Description       = prog.Element("desc")?.Value,
+                    SubTitle          = prog.Element("sub-title")?.Value,
+                    IsLive            = prog.Element("live") != null,
+                    IsNew             = prog.Element("new") != null,
+                    IsPreviouslyShown = prog.Element("previously-shown") != null,
+                    IsPremiere        = prog.Element("premiere") != null,
+                    Categories        = cats.Count > 0 ? cats : null,
+                    ImageUrl          = prog.Element("icon")?.Attribute("src")?.Value,
+                    EpisodeNumOnscreen = onscreen?.Value,
+                    Rating            = ratingEl?.Element("value")?.Value?.Trim(),
+                };
+
+                List<EpgProgram> list;
+                if (!result.TryGetValue(channelAttr, out list))
+                {
+                    list = new List<EpgProgram>();
+                    result[channelAttr] = list;
+                }
+                list.Add(program);
             }
 
             return result;

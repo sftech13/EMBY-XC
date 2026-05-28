@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
-using System.Net.Http;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -31,14 +30,14 @@ namespace Emby.Xtream.Plugin.Service
 
         private volatile XDocument _cachedXml;
         private volatile Dictionary<string, List<XElement>> _programmeIndex;
-        private DateTimeOffset _cacheExpiry = DateTimeOffset.MinValue;
         private readonly SemaphoreSlim _cacheLock = new SemaphoreSlim(1, 1);
 
         public XtreamListingsProvider() { _instance = this; }
 
         public void InvalidateCache()
         {
-            _cacheExpiry = DateTimeOffset.MinValue;
+            _cachedXml = null;
+            _programmeIndex = null;
         }
 
         public async Task<List<ProgramInfo>> GetProgramsAsync(
@@ -236,29 +235,27 @@ namespace Emby.Xtream.Plugin.Service
 
         private async Task<XDocument> GetCachedXmlAsync(CancellationToken cancellationToken)
         {
-            if (_cachedXml != null && DateTimeOffset.UtcNow < _cacheExpiry)
+            var liveTvService = Plugin.Instance?.LiveTvService;
+            if (liveTvService == null)
                 return _cachedXml;
+
+            var doc = await liveTvService.GetXmltvDocumentAsync(cancellationToken).ConfigureAwait(false);
+            if (doc == null)
+                return _cachedXml;
+
+            // Fast path: document reference is unchanged, index is still valid.
+            if (ReferenceEquals(doc, _cachedXml) && _programmeIndex != null)
+                return doc;
 
             await _cacheLock.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                if (_cachedXml != null && DateTimeOffset.UtcNow < _cacheExpiry)
-                    return _cachedXml;
-
-                var url = GetXmltvUrl();
-                if (string.IsNullOrEmpty(url))
-                    return _cachedXml;
-
-                XDocument loadedDoc;
-                var xmlHttpClient = Plugin.CreateHttpClient(180);
-                using (var stream = await xmlHttpClient.GetStreamAsync(url).ConfigureAwait(false))
-                {
-                    loadedDoc = XDocument.Load(stream);
-                }
+                if (ReferenceEquals(doc, _cachedXml) && _programmeIndex != null)
+                    return doc;
 
                 // Build programme index keyed by channel attribute for O(1) per-channel lookups.
                 var newIndex = new Dictionary<string, List<XElement>>(StringComparer.OrdinalIgnoreCase);
-                foreach (var prog in loadedDoc.Descendants("programme"))
+                foreach (var prog in doc.Descendants("programme"))
                 {
                     var chAttr = prog.Attribute("channel")?.Value;
                     if (string.IsNullOrEmpty(chAttr)) continue;
@@ -270,13 +267,9 @@ namespace Emby.Xtream.Plugin.Service
                     }
                     list.Add(prog);
                 }
-                _cachedXml = loadedDoc;
                 _programmeIndex = newIndex;
-
-                var cfg = Plugin.Instance.Configuration;
-                var hours = cfg.EpgCacheMinutes > 0 ? cfg.EpgCacheMinutes / 60.0 : 0.5;
-                _cacheExpiry = DateTimeOffset.UtcNow.AddHours(hours);
-                return _cachedXml;
+                _cachedXml = doc;
+                return doc;
             }
             catch
             {
@@ -454,33 +447,6 @@ namespace Emby.Xtream.Plugin.Service
                 return stripped;
 
             return epgChannelId;
-        }
-
-        private static string GetXmltvUrl()
-        {
-            try
-            {
-                var cfg = Plugin.Instance.Configuration;
-                if (cfg.EpgSource == EpgSourceMode.Disabled)
-                    return null;
-
-                if (cfg.EpgSource == EpgSourceMode.CustomUrl && !string.IsNullOrWhiteSpace(cfg.CustomEpgUrl))
-                    return cfg.CustomEpgUrl;
-
-                if (string.IsNullOrEmpty(cfg.BaseUrl) || string.IsNullOrEmpty(cfg.Username))
-                    return null;
-
-                return string.Format(
-                    CultureInfo.InvariantCulture,
-                    "{0}/xmltv.php?username={1}&password={2}",
-                    cfg.BaseUrl.TrimEnd('/'),
-                    Uri.EscapeDataString(cfg.Username ?? string.Empty),
-                    Uri.EscapeDataString(cfg.Password ?? string.Empty));
-            }
-            catch
-            {
-                return null;
-            }
         }
 
         private static bool TryParseXmltvDate(string input, out DateTimeOffset result)

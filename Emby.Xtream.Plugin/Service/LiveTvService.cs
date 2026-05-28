@@ -6,6 +6,7 @@ using System.Net.Http;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Xml.Linq;
 using Emby.Xtream.Plugin.Client;
 using Emby.Xtream.Plugin.Client.Models;
 using MediaBrowser.Model.Logging;
@@ -33,7 +34,9 @@ namespace Emby.Xtream.Plugin.Service
         private Dictionary<int, (List<EpgProgram> Programs, DateTime CacheTime)> _perChannelEpgCache
             = new Dictionary<int, (List<EpgProgram>, DateTime)>();
 
-        // XMLTV bulk EPG cache: epg_channel_id → programs (populated from /xmltv.php)
+        // XMLTV bulk EPG cache: shared between XtreamListingsProvider (XDocument) and epg.xml endpoint (EpgPrograms).
+        // Both are populated in one fetch; XtreamListingsProvider calls GetXmltvDocumentAsync() instead of fetching independently.
+        private volatile XDocument _xmltvDocument;
         private volatile Dictionary<string, List<EpgProgram>> _xmltvCache;
         private long _xmltvCacheTimeTicks = DateTime.MinValue.Ticks;
         private volatile bool _xmltvFailed;
@@ -159,6 +162,7 @@ namespace Emby.Xtream.Plugin.Service
             {
                 _perChannelEpgCache = new Dictionary<int, (List<EpgProgram>, DateTime)>();
             }
+            _xmltvDocument = null;
             _xmltvCache = null;
             Interlocked.Exchange(ref _xmltvCacheTimeTicks, DateTime.MinValue.Ticks);
             _xmltvFailed = false;
@@ -637,14 +641,18 @@ namespace Emby.Xtream.Plugin.Service
                     var now = DateTimeOffset.UtcNow;
                     var filterEndUnix = now.AddDays(config.EpgDaysToFetch).ToUnixTimeSeconds();
 
-                    Dictionary<string, List<EpgProgram>> xmltvData;
+                    // Load XDocument from the HTTP stream once.
+                    // XtreamListingsProvider uses _xmltvDocument directly (no second download).
+                    // _xmltvCache is derived from the same DOM for the /epg.xml endpoint.
+                    XDocument loadedDoc;
                     var epgHttpClient = Plugin.CreateHttpClient(180);
                     using (var stream = await epgHttpClient.GetStreamAsync(url).ConfigureAwait(false))
                     {
-                        xmltvData = XmltvParser.Parse(stream, now.ToUnixTimeSeconds(), filterEndUnix);
+                        loadedDoc = XDocument.Load(stream);
                     }
 
-                    _xmltvCache = xmltvData;
+                    _xmltvDocument = loadedDoc;
+                    _xmltvCache = XmltvParser.ParseDocument(loadedDoc, now.ToUnixTimeSeconds(), filterEndUnix);
                     _epgChannelIdByStreamId = mapping;
                     Interlocked.Exchange(ref _xmltvCacheTimeTicks, DateTime.UtcNow.Ticks);
                     _xmltvFailed = false;
@@ -667,6 +675,31 @@ namespace Emby.Xtream.Plugin.Service
             {
                 _xmltvLock.Release();
             }
+        }
+
+        /// <summary>
+        /// Returns the cached XMLTV XDocument, fetching if stale. Used by XtreamListingsProvider
+        /// so both the guide and epg.xml endpoint share one download of xmltv.php.
+        /// </summary>
+        internal async Task<XDocument> GetXmltvDocumentAsync(CancellationToken cancellationToken)
+        {
+            var config = Plugin.Instance.Configuration;
+            if (config.EpgSource == EpgSourceMode.Disabled)
+                return null;
+
+            var cacheTtl = TimeSpan.FromMinutes(config.EpgCacheMinutes);
+            var fresh = _xmltvDocument != null
+                && DateTime.UtcNow - new DateTime(Interlocked.Read(ref _xmltvCacheTimeTicks), DateTimeKind.Utc) < cacheTtl;
+
+            if (!fresh)
+            {
+                var retryAllowed = !_xmltvFailed
+                    || (DateTime.UtcNow - new DateTime(Interlocked.Read(ref _xmltvFailTimeTicks), DateTimeKind.Utc)) >= cacheTtl;
+                if (retryAllowed)
+                    await TryFetchXmltvEpgAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            return _xmltvDocument;
         }
 
         private async Task<EpgListings> FetchEpgForChannelAsync(int streamId, CancellationToken cancellationToken)
