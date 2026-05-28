@@ -93,12 +93,6 @@ namespace Emby.Xtream.Plugin.Service
 
         // ── Cleanup orphaned configs ──────────────────────────────────────────
 
-        private static readonly HashSet<string> KnownTunerTypes =
-            new HashSet<string>(StringComparer.OrdinalIgnoreCase) { XtreamTunerHost.TunerType };
-
-        private static readonly HashSet<string> KnownListingTypes =
-            new HashSet<string>(StringComparer.OrdinalIgnoreCase) { XtreamListingsProvider.ProviderType };
-
         private void RemoveOrphanedConfigs()
         {
             try
