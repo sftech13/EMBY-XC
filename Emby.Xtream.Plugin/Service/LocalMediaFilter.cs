@@ -26,23 +26,16 @@ namespace Emby.Xtream.Plugin.Service
         private readonly HashSet<string> _movieTmdbIds;
         private readonly HashSet<string> _movieImdbIds;
         private readonly HashSet<string> _movieTitles;
-        private readonly HashSet<string> _seriesTmdbIds;
-        private readonly HashSet<string> _seriesImdbIds;
-        private readonly HashSet<string> _seriesTitles;
         private readonly HashSet<string> _episodeTmdbKeys;
         private readonly HashSet<string> _episodeTitleKeys;
 
         private LocalMediaFilter(
             HashSet<string> movieTmdbIds, HashSet<string> movieImdbIds, HashSet<string> movieTitles,
-            HashSet<string> seriesTmdbIds, HashSet<string> seriesImdbIds, HashSet<string> seriesTitles,
             HashSet<string> episodeTmdbKeys, HashSet<string> episodeTitleKeys)
         {
             _movieTmdbIds = movieTmdbIds;
             _movieImdbIds = movieImdbIds;
             _movieTitles = movieTitles;
-            _seriesTmdbIds = seriesTmdbIds;
-            _seriesImdbIds = seriesImdbIds;
-            _seriesTitles = seriesTitles;
             _episodeTmdbKeys = episodeTmdbKeys;
             _episodeTitleKeys = episodeTitleKeys;
         }
@@ -52,9 +45,6 @@ namespace Emby.Xtream.Plugin.Service
             var movieTmdbIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var movieImdbIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var movieTitles = new HashSet<string>(StringComparer.Ordinal);
-            var seriesTmdbIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var seriesImdbIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var seriesTitles = new HashSet<string>(StringComparer.Ordinal);
             var episodeTmdbKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var episodeTitleKeys = new HashSet<string>(StringComparer.Ordinal);
             var excludedRootPath = NormalizePath(strmLibraryPath);
@@ -65,14 +55,14 @@ namespace Emby.Xtream.Plugin.Service
                 if (host == null)
                 {
                     logger.Warn("LocalMediaFilter: ApplicationHost not available");
-                    return new LocalMediaFilter(movieTmdbIds, movieImdbIds, movieTitles, seriesTmdbIds, seriesImdbIds, seriesTitles, episodeTmdbKeys, episodeTitleKeys);
+                    return new LocalMediaFilter(movieTmdbIds, movieImdbIds, movieTitles, episodeTmdbKeys, episodeTitleKeys);
                 }
 
                 var libraryManager = host.Resolve<ILibraryManager>();
                 if (libraryManager == null)
                 {
                     logger.Warn("LocalMediaFilter: ILibraryManager could not be resolved");
-                    return new LocalMediaFilter(movieTmdbIds, movieImdbIds, movieTitles, seriesTmdbIds, seriesImdbIds, seriesTitles, episodeTmdbKeys, episodeTitleKeys);
+                    return new LocalMediaFilter(movieTmdbIds, movieImdbIds, movieTitles, episodeTmdbKeys, episodeTitleKeys);
                 }
 
                 var movies = libraryManager.GetItemList(new InternalItemsQuery
@@ -97,30 +87,6 @@ namespace Emby.Xtream.Plugin.Service
                         ExtractPathImdbId(item.Path, movieImdbIds);
 
                     AddTitleKeys(movieTitles, item.Name, item.ProductionYear);
-                }
-
-                var series = libraryManager.GetItemList(new InternalItemsQuery
-                {
-                    IncludeItemTypes = new[] { "Series" },
-                    Recursive = true,
-                });
-                foreach (var item in series)
-                {
-                    if (IsUnderRoot(item, excludedRootPath))
-                        continue;
-
-                    string id;
-                    if (TryGetProviderId(item.ProviderIds, "Tmdb", out id))
-                        seriesTmdbIds.Add(id);
-                    else
-                        ExtractPathTmdbId(item.Path, seriesTmdbIds);
-
-                    if (TryGetProviderId(item.ProviderIds, "Imdb", out id))
-                        seriesImdbIds.Add(id);
-                    else
-                        ExtractPathImdbId(item.Path, seriesImdbIds);
-
-                    AddTitleKeys(seriesTitles, item.Name, item.ProductionYear);
                 }
 
                 var episodes = libraryManager.GetItemList(new InternalItemsQuery
@@ -172,9 +138,8 @@ namespace Emby.Xtream.Plugin.Service
                     }
                 }
 
-                logger.Info("Local media filter: {0} local movies ({1} TMDB, {2} IMDB), {3} local series ({4} TMDB, {5} IMDB), {6} local episode keys; excluded STRM root '{7}'",
+                logger.Info("Local media filter: {0} local movies ({1} TMDB, {2} IMDB), {3} local episode keys; excluded STRM root '{4}'",
                     movieTitles.Count, movieTmdbIds.Count, movieImdbIds.Count,
-                    seriesTitles.Count, seriesTmdbIds.Count, seriesImdbIds.Count,
                     episodeTmdbKeys.Count + episodeTitleKeys.Count, excludedRootPath ?? string.Empty);
 
                 if (movies.Length == 0)
@@ -185,7 +150,7 @@ namespace Emby.Xtream.Plugin.Service
                 logger.Warn("Local media filter: failed to query Emby library — {0}", ex.Message);
             }
 
-            return new LocalMediaFilter(movieTmdbIds, movieImdbIds, movieTitles, seriesTmdbIds, seriesImdbIds, seriesTitles, episodeTmdbKeys, episodeTitleKeys);
+            return new LocalMediaFilter(movieTmdbIds, movieImdbIds, movieTitles, episodeTmdbKeys, episodeTitleKeys);
         }
 
         internal bool ContainsMovie(string tmdbId, string imdbId, string cleanedName)
@@ -199,17 +164,6 @@ namespace Emby.Xtream.Plugin.Service
             // "The Office (2005)" still matches a local "The Office" missing year metadata.
             var noYear = TrailingYear.Replace(norm, string.Empty);
             return noYear.Length < norm.Length && _movieTitles.Contains(noYear);
-        }
-
-        internal bool ContainsSeries(string tmdbId, string imdbId, string cleanedName)
-        {
-            if (!string.IsNullOrEmpty(tmdbId) && _seriesTmdbIds.Contains(tmdbId)) return true;
-            if (!string.IsNullOrEmpty(imdbId) && _seriesImdbIds.Contains(imdbId)) return true;
-            var norm = NormalizeTitle(cleanedName);
-            if (string.IsNullOrEmpty(norm)) return false;
-            if (_seriesTitles.Contains(norm)) return true;
-            var noYear = TrailingYear.Replace(norm, string.Empty);
-            return noYear.Length < norm.Length && _seriesTitles.Contains(noYear);
         }
 
         internal bool ContainsEpisode(string tmdbId, string cleanedName, int seasonNum, int episodeNum)

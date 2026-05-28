@@ -2605,10 +2605,6 @@ function (BaseView, loading) {
         });
     }
 
-    function escapeHtml(str) {
-        return escapeHtml(str);
-    }
-
     function retryFailed(view) {
         var btn = view.querySelector('.btnRetryFailed');
         var result = view.querySelector('.retryFailedResult');
