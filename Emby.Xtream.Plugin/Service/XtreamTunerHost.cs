@@ -713,7 +713,7 @@ namespace Emby.Xtream.Plugin.Service
             var sourceId = "xtream_live_" + streamId.ToString(CultureInfo.InvariantCulture);
             var isTsOutput = string.Equals(config.LiveTvOutputFormat, "ts", StringComparison.OrdinalIgnoreCase);
             var cached = StreamProbeService.GetCachedInfo(streamId);
-            var streams = cached != null ? BuildMediaStreamsFromCache(cached) : new List<MediaStream>();
+            var streams = cached != null ? BuildMediaStreamsFromCache(cached) : BuildDefaultMediaStreams();
 
             // Direct play: the client connects straight to the IPTV URL — no ffmpeg pipeline,
             // no transcoder startup delay. Falls back to direct-stream/transcode automatically
@@ -798,6 +798,39 @@ namespace Emby.Xtream.Plugin.Service
                 streams.Add(as_);
             }
             return streams;
+        }
+
+        // Returned when no probe cache exists yet. Gives Emby enough codec info to
+        // pick a playback path without firing its own ffprobe against the live URL,
+        // eliminating the stutter on first tune. Background probe still runs and
+        // will replace these defaults on the next tune with actual detected values.
+        private static List<MediaStream> BuildDefaultMediaStreams()
+        {
+            return new List<MediaStream>
+            {
+                new MediaStream
+                {
+                    Type         = MediaStreamType.Video,
+                    Codec        = "h264",
+                    Index        = 0,
+                    IsDefault    = true,
+                    IsInterlaced = false,
+                    Width        = 1920,
+                    Height       = 1080,
+                    PixelFormat  = "yuv420p",
+                    DisplayTitle = "H264 1080p",
+                },
+                new MediaStream
+                {
+                    Type         = MediaStreamType.Audio,
+                    Codec        = "ac3",
+                    Index        = 1,
+                    IsDefault    = true,
+                    Language     = "und",
+                    Channels     = 6,
+                    DisplayTitle = "AC3 5.1",
+                },
+            };
         }
 
         /// <summary>
