@@ -41,6 +41,7 @@ namespace Emby.Xtream.Plugin.Client.Models
         public int Season { get; set; }
 
         [JsonPropertyName("info")]
+        [JsonConverter(typeof(FlexibleObjectConverter<EpisodeMediaInfo>))]
         public EpisodeMediaInfo Info { get; set; }
     }
 
@@ -55,9 +56,11 @@ namespace Emby.Xtream.Plugin.Client.Models
         public int? Bitrate { get; set; }
 
         [JsonPropertyName("video")]
+        [JsonConverter(typeof(FlexibleObjectConverter<EpisodeVideoInfo>))]
         public EpisodeVideoInfo Video { get; set; }
 
         [JsonPropertyName("audio")]
+        [JsonConverter(typeof(FlexibleObjectConverter<EpisodeAudioInfo>))]
         public EpisodeAudioInfo Audio { get; set; }
     }
 

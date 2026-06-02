@@ -45,7 +45,10 @@
 
 ## Features Overview
 
-### Current Release: v1.1.65
+### Current Release: v1.1.66
+
+**v1.1.66**
+- Fixed series sync failing with JSON deserialization error for providers that return `""` (empty string) or `[]` (empty array) instead of an object for episode `info`, `info.video`, or `info.audio` fields. Added `FlexibleObjectConverter<T>` that returns `null` for any non-object JSON token on these fields, matching the same defensive pattern already used for other XC API fields.
 
 **v1.1.65**
 - Fixed connection storms on STRM episode playback caused by empty `<streamdetails />` in Emby-written episode NFOs. When Emby has no cached MediaInfo for a STRM episode, it fires ffprobe on every PlaybackInfo request — with multiple concurrent requests this generates a storm of connections through the IPTV proxy, hitting provider connection limits and causing 403 errors. Fix: when **Write NFO Files** is enabled, the plugin now writes real per-episode stream details (codec, resolution, framerate, audio channels, language) directly from the XC API's `get_series_info` response at sync time. For episodes that already exist on disk with an empty `<streamdetails />` tag, the NFO is patched in-place on next sync, preserving all Emby-scraped metadata (plot, cast, ratings, etc.).
