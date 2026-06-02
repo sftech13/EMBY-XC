@@ -1189,6 +1189,13 @@ namespace Emby.Xtream.Plugin.Service
                                     Interlocked.Increment(ref ep.Skipped);
                                 }
 
+                                if (config.EnableNfoFiles && episode.Info != null)
+                                {
+                                    var nfoPath = Path.ChangeExtension(strmPath, ".nfo");
+                                    try { NfoWriter.WriteEpisodeNfo(nfoPath, rawEpisodeTitle, seasonNum, episodeNum, episode.Info); }
+                                    catch (Exception ex) { _logger.Warn("WriteEpisodeNfo failed for '{0}': {1}", nfoPath, ex.Message); }
+                                }
+
                                 Interlocked.Increment(ref ep.Total);
 
                                 lock (writtenPaths)
@@ -1520,6 +1527,13 @@ namespace Emby.Xtream.Plugin.Service
                         {
                             Interlocked.Increment(ref _retryProgress.Added);
                         }
+                    }
+
+                    if (config.EnableNfoFiles && ep.Info != null)
+                    {
+                        var nfoPath = Path.ChangeExtension(epPath, ".nfo");
+                        try { NfoWriter.WriteEpisodeNfo(nfoPath, rawTitle, seasonNum, episodeNum, ep.Info); }
+                        catch { }
                     }
                 }
             }

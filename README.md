@@ -45,9 +45,12 @@
 
 ## Features Overview
 
-### Current Release: v1.1.56
+### Current Release: v1.1.65
 
-**v1.1.56**
+**v1.1.65**
+- Fixed connection storms on STRM episode playback caused by empty `<streamdetails />` in Emby-written episode NFOs. When Emby has no cached MediaInfo for a STRM episode, it fires ffprobe on every PlaybackInfo request — with multiple concurrent requests this generates a storm of connections through the IPTV proxy, hitting provider connection limits and causing 403 errors. Fix: when **Write NFO Files** is enabled, the plugin now writes real per-episode stream details (codec, resolution, framerate, audio channels, language) directly from the XC API's `get_series_info` response at sync time. For episodes that already exist on disk with an empty `<streamdetails />` tag, the NFO is patched in-place on next sync, preserving all Emby-scraped metadata (plot, cast, ratings, etc.).
+
+**v1.1.64**
 - Added **"XC2EMBY - Refresh Live TV"** scheduled task. Runs every 4 hours by default (configurable in Dashboard → Scheduled Tasks). Invalidates the channel and EPG caches, triggers a channel rescan so Emby re-reads channel tags from the plugin, and refreshes the guide data. Previously, channel tags (and the guide category filter) would only update after a manual "Refresh Channel & EPG Cache" button click or an overnight Emby guide refresh.
 
 **v1.1.55**
@@ -119,7 +122,7 @@
 - Episode hash detection skips unchanged series even when the provider bumps timestamps
 - TVDb ID manual overrides per series name
 - Optional TVDb and TMDB fallback lookups through Emby's provider stack
-- Optional `tvshow.nfo` sidecar files
+- Optional `tvshow.nfo` and per-episode `.nfo` sidecar files with real stream details (codec, resolution, audio) from the provider — prevents Emby from probing STRM episode streams
 - **Stop Sync** can cancel an active STRM write
 
 ### Docu Series
