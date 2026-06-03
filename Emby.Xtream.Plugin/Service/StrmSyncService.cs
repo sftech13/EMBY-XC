@@ -1930,6 +1930,247 @@ namespace Emby.Xtream.Plugin.Service
             return null;
         }
 
+        // ── Populate Episode Media Streams ───────────────────────────────────────
+
+        /// <summary>
+        /// Queries Emby's library for all STRM episodes with no MediaStreams rows,
+        /// fetches real per-episode codec info from the XC API, and writes it directly
+        /// to Emby's MediaStreams2 table via IItemRepository. Once populated Emby skips
+        /// ffprobe entirely at playback time.
+        /// </summary>
+        internal async Task PopulateEpisodeMediaStreamsAsync(
+            PluginConfiguration config,
+            IProgress<double> progress,
+            CancellationToken cancellationToken)
+        {
+            var host = Plugin.Instance?.ApplicationHost;
+            if (host == null) { _logger.Warn("PopulateMediaStreams: ApplicationHost unavailable"); return; }
+
+            var libraryManager = host.Resolve<MediaBrowser.Controller.Library.ILibraryManager>();
+            var itemRepo = host.Resolve<MediaBrowser.Controller.Persistence.IItemRepository>();
+            if (libraryManager == null || itemRepo == null)
+            {
+                _logger.Warn("PopulateMediaStreams: required library services unavailable");
+                return;
+            }
+
+            var strmRoot = string.IsNullOrWhiteSpace(config.StrmLibraryPath) ? null :
+                config.StrmLibraryPath.Trim().TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (string.IsNullOrEmpty(strmRoot))
+            {
+                _logger.Warn("PopulateMediaStreams: STRM library path not configured");
+                return;
+            }
+
+            _logger.Info("PopulateMediaStreams: scanning library for unprobed STRM episodes...");
+            progress?.Report(1);
+
+            // Build index: XC stream ID → Emby item (only episodes with no MediaStreams rows)
+            var episodes = libraryManager.GetItemList(new MediaBrowser.Controller.Entities.InternalItemsQuery
+            {
+                IncludeItemTypes = new[] { "Episode" },
+                Recursive = true,
+            });
+
+            var streamIdIndex = new Dictionary<int, MediaBrowser.Controller.Entities.BaseItem>();
+            int alreadyPopulated = 0;
+
+            foreach (var item in episodes)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (string.IsNullOrEmpty(item.Path)) continue;
+                var normPath = item.Path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                if (!normPath.StartsWith(strmRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) &&
+                    !normPath.StartsWith(strmRoot + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(normPath, strmRoot, StringComparison.OrdinalIgnoreCase)) continue;
+                if (!string.Equals(Path.GetExtension(item.Path), ".strm", StringComparison.OrdinalIgnoreCase)) continue;
+
+                var existing = itemRepo.GetMediaStreams(new MediaBrowser.Controller.Persistence.MediaStreamQuery { ItemId = item.InternalId });
+                if (existing != null && existing.Count > 0) { alreadyPopulated++; continue; }
+
+                if (!File.Exists(item.Path)) continue;
+                string strmContent;
+                try { strmContent = File.ReadAllText(item.Path).Trim(); }
+                catch { continue; }
+
+                var streamId = ParseSeriesStreamId(strmContent);
+                if (streamId > 0 && !streamIdIndex.ContainsKey(streamId))
+                    streamIdIndex[streamId] = item;
+            }
+
+            _logger.Info("PopulateMediaStreams: {0} already have streams, {1} need population",
+                alreadyPopulated, streamIdIndex.Count);
+
+            if (streamIdIndex.Count == 0) { progress?.Report(100); return; }
+
+            // Fetch all series from XC (no category filter = all)
+            List<SeriesInfo> allSeries;
+            try
+            {
+                allSeries = await FetchSeriesListAsync(new int[0], config, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.Error("PopulateMediaStreams: failed to fetch series list — {0}", ex.Message);
+                return;
+            }
+
+            _logger.Info("PopulateMediaStreams: processing {0} series to match {1} episodes",
+                allSeries.Count, streamIdIndex.Count);
+
+            int populated = 0, processed = 0, total = Math.Max(1, allSeries.Count);
+            var parallelism = Math.Max(1, Math.Min(config.SyncParallelism, 5));
+            var sem = new SemaphoreSlim(parallelism, parallelism);
+
+            var tasks = allSeries.Select(async series =>
+            {
+                await sem.WaitAsync(cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    SeriesDetailInfo detail;
+                    try { detail = await FetchSeriesDetailAsync(series.SeriesId, config, cancellationToken).ConfigureAwait(false); }
+                    catch { return; }
+
+                    if (detail?.Episodes == null) return;
+
+                    foreach (var seasonEps in detail.Episodes.Values)
+                    {
+                        if (seasonEps == null) continue;
+                        foreach (var ep in seasonEps)
+                        {
+                            if (ep == null) continue;
+                            MediaBrowser.Controller.Entities.BaseItem item;
+                            if (!streamIdIndex.TryGetValue(ep.Id, out item)) continue;
+                            if (ep.Info == null) continue;
+
+                            var streams = BuildMediaStreams(ep.Info);
+                            if (streams.Count == 0) continue;
+
+                            try
+                            {
+                                itemRepo.SaveMediaStreams(item.InternalId, streams, cancellationToken);
+
+                                if (ep.Info.Video?.Width > 0)  item.Width  = ep.Info.Video.Width.Value;
+                                if (ep.Info.Video?.Height > 0) item.Height = ep.Info.Video.Height.Value;
+                                if (!string.IsNullOrEmpty(ep.ContainerExtension))
+                                    item.Container = ep.ContainerExtension;
+
+                                itemRepo.SaveItem(item, cancellationToken);
+                                Interlocked.Increment(ref populated);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.Warn("PopulateMediaStreams: failed for '{0}': {1}", item.Path, ex.Message);
+                            }
+                        }
+                    }
+                }
+                finally
+                {
+                    var p = Interlocked.Increment(ref processed);
+                    progress?.Report(1 + p * 98.0 / total);
+                    sem.Release();
+                }
+            }).ToList();
+
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+            sem.Dispose();
+
+            _logger.Info("PopulateMediaStreams: complete — {0}/{1} episodes populated from XC API",
+                populated, streamIdIndex.Count);
+            progress?.Report(100);
+        }
+
+        private static int ParseSeriesStreamId(string strmContent)
+        {
+            var m = Regex.Match(strmContent,
+                @"/series/[^/]+/[^/]+/(\d+)\.", RegexOptions.IgnoreCase);
+            if (!m.Success) return 0;
+            int id;
+            return int.TryParse(m.Groups[1].Value, NumberStyles.None, CultureInfo.InvariantCulture, out id) ? id : 0;
+        }
+
+        private static List<MediaBrowser.Model.Entities.MediaStream> BuildMediaStreams(EpisodeMediaInfo info)
+        {
+            var streams = new List<MediaBrowser.Model.Entities.MediaStream>();
+            int idx = 0;
+
+            if (info.Video != null && !string.IsNullOrEmpty(info.Video.CodecName))
+            {
+                var fps = ParseFrameRateValue(info.Video.RFrameRate);
+                streams.Add(new MediaBrowser.Model.Entities.MediaStream
+                {
+                    Type         = MediaBrowser.Model.Entities.MediaStreamType.Video,
+                    Index        = idx++,
+                    Codec        = info.Video.CodecName,
+                    Width        = info.Video.Width,
+                    Height       = info.Video.Height,
+                    AverageFrameRate = fps > 0 ? (float?)fps : null,
+                    RealFrameRate    = fps > 0 ? (float?)fps : null,
+                    IsDefault    = true,
+                    IsForced     = false,
+                    IsExternal   = false,
+                });
+            }
+
+            if (info.Audio != null && !string.IsNullOrEmpty(info.Audio.CodecName))
+            {
+                string lang = null;
+                if (info.Audio.Tags != null) info.Audio.Tags.TryGetValue("language", out lang);
+
+                int? sampleRate = null;
+                if (!string.IsNullOrEmpty(info.Audio.SampleRate))
+                {
+                    int sr;
+                    if (int.TryParse(info.Audio.SampleRate, NumberStyles.None, CultureInfo.InvariantCulture, out sr))
+                        sampleRate = sr;
+                }
+
+                int? bitRate = null;
+                if (!string.IsNullOrEmpty(info.Audio.BitRate))
+                {
+                    int br;
+                    if (int.TryParse(info.Audio.BitRate, NumberStyles.None, CultureInfo.InvariantCulture, out br))
+                        bitRate = br;
+                }
+
+                streams.Add(new MediaBrowser.Model.Entities.MediaStream
+                {
+                    Type       = MediaBrowser.Model.Entities.MediaStreamType.Audio,
+                    Index      = idx++,
+                    Codec      = info.Audio.CodecName,
+                    Channels   = info.Audio.Channels,
+                    SampleRate = sampleRate,
+                    BitRate    = bitRate,
+                    Language   = lang,
+                    IsDefault  = true,
+                    IsForced   = false,
+                    IsExternal = false,
+                });
+            }
+
+            return streams;
+        }
+
+        private static double ParseFrameRateValue(string rFrameRate)
+        {
+            if (string.IsNullOrEmpty(rFrameRate)) return 0;
+            var slash = rFrameRate.IndexOf('/');
+            if (slash > 0)
+            {
+                double num, den;
+                if (double.TryParse(rFrameRate.Substring(0, slash), NumberStyles.Any, CultureInfo.InvariantCulture, out num) &&
+                    double.TryParse(rFrameRate.Substring(slash + 1), NumberStyles.Any, CultureInfo.InvariantCulture, out den) &&
+                    den != 0)
+                    return num / den;
+            }
+            double fps;
+            return double.TryParse(rFrameRate, NumberStyles.Any, CultureInfo.InvariantCulture, out fps) ? fps : 0;
+        }
+
         private async Task<List<SeriesInfo>> FetchSeriesListAsync(
             int[] categoryIds, PluginConfiguration config, CancellationToken cancellationToken)
         {
