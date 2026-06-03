@@ -45,7 +45,10 @@
 
 ## Features Overview
 
-### Current Release: v1.1.68
+### Current Release: v1.1.69
+
+**v1.1.69**
+- Fixed episodes being prematurely marked as played when stopping playback early. The Populate Episode Media Streams task now also writes `RunTimeTicks` from the XC API's `duration_secs` field. Without a known runtime, Emby cannot calculate percentage watched and defaults to marking the episode as played on any stop event.
 
 **v1.1.68**
 - Fixed Populate Episode Media Streams task failing immediately with `MissingMethodException` on Emby 4.9.x. `IItemRepository.GetMediaStreams(MediaStreamQuery)` was removed in Emby 4.9; replaced the already-probed check with `item.Width > 0` (Emby sets Width on the item after a successful probe, so width=0 means never probed).

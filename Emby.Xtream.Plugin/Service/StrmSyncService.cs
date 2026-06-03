@@ -2057,6 +2057,8 @@ namespace Emby.Xtream.Plugin.Service
                                 if (ep.Info.Video?.Height > 0) item.Height = ep.Info.Video.Height.Value;
                                 if (!string.IsNullOrEmpty(ep.ContainerExtension))
                                     item.Container = ep.ContainerExtension;
+                                if (ep.Info.DurationSecs.HasValue && ep.Info.DurationSecs.Value > 0)
+                                    item.RunTimeTicks = (long)ep.Info.DurationSecs.Value * TimeSpan.TicksPerSecond;
 
                                 itemRepo.SaveItem(item, cancellationToken);
                                 Interlocked.Increment(ref populated);
