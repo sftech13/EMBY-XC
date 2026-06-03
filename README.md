@@ -45,7 +45,10 @@
 
 ## Features Overview
 
-### Current Release: v1.1.67
+### Current Release: v1.1.68
+
+**v1.1.68**
+- Fixed Populate Episode Media Streams task failing immediately with `MissingMethodException` on Emby 4.9.x. `IItemRepository.GetMediaStreams(MediaStreamQuery)` was removed in Emby 4.9; replaced the already-probed check with `item.Width > 0` (Emby sets Width on the item after a successful probe, so width=0 means never probed).
 
 **v1.1.67**
 - Added **"XC2EMBY - Populate Episode Media Streams"** scheduled task. Queries Emby's library for all STRM TV show episodes with no media stream data in the database, fetches real per-episode codec info (video codec, resolution, framerate, audio codec, channels, language) from the XC API's `get_series_info` endpoint, and writes it directly to Emby's `MediaStreams2` table via `IItemRepository.SaveMediaStreams`. Once populated, Emby reads stream info from its database at playback time and skips ffprobe entirely — preventing the connection storm that occurs when multiple concurrent playback requests trigger parallel probes against a provider with connection limits. Run once after a full series sync; subsequent syncs add NFO streamdetails for new episodes so they never enter the unprobed state.

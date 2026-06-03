@@ -1986,8 +1986,8 @@ namespace Emby.Xtream.Plugin.Service
                     !string.Equals(normPath, strmRoot, StringComparison.OrdinalIgnoreCase)) continue;
                 if (!string.Equals(Path.GetExtension(item.Path), ".strm", StringComparison.OrdinalIgnoreCase)) continue;
 
-                var existing = itemRepo.GetMediaStreams(new MediaBrowser.Controller.Persistence.MediaStreamQuery { ItemId = item.InternalId });
-                if (existing != null && existing.Count > 0) { alreadyPopulated++; continue; }
+                // item.Width is set by Emby after a successful probe; 0 means never probed
+                if (item.Width > 0) { alreadyPopulated++; continue; }
 
                 if (!File.Exists(item.Path)) continue;
                 string strmContent;
