@@ -1986,8 +1986,9 @@ namespace Emby.Xtream.Plugin.Service
                     !string.Equals(normPath, strmRoot, StringComparison.OrdinalIgnoreCase)) continue;
                 if (!string.Equals(Path.GetExtension(item.Path), ".strm", StringComparison.OrdinalIgnoreCase)) continue;
 
-                // item.Width is set by Emby after a successful probe; 0 means never probed
-                if (item.Width > 0) { alreadyPopulated++; continue; }
+                // Skip only when both Width and RunTimeTicks are populated
+                if (item.Width > 0 && item.RunTimeTicks.HasValue && item.RunTimeTicks.Value > 0)
+                { alreadyPopulated++; continue; }
 
                 if (!File.Exists(item.Path)) continue;
                 string strmContent;

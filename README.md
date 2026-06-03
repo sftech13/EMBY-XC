@@ -45,7 +45,10 @@
 
 ## Features Overview
 
-### Current Release: v1.1.69
+### Current Release: v1.1.70
+
+**v1.1.70**
+- Fixed Populate Episode Media Streams task skipping episodes that had Width set (from a v1.1.68 run) but no RunTimeTicks. The skip condition now requires both Width and RunTimeTicks to be populated, so a second run after upgrading from v1.1.68 will fill in the missing durations.
 
 **v1.1.69**
 - Fixed episodes being prematurely marked as played when stopping playback early. The Populate Episode Media Streams task now also writes `RunTimeTicks` from the XC API's `duration_secs` field. Without a known runtime, Emby cannot calculate percentage watched and defaults to marking the episode as played on any stop event.
