@@ -26,9 +26,8 @@ namespace Emby.Xtream.Plugin
         // EPG / Guide Data
         public EpgSourceMode EpgSource { get; set; } = EpgSourceMode.XtreamServer;
         public string CustomEpgUrl { get; set; } = string.Empty;
-        public int EpgCacheMinutes { get; set; } = 30;
+        public int CacheDurationMinutes { get; set; } = 360;
         public int EpgDaysToFetch { get; set; } = 2;
-        public int M3UCacheMinutes { get; set; } = 15;
 
         // Category filtering
         public int[] SelectedLiveCategoryIds { get; set; } = new int[0];

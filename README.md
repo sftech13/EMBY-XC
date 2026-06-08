@@ -45,7 +45,16 @@
 
 ## Features Overview
 
-### Current Release: v1.1.70
+### Current Release: v1.1.73
+
+**v1.1.73**
+- Fixed the Deleted count on the dashboard always showing 0 when **Review Orphans** (orphan preview) is enabled. The sync correctly staged orphans but the manual commit step never updated the sync history. `CommitPendingOrphans` now categorises each deleted path by root folder prefix (Movies, TV Shows, Documentaries, Docu-Series) and patches the Deleted counter on the most recent matching history entry, so the dashboard reflects the true count after a commit.
+
+**v1.1.72**
+- Fixed button text not centered in the plugin config UI. `button-secondary` and `[is="emby-button"]` overrides were stripping Emby's built-in flex centering without replacing it. Added `text-align: center` and `justify-content: center` to both selectors, and made `.tabBtn` explicitly `inline-flex` with centered alignment.
+
+**v1.1.71**
+- Merged EPG Cache Duration and Channel Cache Duration into a single **Cache Duration** setting. Both caches are always invalidated together when a refresh fires, so separate timers were redundant. Default changed from 30/15 minutes to 360 minutes (6 hours) to match a typical 4× daily sync schedule. Existing installs will see 360 on first load — save the config page once to persist it.
 
 **v1.1.70**
 - Fixed Populate Episode Media Streams task skipping episodes that had Width set (from a v1.1.68 run) but no RunTimeTicks. The skip condition now requires both Width and RunTimeTicks to be populated, so a second run after upgrading from v1.1.68 will fill in the missing durations.

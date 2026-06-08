@@ -2388,7 +2388,60 @@ namespace Emby.Xtream.Plugin.Service
             config.PendingOrphansJson = string.Empty;
             Plugin.Instance.SaveConfiguration();
             _logger.Info("Committed deletion of {0} staged orphan(s)", removed);
+            if (removed > 0)
+                PatchHistoryWithOrphanDeletes(config, paths);
             return removed;
+        }
+
+        private void PatchHistoryWithOrphanDeletes(PluginConfiguration config, List<string> deletedPaths)
+        {
+            int moviesDeleted = 0, docsDeleted = 0, seriesDeleted = 0, docuDeleted = 0;
+            var movieRoot  = (config.MovieRootFolderName       ?? string.Empty).Trim().TrimEnd('/', '\\');
+            var docRoot    = (config.DocumentaryRootFolderName ?? string.Empty).Trim().TrimEnd('/', '\\');
+            var seriesRoot = (config.SeriesRootFolderName      ?? string.Empty).Trim().TrimEnd('/', '\\');
+            var docuRoot   = (config.DocuSeriesRootFolderName  ?? string.Empty).Trim().TrimEnd('/', '\\');
+            var sep        = Path.DirectorySeparatorChar.ToString();
+
+            foreach (var rel in deletedPaths)
+            {
+                var norm = rel.TrimStart('/', '\\');
+                if (!string.IsNullOrEmpty(movieRoot)  && norm.StartsWith(movieRoot  + sep, StringComparison.OrdinalIgnoreCase)) { moviesDeleted++; continue; }
+                if (!string.IsNullOrEmpty(docRoot)    && norm.StartsWith(docRoot    + sep, StringComparison.OrdinalIgnoreCase)) { docsDeleted++;   continue; }
+                if (!string.IsNullOrEmpty(seriesRoot) && norm.StartsWith(seriesRoot + sep, StringComparison.OrdinalIgnoreCase)) { seriesDeleted++; continue; }
+                if (!string.IsNullOrEmpty(docuRoot)   && norm.StartsWith(docuRoot   + sep, StringComparison.OrdinalIgnoreCase)) { docuDeleted++; }
+            }
+
+            if (moviesDeleted == 0 && docsDeleted == 0 && seriesDeleted == 0 && docuDeleted == 0)
+                return;
+
+            string newJson;
+            lock (_historyLock)
+            {
+                var history = GetOrLoadHistory();
+                bool needMovies = moviesDeleted > 0, needDocs = docsDeleted > 0,
+                     needSeries = seriesDeleted > 0, needDocu  = docuDeleted  > 0;
+
+                foreach (var entry in history)
+                {
+                    if (needMovies && entry.WasMovieSync)        { entry.MoviesDeleted  += moviesDeleted; needMovies = false; }
+                    if (needDocs   && entry.WasDocumentarySync)  { entry.MoviesDeleted  += docsDeleted;   needDocs   = false; }
+                    if (needSeries && entry.WasSeriesSync)       { entry.EpisodeDeleted += seriesDeleted; needSeries = false; }
+                    if (needDocu   && entry.WasDocuSeriesSync)   { entry.EpisodeDeleted += docuDeleted;   needDocu   = false; }
+                    if (!needMovies && !needDocs && !needSeries && !needDocu) break;
+                }
+
+                newJson = STJ.JsonSerializer.Serialize(_syncHistory, JsonOptions);
+            }
+
+            try
+            {
+                Plugin.Instance.Configuration.SyncHistoryJson = newJson;
+                Plugin.Instance.SaveConfiguration();
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug("Failed to persist orphan delete counts to history: {0}", ex.Message);
+            }
         }
 
         public void ClearPendingOrphans()

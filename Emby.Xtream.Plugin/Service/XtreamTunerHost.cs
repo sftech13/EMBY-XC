@@ -102,7 +102,7 @@ namespace Emby.Xtream.Plugin.Service
             if (cached != null)
             {
                 var cacheDuration = TimeSpan.FromMinutes(
-                    Math.Max(MinCacheDuration.TotalMinutes, config.M3UCacheMinutes));
+                    Math.Max(MinCacheDuration.TotalMinutes, config.CacheDurationMinutes));
                 var age = DateTime.UtcNow - cacheTime;
                 if (age < cacheDuration)
                 {

@@ -151,9 +151,15 @@
                         background: transparent !important;
                         border: 1px solid rgba(128,128,128,0.35) !important;
                         color: inherit !important;
+                        text-align: center !important;
+                        justify-content: center !important;
                     }
                     .button-secondary:hover {
                         border-color: rgba(128,128,128,0.5) !important;
+                    }
+                    [is="emby-button"] {
+                        text-align: center !important;
+                        justify-content: center !important;
                     }
                     .danger-zone {
                         border: 1px solid rgba(192,57,43,0.3);
@@ -436,6 +442,10 @@
                     .tabBtn {
                         flex-shrink: 0;
                         white-space: nowrap;
+                        text-align: center;
+                        display: inline-flex !important;
+                        align-items: center;
+                        justify-content: center;
                     }
                     @media (max-width: 600px) {
                         .tabBtn {
@@ -1329,11 +1339,11 @@
                     <div class="epgSettings settingsOptionList">
                         <div class="settingsOptionItem">
                             <div>
-                                <div class="settingsOptionTitle">EPG Cache Duration</div>
-                                <div class="settingsOptionDescription">How long to cache guide data before re-fetching.</div>
+                                <div class="settingsOptionTitle">Cache Duration</div>
+                                <div class="settingsOptionDescription">How long to cache the channel list and EPG guide data. Set this to match your sync interval. Minimum 5 minutes.</div>
                             </div>
                             <div class="inputContainer">
-                                <input class="txtEpgCacheMinutes" type="number" is="emby-input"
+                                <input class="txtCacheDurationMinutes" type="number" is="emby-input"
                                        label="Minutes" min="5" max="1440" step="5" />
                             </div>
                         </div>
@@ -1345,16 +1355,6 @@
                             <div class="inputContainer">
                                 <input class="txtEpgDaysToFetch" type="number" is="emby-input"
                                        label="Days" min="1" max="14" step="1" />
-                            </div>
-                        </div>
-                        <div class="settingsOptionItem">
-                            <div>
-                                <div class="settingsOptionTitle">Channel Cache Duration</div>
-                                <div class="settingsOptionDescription">How long to cache the channel list. New channels from your provider won't appear in Emby until this expires. Minimum 5 minutes.</div>
-                            </div>
-                            <div class="inputContainer">
-                                <input class="txtM3UCacheMinutes" type="number" is="emby-input"
-                                       label="Minutes" min="5" max="1440" step="1" />
                             </div>
                         </div>
                     </div>

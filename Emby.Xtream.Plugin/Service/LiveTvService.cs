@@ -64,7 +64,7 @@ namespace Emby.Xtream.Plugin.Service
             await _m3uLock.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                if (_cachedM3U != null && DateTime.UtcNow - _m3uCacheTime < TimeSpan.FromMinutes(config.M3UCacheMinutes))
+                if (_cachedM3U != null && DateTime.UtcNow - _m3uCacheTime < TimeSpan.FromMinutes(config.CacheDurationMinutes))
                 {
                     _logger.Debug("Returning cached M3U playlist");
                     return _cachedM3U;
@@ -110,7 +110,7 @@ namespace Emby.Xtream.Plugin.Service
             await _epgLock.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                if (_cachedEpgXml != null && DateTime.UtcNow - _epgCacheTime < TimeSpan.FromMinutes(config.EpgCacheMinutes))
+                if (_cachedEpgXml != null && DateTime.UtcNow - _epgCacheTime < TimeSpan.FromMinutes(config.CacheDurationMinutes))
                 {
                     _logger.Debug("Returning cached XMLTV EPG");
                     return _cachedEpgXml;
@@ -469,7 +469,7 @@ namespace Emby.Xtream.Plugin.Service
         internal async Task<List<EpgProgram>> FetchEpgForChannelCachedAsync(int streamId, CancellationToken cancellationToken)
         {
             var config = Plugin.Instance.Configuration;
-            var cacheTtl = TimeSpan.FromMinutes(config.EpgCacheMinutes);
+            var cacheTtl = TimeSpan.FromMinutes(config.CacheDurationMinutes);
 
             // 1. Check per-channel cache (fastest path)
             lock (_perChannelEpgLock)
@@ -560,7 +560,7 @@ namespace Emby.Xtream.Plugin.Service
             try
             {
                 var config = Plugin.Instance.Configuration;
-                var cacheTtl = TimeSpan.FromMinutes(config.EpgCacheMinutes);
+                var cacheTtl = TimeSpan.FromMinutes(config.CacheDurationMinutes);
 
                 // Already fresh?
                 if (_xmltvCache != null && DateTime.UtcNow - new DateTime(Interlocked.Read(ref _xmltvCacheTimeTicks), DateTimeKind.Utc) < cacheTtl)
@@ -643,7 +643,7 @@ namespace Emby.Xtream.Plugin.Service
             if (config.EpgSource == EpgSourceMode.Disabled)
                 return null;
 
-            var cacheTtl = TimeSpan.FromMinutes(config.EpgCacheMinutes);
+            var cacheTtl = TimeSpan.FromMinutes(config.CacheDurationMinutes);
             var fresh = _xmltvDocument != null
                 && DateTime.UtcNow - new DateTime(Interlocked.Read(ref _xmltvCacheTimeTicks), DateTimeKind.Utc) < cacheTtl;
 

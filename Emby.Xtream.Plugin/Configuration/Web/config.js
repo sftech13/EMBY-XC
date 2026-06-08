@@ -612,9 +612,8 @@ function (BaseView, loading) {
             var epgNameToInt = { 'XtreamServer': '0', 'CustomUrl': '1', 'Disabled': '2' };
             view.querySelector('.selectEpgSource').value = epgNameToInt[epgVal] || (epgVal || 0).toString();
             view.querySelector('.txtCustomEpgUrl').value = config.CustomEpgUrl || '';
-            view.querySelector('.txtEpgCacheMinutes').value = config.EpgCacheMinutes || 30;
+            view.querySelector('.txtCacheDurationMinutes').value = config.CacheDurationMinutes || 360;
             view.querySelector('.txtEpgDaysToFetch').value = config.EpgDaysToFetch || 2;
-            view.querySelector('.txtM3UCacheMinutes').value = config.M3UCacheMinutes || 15;
 
             instance.selectedCategoryIds = config.SelectedLiveCategoryIds || [];
 
@@ -755,9 +754,8 @@ function (BaseView, loading) {
 
             config.EpgSource = parseInt(view.querySelector('.selectEpgSource').value, 10);
             config.CustomEpgUrl = view.querySelector('.txtCustomEpgUrl').value.trim();
-            config.EpgCacheMinutes = parseInt(view.querySelector('.txtEpgCacheMinutes').value, 10) || 30;
+            config.CacheDurationMinutes = parseInt(view.querySelector('.txtCacheDurationMinutes').value, 10) || 360;
             config.EpgDaysToFetch = parseInt(view.querySelector('.txtEpgDaysToFetch').value, 10) || 2;
-            config.M3UCacheMinutes = parseInt(view.querySelector('.txtM3UCacheMinutes').value, 10) || 15;
 
             var selectedLiveCategoryIds = getSelectedCategoryIds(instance);
             config.SelectedLiveCategoryIds = selectedLiveCategoryIds;
@@ -864,9 +862,8 @@ function (BaseView, loading) {
             includeGroupTitle: config.IncludeGroupTitleInM3U !== false,
             epgSource: config.EpgSource,
             customEpgUrl: config.CustomEpgUrl || '',
-            epgCacheMinutes: config.EpgCacheMinutes || 30,
-            epgDaysToFetch: config.EpgDaysToFetch || 2,
-            m3uCacheMinutes: config.M3UCacheMinutes || 15
+            cacheDurationMinutes: config.CacheDurationMinutes || 360,
+            epgDaysToFetch: config.EpgDaysToFetch || 2
         };
     }
 
@@ -892,9 +889,8 @@ function (BaseView, loading) {
             || before.includeGroupTitle !== after.includeGroupTitle
             || String(before.epgSource) !== String(after.epgSource)
             || before.customEpgUrl !== after.customEpgUrl
-            || before.epgCacheMinutes !== after.epgCacheMinutes
-            || before.epgDaysToFetch !== after.epgDaysToFetch
-            || before.m3uCacheMinutes !== after.m3uCacheMinutes;
+            || before.cacheDurationMinutes !== after.cacheDurationMinutes
+            || before.epgDaysToFetch !== after.epgDaysToFetch;
     }
 
     function sameIdArray(left, right) {
