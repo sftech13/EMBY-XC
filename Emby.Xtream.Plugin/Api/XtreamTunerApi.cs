@@ -1963,7 +1963,7 @@ namespace Emby.Xtream.Plugin.Api
             {
                 { "Content-Disposition", "attachment; filename=\"" + filename + "\"" },
             };
-            return ResultFactory.GetResult(Request, stream, "text/plain", headers);
+            return ResultFactory.GetResult(Request, stream, "text/plain; charset=utf-8", headers);
         }
     }
 }

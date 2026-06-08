@@ -45,7 +45,10 @@
 
 ## Features Overview
 
-### Current Release: v1.1.76
+### Current Release: v1.1.77
+
+**v1.1.77**
+- Fixed sanitized log download rendering as garbled characters on most viewers. The response now explicitly declares `charset=utf-8` so browsers and text editors correctly interpret the UTF-8 encoded output. Also fixed a false-positive where plugin version numbers in the form `X.X.X.0` (assembly version, e.g. `1.1.76.0` after an upgrade arrow in the log) were incorrectly redacted as IP addresses — the version-protection regex now also covers the `→` and `->` arrow patterns logged during plugin version changes.
 
 **v1.1.76**
 - Improved sanitized log download readability. The exported file now includes a header (plugin version, export timestamp, line/error/warning counts, which log files were included, redaction notice), an Errors & Warnings section pulled to the top for quick triage, and the full log grouped by source file with section dividers. Filename is now timestamped (`xc2emby-log-YYYYMMDD-HHmmss.txt`). Safe to share for support — all credentials, IPs, and provider hostnames remain redacted.

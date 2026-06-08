@@ -9,7 +9,7 @@ namespace Emby.Xtream.Plugin.Service
             RegexOptions.Compiled);
 
         private static readonly Regex VersionContextRegex = new Regex(
-            @"(?:Version[= ]|version )\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}",
+            @"(?:Version[= ]|version |→ |-> )\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}",
             RegexOptions.Compiled);
 
         private static readonly Regex XtreamCredRegex = new Regex(
