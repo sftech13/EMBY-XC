@@ -45,7 +45,10 @@
 
 ## Features Overview
 
-### Current Release: v1.1.73
+### Current Release: v1.1.74
+
+**v1.1.74**
+- Fixed duplicate STRM files persisting when local media (Radarr/Sonarr) arrives after the XC2EMBY sync already wrote a STRM for the same title. Previously, when the local media filter matched a movie or episode on a subsequent sync, it added the existing STRM to a protection list (preventing orphan cleanup from removing it), so the duplicate stayed on disk indefinitely. Now when the filter detects a match and a STRM already exists, the STRM is deleted immediately and its directory is cleaned up if empty. The deletion count is included in the dashboard Deleted stat. Applies to both movies and TV show episodes.
 
 **v1.1.73**
 - Fixed the Deleted count on the dashboard always showing 0 when **Review Orphans** (orphan preview) is enabled. The sync correctly staged orphans but the manual commit step never updated the sync history. `CommitPendingOrphans` now categorises each deleted path by root folder prefix (Movies, TV Shows, Documentaries, Docu-Series) and patches the Deleted counter on the most recent matching history entry, so the dashboard reflects the true count after a commit.

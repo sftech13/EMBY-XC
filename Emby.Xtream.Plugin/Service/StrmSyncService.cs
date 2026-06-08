@@ -499,6 +499,7 @@ namespace Emby.Xtream.Plugin.Service
                 var writtenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var locallyFilteredPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var semaphore = new SemaphoreSlim(config.SyncParallelism);
+                int filterDeletedMovies = 0;
 
                 var tasks = allStreams.Select(async movie =>
                 {
@@ -613,12 +614,22 @@ namespace Emby.Xtream.Plugin.Service
                         {
                             if (File.Exists(strmPath))
                             {
-                                lock (locallyFilteredPaths)
+                                try
                                 {
-                                    locallyFilteredPaths.Add(strmPath);
+                                    File.Delete(strmPath);
+                                    var strmDir = Path.GetDirectoryName(strmPath);
+                                    if (!string.IsNullOrEmpty(strmDir) && Directory.Exists(strmDir) &&
+                                        Directory.GetFileSystemEntries(strmDir).Length == 0)
+                                        Directory.Delete(strmDir);
+                                    Interlocked.Increment(ref filterDeletedMovies);
+                                    _logger.Info("Local media filter: removed duplicate STRM for '{0}' — local file now in library", cleanedName);
+                                }
+                                catch (Exception delEx)
+                                {
+                                    _logger.Warn("Local media filter: could not remove STRM for '{0}': {1}", cleanedName, delEx.Message);
+                                    lock (locallyFilteredPaths) { locallyFilteredPaths.Add(strmPath); }
                                 }
                             }
-
                             _logger.Debug("Local media filter: skipping movie '{0}' (already in library)", cleanedName);
                             Interlocked.Increment(ref mp.Skipped);
                             Interlocked.Increment(ref mp.Completed);
@@ -753,6 +764,7 @@ namespace Emby.Xtream.Plugin.Service
                         mp.Deleted = DeleteOrphans(orphans, moviesRoot);
                     }
                 }
+                mp.Deleted += filterDeletedMovies;
 
                 // Persist the highest Added timestamp seen so next sync can delta from here
                 cancellationToken.ThrowIfCancellationRequested();
@@ -899,6 +911,7 @@ namespace Emby.Xtream.Plugin.Service
                 var writtenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var locallyFilteredPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var semaphore = new SemaphoreSlim(config.SyncParallelism);
+                int filterDeletedEpisodes = 0;
 
                 // Episode hash cache: load stored hashes so we can skip file I/O for unchanged series
                 var storedHashes = DeserializeEpisodeHashes(config.SeriesEpisodeHashesJson);
@@ -1150,12 +1163,24 @@ namespace Emby.Xtream.Plugin.Service
                                 {
                                     if (File.Exists(strmPath))
                                     {
-                                        lock (locallyFilteredPaths)
+                                        try
                                         {
-                                            locallyFilteredPaths.Add(strmPath);
+                                            File.Delete(strmPath);
+                                            var strmDir = Path.GetDirectoryName(strmPath);
+                                            if (!string.IsNullOrEmpty(strmDir) && Directory.Exists(strmDir) &&
+                                                Directory.GetFileSystemEntries(strmDir).Length == 0)
+                                                Directory.Delete(strmDir);
+                                            Interlocked.Increment(ref filterDeletedEpisodes);
+                                            _logger.Info("Local media filter: removed duplicate STRM for '{0}' S{1:D2}E{2:D2} — local file now in library",
+                                                cleanedName, seasonNum, episodeNum);
+                                        }
+                                        catch (Exception delEx)
+                                        {
+                                            _logger.Warn("Local media filter: could not remove STRM for '{0}' S{1:D2}E{2:D2}: {2}",
+                                                cleanedName, seasonNum, episodeNum, delEx.Message);
+                                            lock (locallyFilteredPaths) { locallyFilteredPaths.Add(strmPath); }
                                         }
                                     }
-
                                     _logger.Debug("Local media filter: skipping episode '{0}' S{1:D2}E{2:D2} (already in library)",
                                         cleanedName, seasonNum, episodeNum);
                                     Interlocked.Increment(ref ep.Total);
@@ -1266,6 +1291,7 @@ namespace Emby.Xtream.Plugin.Service
                         ep.Deleted = deleted;
                     }
                 }
+                ep.Deleted += filterDeletedEpisodes;
 
                 // Persist the highest LastModified timestamp seen
                 cancellationToken.ThrowIfCancellationRequested();
