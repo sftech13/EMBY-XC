@@ -107,6 +107,18 @@ namespace Emby.Xtream.Plugin.Api
     }
 
     [Authenticated(Roles = "Admin")]
+    [Route("/XC2EMBY/ProviderHealth", "GET", Summary = "Returns the last known provider health state")]
+    public class GetProviderHealth : IReturn<ProviderHealthResult>
+    {
+    }
+
+    [Authenticated(Roles = "Admin")]
+    [Route("/XC2EMBY/TestNotification", "GET", Summary = "Sends a test service disruption notification to all active sessions")]
+    public class TestNotification : IReturnVoid
+    {
+    }
+
+    [Authenticated(Roles = "Admin")]
     [Route("/XC2EMBY/Content/Movies", "DELETE", Summary = "Deletes all movie STRM content")]
     public class DeleteMovieContent : IReturn<DeleteContentResult>
     {
@@ -255,6 +267,15 @@ namespace Emby.Xtream.Plugin.Api
     {
         public bool Success { get; set; }
         public string Message { get; set; }
+        public int MaxConnections { get; set; }
+    }
+
+    public class ProviderHealthResult
+    {
+        public bool IsReachable { get; set; }
+        public DateTime? LastChecked { get; set; }
+        public string LastError { get; set; }
+        public int ConsecutiveFailures { get; set; }
     }
 
     public class RefreshLogosResult
@@ -337,6 +358,10 @@ namespace Emby.Xtream.Plugin.Api
         public LibraryStats LibraryStats { get; set; }
         public bool AutoSyncOn { get; set; }
         public DateTime? NextSyncTime { get; set; }
+        public bool SyncMovies { get; set; }
+        public bool SyncDocumentaries { get; set; }
+        public bool SyncSeries { get; set; }
+        public bool SyncDocuSeries { get; set; }
     }
 
     public class LibraryStats
@@ -1100,6 +1125,10 @@ namespace Emby.Xtream.Plugin.Api
                             syncService.SeriesProgress.IsRunning || syncService.DocuSeriesProgress.IsRunning,
                 AutoSyncOn = config.AutoSyncEnabled,
                 NextSyncTime = nextSyncTime,
+                SyncMovies = config.SyncMovies,
+                SyncDocumentaries = config.SyncDocumentaries,
+                SyncSeries = config.SyncSeries,
+                SyncDocuSeries = config.SyncDocuSeries,
                 LibraryStats = new LibraryStats
                 {
                     MovieFolders   = movieFolders,
@@ -1117,6 +1146,24 @@ namespace Emby.Xtream.Plugin.Api
                     LiveTvChannels = liveTvChannels,
                 },
             };
+        }
+
+        public object Get(GetProviderHealth request)
+        {
+            var health = Plugin.Instance.ProviderHealth;
+            return new ProviderHealthResult
+            {
+                IsReachable        = health.IsReachable,
+                LastChecked        = health.LastChecked,
+                LastError          = health.LastError,
+                ConsecutiveFailures = health.ConsecutiveFailures,
+            };
+        }
+
+        public async Task<object> Get(TestNotification request)
+        {
+            await Plugin.Instance.BroadcastProviderStatusAsync(false).ConfigureAwait(false);
+            return null;
         }
 
         public async Task<object> Get(GetGuideDiagnostics request)
@@ -1653,7 +1700,35 @@ namespace Emby.Xtream.Plugin.Api
                             if (auth == 1)
                             {
                                 result.Success = true;
-                                result.Message = "Connection successful!";
+
+                                var details = new System.Text.StringBuilder("Connection successful!");
+
+                                if (!string.IsNullOrEmpty(status))
+                                    details.Append(" · ").Append(status);
+
+                                if (userInfo.TryGetProperty("exp_date", out var expEl))
+                                {
+                                    string expStr = expEl.ValueKind == System.Text.Json.JsonValueKind.String
+                                        ? expEl.GetString()
+                                        : (expEl.ValueKind == System.Text.Json.JsonValueKind.Number ? expEl.GetRawText() : null);
+                                    if (expStr != null && long.TryParse(expStr, out var expUnix) && expUnix > 0)
+                                    {
+                                        var expDate = DateTimeOffset.FromUnixTimeSeconds(expUnix);
+                                        details.Append(" · Expires ").Append(expDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+                                    }
+                                }
+
+                                if (userInfo.TryGetProperty("max_connections", out var maxEl))
+                                {
+                                    var maxStr = maxEl.ValueKind == System.Text.Json.JsonValueKind.String ? maxEl.GetString() : (maxEl.ValueKind == System.Text.Json.JsonValueKind.Number ? maxEl.GetRawText() : null);
+                                    if (!string.IsNullOrEmpty(maxStr) && int.TryParse(maxStr, out var maxInt) && maxInt > 0)
+                                    {
+                                        result.MaxConnections = maxInt;
+                                        details.Append(" · ").Append(maxInt).Append(" max connections");
+                                    }
+                                }
+
+                                result.Message = details.ToString();
                             }
                             else
                             {

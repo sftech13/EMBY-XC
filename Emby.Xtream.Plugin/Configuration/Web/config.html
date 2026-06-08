@@ -446,11 +446,12 @@
                         display: inline-flex !important;
                         align-items: center;
                         justify-content: center;
+                        padding: 0.6em 1.05em !important;
                     }
                     @media (max-width: 600px) {
                         .tabBtn {
-                            padding: 0.55em 0.9em !important;
-                            font-size: 0.88em !important;
+                            padding: 0.55em 0.75em !important;
+                            font-size: 0.85em !important;
                         }
                         .dashboard-grid {
                             grid-template-columns: 1fr;
@@ -490,31 +491,31 @@
 
                 <div class="configTabs" style="display:flex; gap:0; margin-bottom:1.5em; border-bottom:2px solid rgba(128,128,128,0.15);">
                     <button type="button" class="tabBtn tabBtnDashboard" data-tab="dashboard"
-                            style="padding:0.6em 1.5em; background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-2px; cursor:pointer; color:inherit; font-size:1em; opacity:0.7;">
+                            style="background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-2px; cursor:pointer; color:inherit; font-size:1em; opacity:0.7;">
                         Dashboard
                     </button>
                     <button type="button" class="tabBtn tabBtnLiveTv" data-tab="liveTv"
-                            style="padding:0.6em 1.5em; background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-2px; cursor:pointer; color:inherit; font-size:1em; opacity:0.7;">
+                            style="background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-2px; cursor:pointer; color:inherit; font-size:1em; opacity:0.7;">
                         Live TV
                     </button>
                     <button type="button" class="tabBtn tabBtnMovies" data-tab="movies"
-                            style="padding:0.6em 1.5em; background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-2px; cursor:pointer; color:inherit; font-size:1em; opacity:0.7;">
+                            style="background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-2px; cursor:pointer; color:inherit; font-size:1em; opacity:0.7;">
                         Movies
                     </button>
                     <button type="button" class="tabBtn tabBtnDocumentaries" data-tab="documentaries"
-                            style="padding:0.6em 1.5em; background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-2px; cursor:pointer; color:inherit; font-size:1em; opacity:0.7;">
+                            style="background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-2px; cursor:pointer; color:inherit; font-size:1em; opacity:0.7;">
                         Documentary
                     </button>
                     <button type="button" class="tabBtn tabBtnSeries" data-tab="series"
-                            style="padding:0.6em 1.5em; background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-2px; cursor:pointer; color:inherit; font-size:1em; opacity:0.7;">
+                            style="background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-2px; cursor:pointer; color:inherit; font-size:1em; opacity:0.7;">
                         TV Shows
                     </button>
                     <button type="button" class="tabBtn tabBtnDocuSeries" data-tab="docuSeries"
-                            style="padding:0.6em 1.5em; background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-2px; cursor:pointer; color:inherit; font-size:1em; opacity:0.7;">
+                            style="background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-2px; cursor:pointer; color:inherit; font-size:1em; opacity:0.7;">
                         Docu Series
                     </button>
                     <button type="button" class="tabBtn tabBtnGeneric" data-tab="generic"
-                            style="padding:0.6em 1.5em; background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-2px; cursor:pointer; color:inherit; font-size:1em; opacity:0.7;">
+                            style="background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-2px; cursor:pointer; color:inherit; font-size:1em; opacity:0.7;">
                         Settings
                     </button>
                 </div>
@@ -537,7 +538,7 @@
 
                     <!-- First-run empty states -->
                     <div class="dashboardEmptyStateUnconfigured" style="display:none; text-align:center; padding:2em 1em;">
-                        <div style="font-size:1.05em; opacity:0.8; margin-bottom:0.8em;">Configure your Xtream connection to get started</div>
+                        <div style="font-size:1.05em; opacity:0.8; margin-bottom:0.8em;">Configure your provider connection to get started</div>
                         <button type="button" class="btnGoToSettings raised button-secondary" is="emby-button">Open Settings &#x2192;</button>
                     </div>
                     <div class="dashboardEmptyStateNoCategories" style="display:none; text-align:center; padding:1.5em 1em; opacity:0.7;">
@@ -665,12 +666,12 @@
                 <div class="tabPanel tabGeneric" style="display:none;">
 
                 <div class="verticalSection">
-                    <h2 class="sectionTitle">Xtream Connection</h2>
+                    <h2 class="sectionTitle">Provider</h2>
                     <div class="inputContainer">
                         <input class="txtBaseUrl" type="text" is="emby-input"
                                label="Server URL (e.g. http://example.com:8080)" />
                         <div class="fieldDescription">
-                            Base URL of your Xtream-compatible server, without trailing slash.
+                            Base URL of your provider server, without trailing slash.
                         </div>
                     </div>
                     <div class="inputContainer">
@@ -944,7 +945,7 @@
                         </label>
                         <div class="fieldDescription checkboxFieldDescription">
                             Appends [tmdbid=X] or [tvdbid=X] to movie and series folder names
-                            using IDs from the Xtream provider.
+                            using IDs from your provider.
                         </div>
                     </div>
                     <div class="seriesIdSettings" style="display:none;"></div>
@@ -984,7 +985,7 @@
                             <span>Enable VOD Movies</span>
                         </label>
                         <div class="fieldDescription checkboxFieldDescription">
-                            Generate STRM files for VOD movies from the Xtream server.
+                            Generate STRM files for VOD movies from your provider.
                         </div>
                     </div>
                 </div>
@@ -1219,7 +1220,7 @@
                             <span>Enable Live TV</span>
                         </label>
                         <div class="fieldDescription checkboxFieldDescription">
-                            Expose Xtream live channels through Emby's Live TV guide.
+                            Expose live channels through Emby's Live TV guide.
                         </div>
                     </div>
                 </div>
@@ -1259,16 +1260,7 @@
                                 </select>
                             </div>
                         </div>
-                        <div class="settingsOptionItem liveTvSettings">
-                            <div>
-                                <div class="settingsOptionTitle">Max Simultaneous Streams</div>
-                                <div class="settingsOptionDescription">Match this to your provider's connection limit.</div>
-                            </div>
-                            <div class="inputContainer">
-                                <input class="txtTunerCount" type="number" is="emby-input"
-                                       label=" " min="1" max="99" step="1" />
-                            </div>
-                        </div>
+                        <input class="txtTunerCount" type="hidden" />
                         <div class="settingsOptionItem liveTvSettings">
                             <div>
                                 <div class="settingsOptionTitle">Direct Play</div>
@@ -1318,7 +1310,7 @@
                             </div>
                             <div class="selectContainer">
                                 <select class="selectEpgSource" is="emby-select" label=" ">
-                                    <option value="0">Xtream server</option>
+                                    <option value="0">Provider (built-in)</option>
                                     <option value="1">Custom URL</option>
                                     <option value="2">Disabled</option>
                                 </select>

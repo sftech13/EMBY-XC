@@ -8,10 +8,12 @@ using Emby.Xtream.Plugin.Service;
 using MediaBrowser.Common;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Plugins;
+using MediaBrowser.Controller.Session;
 using MediaBrowser.Model.Drawing;
 using MediaBrowser.Model.Logging;
 using MediaBrowser.Model.Plugins;
 using MediaBrowser.Model.Serialization;
+using MediaBrowser.Model.Session;
 
 namespace Emby.Xtream.Plugin
 {
@@ -26,6 +28,7 @@ namespace Emby.Xtream.Plugin
         private readonly IApplicationHost _applicationHost;
         private LiveTvService _liveTvService;
         private StrmSyncService _strmSyncService;
+        private ProviderHealthMonitor _providerHealth;
 
         public Plugin(IApplicationPaths applicationPaths, IXmlSerializer xmlSerializer, ILogManager logManager, IApplicationHost applicationHost)
             : base(applicationPaths, xmlSerializer)
@@ -34,6 +37,11 @@ namespace Emby.Xtream.Plugin
             _applicationHost = applicationHost;
             _liveTvService = new LiveTvService(logManager.GetLogger("XtreamTuner.LiveTv"));
             _strmSyncService = new StrmSyncService(logManager.GetLogger("XtreamTuner.StrmSync"));
+            _providerHealth = new ProviderHealthMonitor(logManager.GetLogger("XtreamTuner.ProviderHealth"));
+            _providerHealth.ReachabilityChanged += isReachable =>
+            {
+                _ = Task.Run(() => BroadcastProviderStatusAsync(isReachable));
+            };
             TryMigrateLegacyConfiguration(logManager.GetLogger("XtreamTuner.Plugin"));
 
             // Pre-warm the channel cache in the background so the first guide load is instant.
@@ -43,6 +51,12 @@ namespace Emby.Xtream.Plugin
             {
                 // Small delay to let Emby finish its own startup before we hit the network.
                 await Task.Delay(TimeSpan.FromSeconds(15)).ConfigureAwait(false);
+
+                try
+                {
+                    await _providerHealth.CheckAsync(System.Threading.CancellationToken.None).ConfigureAwait(false);
+                }
+                catch { /* best-effort health check, ignore errors */ }
 
                 try
                 {
@@ -86,6 +100,8 @@ namespace Emby.Xtream.Plugin
         public LiveTvService LiveTvService => _liveTvService;
 
         public StrmSyncService StrmSyncService => _strmSyncService;
+
+        public ProviderHealthMonitor ProviderHealth => _providerHealth;
 
         public Stream GetThumbImage()
         {
@@ -233,6 +249,39 @@ namespace Emby.Xtream.Plugin
                 !string.Equals(current.Password, legacy.Password, StringComparison.Ordinal) &&
                 currentLooksFresh &&
                 legacyLooksEstablished;
+        }
+
+        internal async Task BroadcastProviderStatusAsync(bool isReachable)
+        {
+            try
+            {
+                var sessionManager = _applicationHost.Resolve<ISessionManager>();
+                if (sessionManager == null) return;
+
+                var sessions = sessionManager.Sessions;
+                if (sessions == null) return;
+
+                var command = new MessageCommand
+                {
+                    Header = isReachable ? "Service Restored" : "Service Disruption",
+                    Text   = isReachable
+                        ? "Live TV and VOD are back online."
+                        : "Live TV and VOD are currently down and are not reachable at the moment. We expect this to be corrected shortly.",
+                    TimeoutMs = isReachable ? 8000 : 0
+                };
+
+                foreach (var session in sessions)
+                {
+                    try
+                    {
+                        await sessionManager.SendMessageCommand(
+                            session.Id, session.Id, command,
+                            System.Threading.CancellationToken.None).ConfigureAwait(false);
+                    }
+                    catch { /* best-effort per session */ }
+                }
+            }
+            catch { /* best-effort broadcast */ }
         }
 
         private static bool IsEmptyJsonObject(string value)

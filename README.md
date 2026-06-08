@@ -45,88 +45,16 @@
 
 ## Features Overview
 
-### Current Release: v1.1.81
+### Current Release: v1.1.98
 
-**v1.1.81**
-- Improved Library Paths UX in Settings. Sub-folder fields (Movies, Documentaries, TV Shows, Docu Series) now display just the folder name instead of the full path when the value is directly under the STRM root (e.g. `Movies` instead of `/media/m3u2strm/Movies`). A small computed full-path hint appears below each field and updates live as you type, so the resolved location is always visible.
+**v1.1.98**
+- Added provider health broadcast notifications. When the IPTV provider goes down or comes back online, all active Emby sessions receive a popup: **"Service Disruption"** / **"Service Restored"**. Only fires on state transitions — one notification per outage, not once per health check. Admin test endpoint available at `GET /XC2EMBY/TestNotification?api_key=<key>`.
 
-**v1.1.80**
-- Fixed Emby auth token (`X-Emby-Token`) still leaking in sanitized log exports. Emby wraps token values in non-ASCII Unicode delimiter characters in its HTTP request log lines, causing the sanitizer regex to miss the match. Non-ASCII stripping now runs before sanitization so the regex sees clean text. Also fixed the "Legacy config migration skipped" message appearing in the Errors & Warnings section on every restart — it is a benign informational event (the plugin works correctly regardless) and is now logged at Info level instead of Warn.
+**v1.1.97**
+- Fixed provider health status dot inheriting the Emby theme accent color (appeared pink on pink themes). The dot now uses fixed semantic colors: green when the provider is reachable, red on consecutive failures, grey before the first check — regardless of the active Emby theme.
 
-**v1.1.79**
-- Fixed Emby auth tokens (`X-Emby-Token`) being exposed in the sanitized log export. Emby includes the session token as a URL query parameter in every HTTP request it logs; the token can be used to authenticate against the server. It is now redacted to `X-Emby-Token=<token-redacted>` in all exported log lines.
-
-**v1.1.78**
-- Fixed sanitized log still showing garbled characters. Emby's `ResultFactory` ignores the `charset` parameter on `text/plain` responses, so declaring UTF-8 had no effect. Replaced all Unicode box-drawing/arrow characters in the log structure (`━`, `─`, `—`) with plain ASCII equivalents (`=`, `-`). Additionally, Emby's HTTP request logger injects Unicode delimiter characters around IP addresses and hostnames in its own log lines; these are now stripped from all log content lines before writing to the export, producing clean readable output (`plex.webhop.me` instead of `plex.webhop.me`).
-
-**v1.1.77**
-- Fixed sanitized log download rendering as garbled characters on most viewers. The response now explicitly declares `charset=utf-8` so browsers and text editors correctly interpret the UTF-8 encoded output. Also fixed a false-positive where plugin version numbers in the form `X.X.X.0` (assembly version, e.g. `1.1.76.0` after an upgrade arrow in the log) were incorrectly redacted as IP addresses — the version-protection regex now also covers the `→` and `->` arrow patterns logged during plugin version changes.
-
-**v1.1.76**
-- Improved sanitized log download readability. The exported file now includes a header (plugin version, export timestamp, line/error/warning counts, which log files were included, redaction notice), an Errors & Warnings section pulled to the top for quick triage, and the full log grouped by source file with section dividers. Filename is now timestamped (`xc2emby-log-YYYYMMDD-HHmmss.txt`). Safe to share for support — all credentials, IPs, and provider hostnames remain redacted.
-
-**v1.1.75**
-- Removed "Delete All" buttons from the Danger Zone in Movies, Documentaries, TV Shows, and Docu-Series tabs. The Browse & Delete panel already includes Select All / Deselect All, making the bulk-delete button redundant and unnecessarily risky. The browse panel button label is updated to "Browse & Delete" accordingly.
-
-**v1.1.74**
-- Fixed duplicate STRM files persisting when local media (Radarr/Sonarr) arrives after the XC2EMBY sync already wrote a STRM for the same title. Previously, when the local media filter matched a movie or episode on a subsequent sync, it added the existing STRM to a protection list (preventing orphan cleanup from removing it), so the duplicate stayed on disk indefinitely. Now when the filter detects a match and a STRM already exists, the STRM is deleted immediately and its directory is cleaned up if empty. The deletion count is included in the dashboard Deleted stat. Applies to both movies and TV show episodes.
-
-**v1.1.73**
-- Fixed the Deleted count on the dashboard always showing 0 when **Review Orphans** (orphan preview) is enabled. The sync correctly staged orphans but the manual commit step never updated the sync history. `CommitPendingOrphans` now categorises each deleted path by root folder prefix (Movies, TV Shows, Documentaries, Docu-Series) and patches the Deleted counter on the most recent matching history entry, so the dashboard reflects the true count after a commit.
-
-**v1.1.72**
-- Fixed button text not centered in the plugin config UI. `button-secondary` and `[is="emby-button"]` overrides were stripping Emby's built-in flex centering without replacing it. Added `text-align: center` and `justify-content: center` to both selectors, and made `.tabBtn` explicitly `inline-flex` with centered alignment.
-
-**v1.1.71**
-- Merged EPG Cache Duration and Channel Cache Duration into a single **Cache Duration** setting. Both caches are always invalidated together when a refresh fires, so separate timers were redundant. Default changed from 30/15 minutes to 360 minutes (6 hours) to match a typical 4× daily sync schedule. Existing installs will see 360 on first load — save the config page once to persist it.
-
-**v1.1.70**
-- Fixed Populate Episode Media Streams task skipping episodes that had Width set (from a v1.1.68 run) but no RunTimeTicks. The skip condition now requires both Width and RunTimeTicks to be populated, so a second run after upgrading from v1.1.68 will fill in the missing durations.
-
-**v1.1.69**
-- Fixed episodes being prematurely marked as played when stopping playback early. The Populate Episode Media Streams task now also writes `RunTimeTicks` from the XC API's `duration_secs` field. Without a known runtime, Emby cannot calculate percentage watched and defaults to marking the episode as played on any stop event.
-
-**v1.1.68**
-- Fixed Populate Episode Media Streams task failing immediately with `MissingMethodException` on Emby 4.9.x. `IItemRepository.GetMediaStreams(MediaStreamQuery)` was removed in Emby 4.9; replaced the already-probed check with `item.Width > 0` (Emby sets Width on the item after a successful probe, so width=0 means never probed).
-
-**v1.1.67**
-- Added **"XC2EMBY - Populate Episode Media Streams"** scheduled task. Queries Emby's library for all STRM TV show episodes with no media stream data in the database, fetches real per-episode codec info (video codec, resolution, framerate, audio codec, channels, language) from the XC API's `get_series_info` endpoint, and writes it directly to Emby's `MediaStreams2` table via `IItemRepository.SaveMediaStreams`. Once populated, Emby reads stream info from its database at playback time and skips ffprobe entirely — preventing the connection storm that occurs when multiple concurrent playback requests trigger parallel probes against a provider with connection limits. Run once after a full series sync; subsequent syncs add NFO streamdetails for new episodes so they never enter the unprobed state.
-
-**v1.1.66**
-- Fixed series sync failing with JSON deserialization error for providers that return `""` (empty string) or `[]` (empty array) instead of an object for episode `info`, `info.video`, or `info.audio` fields. Added `FlexibleObjectConverter<T>` that returns `null` for any non-object JSON token on these fields, matching the same defensive pattern already used for other XC API fields.
-
-**v1.1.65**
-- Fixed connection storms on STRM episode playback caused by empty `<streamdetails />` in Emby-written episode NFOs. When Emby has no cached MediaInfo for a STRM episode, it fires ffprobe on every PlaybackInfo request — with multiple concurrent requests this generates a storm of connections through the IPTV proxy, hitting provider connection limits and causing 403 errors. Fix: when **Write NFO Files** is enabled, the plugin now writes real per-episode stream details (codec, resolution, framerate, audio channels, language) directly from the XC API's `get_series_info` response at sync time. For episodes that already exist on disk with an empty `<streamdetails />` tag, the NFO is patched in-place on next sync, preserving all Emby-scraped metadata (plot, cast, ratings, etc.).
-
-**v1.1.64**
-- Added **"XC2EMBY - Refresh Live TV"** scheduled task. Runs every 4 hours by default (configurable in Dashboard → Scheduled Tasks). Invalidates the channel and EPG caches, triggers a channel rescan so Emby re-reads channel tags from the plugin, and refreshes the guide data. Previously, channel tags (and the guide category filter) would only update after a manual "Refresh Channel & EPG Cache" button click or an overnight Emby guide refresh.
-
-**v1.1.55**
-- Fixed channel group tags (MLB, ESPN, NFL, etc.) never appearing in the Emby Live TV guide tag filter. The XC API returns `category_id` as a JSON string (e.g. `"53"`) rather than an integer. `LiveStreamInfo.CategoryId` was declared as `int?` with no converter, so System.Text.Json silently nulled it on every deserialization — all channels had `CategoryId = null`, `Tags` was never set, and Emby's `SetTags()` call was never reached. Fixed by adding `[JsonConverter(typeof(FlexibleNullableInt32Converter))]` to `LiveStreamInfo.CategoryId` (same converter already used on `Category.CategoryId`).
-
-**v1.1.54**
-- Fixed "Refresh Channel & EPG Cache" button silently deadlocking on the second click. `BaseTunerHost.ValdidateOptions` (Emby base class) calls `GetChannelsInternal()` while holding `_channelInfoLock`. The `_explicitInvalidate` callback in `RefreshChannelCacheAsync` calls `TriggerChannelRescan()` → `SaveTunerHost()` → tries to re-acquire the same lock → deadlock. Fixed by overriding `ValdidateOptions` to return `Task.CompletedTask` (same pattern as Emby's own M3U plugin). Credentials are validated via the `TestXtreamConnection` endpoint instead.
-
-**v1.1.53**
-- Fixed Channel Cache Duration input allowing values below the enforced 5-minute minimum. HTML `min` attribute updated from `1` to `5` to match code behavior.
-
-**v1.1.52**
-- Fixed two channel cache bugs that caused the guide to blank or fail to update after a cache refresh while users were actively watching.
-  1. **CAS race (`_isRefreshing` stuck at 1)**: `GetChannelsInternal`'s stale path set `_isRefreshing=1` before firing `Task.Run(RefreshChannelCacheAsync)`. Inside the task, `RefreshChannelCacheAsync`'s own CAS guard saw the flag already set and exited early — skipping the `finally` block and leaving `_isRefreshing` permanently at 1. All subsequent refreshes were silently dead until Emby restarted.
-  2. **Fresh data never reaching Emby's DB**: Even with the soft invalidation introduced in v1.1.51, the background refresh updated `_cachedChannels` but nothing triggered a second `RefreshChannelsScheduledTask` to propagate that data into `BaseTunerHost._channelCache` and Emby's library DB. Added `_explicitInvalidate` flag: after a successful background refresh triggered by an explicit `RefreshCache` call, `TriggerChannelRescan()` fires again so Emby immediately picks up the fresh channel list.
-
-**v1.1.51**
-- Fixed guide going blank and Live TV dropping for active users when a cache refresh is triggered while streams are playing. The refresh now uses a soft cache invalidation — the existing channel list remains available while new data fetches in the background, then swaps in atomically. Previously, `ClearCaches()` nulled the channel list before Emby could re-fetch it; Emby defers channel rescans while streams are active, so the guide stayed blank until all users stopped watching or Emby restarted.
-
-**v1.1.50**
-- Fixed Live TV guide showing 0 channels after Emby restart. `RefreshChannelCacheAsync` was blocked indefinitely waiting for the XMLTV download/parse (264 MB XML via `XDocument.Load`) to complete before building the channel list. The XMLTV tasks now have a 10-second timeout — channels are registered immediately and XMLTV ID matching is applied on the next refresh cycle once the feed is loaded.
-
-**v1.1.49**
-- Hotfix: XMLTV timestamps without a space before the timezone offset (e.g. `20260513120000+0100`) had their timezone silently ignored, shifting all guide programs by the offset amount. `ParseXmltvTimestamp` now splits on `+`/`-` at position ≥14 when no space is present, restoring correct UTC conversion for all providers.
-
-**v1.1.48**
-- Fixed guide going blank during active live streams.
-- Config UX improvements.
+**v1.1.96**
+- Added live provider health monitoring. A status dot in the plugin header shows whether the IPTV provider is currently reachable. The UI polls every 2 minutes; a background scheduled task (`XC2EMBY - Provider Health Check`) runs every 5 minutes. An initial check fires 15 seconds after Emby startup so the dot is populated immediately rather than waiting for the first scheduled run. Test Connection now shows provider account status, expiry date, and max allowed streams. Max Simultaneous Streams is auto-set from the provider on test — no longer a manual field.
 
 ### Live TV
 - Registers as a native Emby tuner host — channels appear in Live TV just like any other tuner

@@ -866,6 +866,13 @@ function (BaseView, loading) {
         });
     }
 
+    function normalizeEpgSource(val) {
+        var nameToInt = { XtreamServer: 0, CustomUrl: 1, Disabled: 2 };
+        if (typeof val === 'string' && nameToInt.hasOwnProperty(val)) return nameToInt[val];
+        var n = parseInt(val, 10);
+        return isNaN(n) ? 0 : n;
+    }
+
     function captureLiveRefreshSettings(config) {
         return {
             enabled: config.EnableLiveTv !== false,
@@ -874,7 +881,7 @@ function (BaseView, loading) {
             tunerCount: config.TunerCount || 1,
             directPlay: config.EnableLiveTvDirectPlay !== false,
             includeGroupTitle: config.IncludeGroupTitleInM3U !== false,
-            epgSource: config.EpgSource,
+            epgSource: normalizeEpgSource(config.EpgSource),
             customEpgUrl: config.CustomEpgUrl || '',
             cacheDurationMinutes: config.CacheDurationMinutes || 360,
             epgDaysToFetch: config.EpgDaysToFetch || 2
@@ -901,7 +908,7 @@ function (BaseView, loading) {
             || before.tunerCount !== after.tunerCount
             || before.directPlay !== after.directPlay
             || before.includeGroupTitle !== after.includeGroupTitle
-            || String(before.epgSource) !== String(after.epgSource)
+            || before.epgSource !== after.epgSource
             || before.customEpgUrl !== after.customEpgUrl
             || before.cacheDurationMinutes !== after.cacheDurationMinutes
             || before.epgDaysToFetch !== after.epgDaysToFetch;
@@ -1266,6 +1273,9 @@ function (BaseView, loading) {
             data: JSON.stringify({ BaseUrl: url, Username: user, Password: pass })
         }).then(function (result) {
             setPillResult(resultEl, result.Success, result.Message);
+            if (result.Success && result.MaxConnections > 0) {
+                view.querySelector('.txtTunerCount').value = result.MaxConnections;
+            }
         }).catch(function () {
             setPillResult(resultEl, false, 'Connection test request failed. Check the Emby server logs.');
         });
@@ -1545,7 +1555,7 @@ function (BaseView, loading) {
             instance.loadedCategories = categories;
 
             if (!categories || categories.length === 0) {
-                listEl.innerHTML = '<div style="opacity:0.5;">No categories found. Check your Xtream connection settings.</div>';
+                listEl.innerHTML = '<div style="opacity:0.5;">No categories found. Check your provider connection settings.</div>';
                 return;
             }
 
@@ -1612,7 +1622,7 @@ function (BaseView, loading) {
             instance.loadedVodCategories = categories;
 
             if (!categories || categories.length === 0) {
-                listEl.innerHTML = '<div style="opacity:0.5;">No VOD categories found. Check your Xtream connection settings.</div>';
+                listEl.innerHTML = '<div style="opacity:0.5;">No VOD categories found. Check your provider connection settings.</div>';
                 return;
             }
 
@@ -1732,7 +1742,7 @@ function (BaseView, loading) {
             countType: 'documentary',
             folderType: 'documentary',
             loadedSetter: function (categories) { instance.loadedDocumentaryCategories = categories; },
-            emptyMessage: 'No documentary categories found. Check your Xtream connection settings.',
+            emptyMessage: 'No documentary categories found. Check your provider connection settings.',
             failMessage: 'Failed to load documentary categories. Save your connection settings first, then try again.'
         });
     }
@@ -1866,7 +1876,7 @@ function (BaseView, loading) {
             instance.loadedSeriesCategories = categories;
 
             if (!categories || categories.length === 0) {
-                listEl.innerHTML = '<div style="opacity:0.5;">No series categories found. Check your Xtream connection settings.</div>';
+                listEl.innerHTML = '<div style="opacity:0.5;">No series categories found. Check your provider connection settings.</div>';
                 return;
             }
 
@@ -1982,7 +1992,7 @@ function (BaseView, loading) {
             countType: 'docuSeries',
             folderType: 'docuSeries',
             loadedSetter: function (categories) { instance.loadedDocuSeriesCategories = categories; },
-            emptyMessage: 'No docu series categories found. Check your Xtream connection settings.',
+            emptyMessage: 'No docu series categories found. Check your provider connection settings.',
             failMessage: 'Failed to load docu series categories. Save your connection settings first, then try again.'
         });
     }
@@ -2740,60 +2750,79 @@ function (BaseView, loading) {
         function statTile(value, label, color) {
             return '<div class="dashboard-stat"><div class="stat-value" style="color:' + (color || accentColor) + ';">' + value + '</div><div class="stat-label">' + label + '</div></div>';
         }
-        function rowLabel(text) {
-            return '<div style="font-size:0.75em; font-weight:600; opacity:0.45; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:0.35em;">' + text + '</div>';
-        }
-        function vodRow(entry, diskTotal, label) {
-            var added = entry.MoviesAdded || 0;
-            var deleted = entry.MoviesDeleted || 0;
-            var failed = entry.MoviesFailed || 0;
-            return '<div style="grid-column:1/-1;">' + rowLabel(label) + '</div>' +
-                statTile(diskTotal, 'Total') +
-                statTile(Math.max(0, diskTotal - added), 'Up to date', '#aaa') +
-                statTile(added > 0 ? '+' + added : '0', 'Added', added > 0 ? accentColor : '#aaa') +
-                statTile(deleted > 0 ? deleted : '0', 'Deleted', deleted > 0 ? '#e74c3c' : '#aaa') +
-                statTile(failed, 'Failed', failed > 0 ? '#cc0000' : accentColor);
-        }
-        function seriesRow(entry, diskTotal, label) {
-            var added = entry.EpisodeAdded || 0;
-            var deleted = entry.EpisodeDeleted || 0;
-            var failed = entry.EpisodeFailed || 0;
-            return '<div style="grid-column:1/-1;">' + rowLabel(label) + '</div>' +
-                statTile(diskTotal, 'Total') +
-                statTile(Math.max(0, diskTotal - added), 'Up to date', '#aaa') +
-                statTile(added > 0 ? '+' + added : '0', 'Added', added > 0 ? accentColor : '#aaa') +
-                statTile(deleted > 0 ? deleted : '0', 'Deleted', deleted > 0 ? '#e74c3c' : '#aaa') +
-                statTile(failed, 'Failed', failed > 0 ? '#cc0000' : accentColor);
+        function syncSection(label, added, skipped, deleted, failed, titleSummary, titleArray, addedCount) {
+            var html = '<div style="padding:0.15em 0;">';
+            html += '<div style="font-size:0.72em; font-weight:600; opacity:0.45; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:0.35em;">' + label + '</div>';
+            html += '<div style="display:grid; grid-template-columns:repeat(4,1fr); gap:0.5em;">';
+            html += statTile(added > 0 ? '+' + added : '0', 'Added', added > 0 ? accentColor : '#aaa');
+            html += statTile(skipped > 0 ? skipped : '0', 'Skipped', '#aaa');
+            html += statTile(deleted > 0 ? deleted : '0', 'Deleted', deleted > 0 ? '#e74c3c' : '#aaa');
+            html += statTile(failed > 0 ? failed : '0', 'Failed', failed > 0 ? '#cc0000' : accentColor);
+            html += '</div>';
+            if (addedCount > 0 && titleArray && titleArray.length) {
+                html += '<details style="margin-top:0.35em; font-size:0.82em; opacity:0.65;">' +
+                    '<summary style="cursor:pointer;">' + titleSummary + '</summary>' +
+                    '<ul style="margin:0.3em 0 0 1em; padding:0; max-height:160px; overflow-y:auto;">' +
+                    titleArray.map(function(t) { return '<li>' + escapeHtml(t) + '</li>'; }).join('') +
+                    (addedCount > titleArray.length
+                        ? '<li style="opacity:0.5;">\u2026and ' + (addedCount - titleArray.length) + ' more</li>'
+                        : '') +
+                    '</ul></details>';
+            }
+            html += '</div>';
+            return html;
         }
 
         var lib = data.LibraryStats || {};
         var statsHtml = '';
 
-        if (lastMovies || lastDocs || lastSeries || lastDocuSeries) {
-            statsHtml += '<div style="display:grid; grid-template-columns:repeat(5,1fr); gap:0.5em;">';
-            if (lastMovies)     statsHtml += vodRow(lastMovies,    lib.MovieCount || 0,        'Movies');
-            if (lastDocs)       statsHtml += vodRow(lastDocs,      lib.DocumentaryCount || 0,  'Documentaries');
-            if (lastSeries)     statsHtml += seriesRow(lastSeries,     lib.EpisodeCount || 0,      'TV Shows');
-            if (lastDocuSeries) statsHtml += seriesRow(lastDocuSeries, lib.DocuEpisodeCount || 0,  'Docu-Series');
-            statsHtml += '</div>';
-        }
+        var showMovies     = !!(lastMovies     || data.SyncMovies);
+        var showDocs       = !!(lastDocs       || data.SyncDocumentaries);
+        var showSeries     = !!(lastSeries     || data.SyncSeries);
+        var showDocuSeries = !!(lastDocuSeries || data.SyncDocuSeries);
 
-        // Expandable title lists
-        function titleList(entry, addedCount, titleArray, summaryText) {
-            if (!entry || addedCount <= 0 || !titleArray || !titleArray.length) return '';
-            return '<details style="margin-top:0.3em; margin-bottom:0.4em; font-size:0.82em; opacity:0.65;">' +
-                '<summary style="cursor:pointer; list-style:none;">' + summaryText + '</summary>' +
-                '<ul style="margin:0.3em 0 0 1em; padding:0;">' +
-                titleArray.map(function(t) { return '<li>' + escapeHtml(t) + '</li>'; }).join('') +
-                (addedCount > titleArray.length
-                    ? '<li style="opacity:0.5;">\u2026and ' + (addedCount - titleArray.length) + ' more</li>'
-                    : '') +
-                '</ul></details>';
+        if (showMovies || showDocs || showSeries || showDocuSeries) {
+            var sections = [];
+            if (showMovies) {
+                var mAdded = lastMovies ? (lastMovies.MoviesAdded   || 0) : 0;
+                sections.push(syncSection('Movies',
+                    mAdded,
+                    lastMovies ? (lastMovies.MoviesSkipped  || 0) : 0,
+                    lastMovies ? (lastMovies.MoviesDeleted  || 0) : 0,
+                    lastMovies ? (lastMovies.MoviesFailed   || 0) : 0,
+                    'Show added movie titles', lastMovies && lastMovies.AddedMovieTitles, mAdded));
+            }
+            if (showDocs) {
+                var dAdded = lastDocs ? (lastDocs.MoviesAdded   || 0) : 0;
+                sections.push(syncSection('Documentaries',
+                    dAdded,
+                    lastDocs ? (lastDocs.MoviesSkipped  || 0) : 0,
+                    lastDocs ? (lastDocs.MoviesDeleted  || 0) : 0,
+                    lastDocs ? (lastDocs.MoviesFailed   || 0) : 0,
+                    'Show added documentary titles', lastDocs && lastDocs.AddedMovieTitles, dAdded));
+            }
+            if (showSeries) {
+                var sAdded   = lastSeries ? (lastSeries.EpisodeAdded  || 0) : 0;
+                var sTitles  = lastSeries && lastSeries.AddedSeriesTitles;
+                sections.push(syncSection('TV Shows',
+                    sAdded,
+                    lastSeries ? (lastSeries.EpisodeSkipped  || 0) : 0,
+                    lastSeries ? (lastSeries.EpisodeDeleted  || 0) : 0,
+                    lastSeries ? (lastSeries.EpisodeFailed   || 0) : 0,
+                    'Show added series titles', sTitles, sTitles ? sTitles.length : 0));
+            }
+            if (showDocuSeries) {
+                var dsAdded  = lastDocuSeries ? (lastDocuSeries.EpisodeAdded  || 0) : 0;
+                var dsTitles = lastDocuSeries && lastDocuSeries.AddedSeriesTitles;
+                sections.push(syncSection('Docu Series',
+                    dsAdded,
+                    lastDocuSeries ? (lastDocuSeries.EpisodeSkipped  || 0) : 0,
+                    lastDocuSeries ? (lastDocuSeries.EpisodeDeleted  || 0) : 0,
+                    lastDocuSeries ? (lastDocuSeries.EpisodeFailed   || 0) : 0,
+                    'Show added docu-series titles', dsTitles, dsTitles ? dsTitles.length : 0));
+            }
+            statsHtml += sections.join('<div style="border-top:1px solid rgba(128,128,128,0.12); margin:0.5em 0;"></div>');
         }
-        statsHtml += titleList(lastMovies,    lastMovies    ? (lastMovies.MoviesAdded || 0)      : 0, lastMovies    && lastMovies.AddedMovieTitles,    'Show added movie titles');
-        statsHtml += titleList(lastDocs,      lastDocs      ? (lastDocs.MoviesAdded || 0)        : 0, lastDocs      && lastDocs.AddedMovieTitles,      'Show added documentary titles');
-        statsHtml += titleList(lastSeries,    lastSeries    ? (lastSeries.EpisodeAdded || 0)     : 0, lastSeries    && lastSeries.AddedSeriesTitles,   'Show added series titles');
-        statsHtml += titleList(lastDocuSeries, lastDocuSeries ? (lastDocuSeries.EpisodeAdded || 0) : 0, lastDocuSeries && lastDocuSeries.AddedSeriesTitles, 'Show added docu-series titles');
 
         if (data.AutoSyncOn && data.NextSyncTime) {
             var delta = new Date(data.NextSyncTime) - new Date();
@@ -2955,6 +2984,7 @@ function (BaseView, loading) {
             clearInterval(dashboardPollId);
             dashboardPollId = null;
         }
+        stopHealthPolling();
     }
 
     function dashboardSyncAll(instance) {
@@ -3071,17 +3101,57 @@ function (BaseView, loading) {
         badge.classList.toggle('zero-selected', selected === 0);
     }
 
+    var _healthPollId = null;
+
+    function startHealthPolling(view) {
+        if (_healthPollId) return;
+        var doCheck = function () {
+            ApiClient.getJSON(ApiClient.getUrl('XC2EMBY/ProviderHealth')).then(function (h) {
+                var item = view.querySelector('.healthItemXtream');
+                if (!item) { stopHealthPolling(); return; }
+                applyProviderHealthDot(item, h);
+            }).catch(function () {});
+        };
+        doCheck();
+        _healthPollId = setInterval(doCheck, 120000);
+    }
+
+    function stopHealthPolling() {
+        if (_healthPollId) { clearInterval(_healthPollId); _healthPollId = null; }
+    }
+
+    function applyProviderHealthDot(item, h) {
+        var label = item.querySelector('.healthLabel');
+        if (!h.LastChecked) {
+            setHealthDot(item, 'grey');
+            if (label) label.textContent = 'XC2EMBY: Checking...';
+            return;
+        }
+        if (h.IsReachable) {
+            setHealthDot(item, 'ok');
+            if (label) label.textContent = 'XC2EMBY: Connected';
+        } else {
+            setHealthDot(item, 'error');
+            var failText = h.ConsecutiveFailures > 1 ? ' (' + h.ConsecutiveFailures + ' failures)' : '';
+            if (label) label.textContent = 'XC2EMBY: Unreachable' + failText;
+        }
+    }
+
     function renderHealthBar(view, config) {
         var xtreamItem      = view.querySelector('.healthItemXtream');
         var syncItem        = view.querySelector('.healthItemLastSync');
         if (!xtreamItem) return;
 
-        // Xtream dot
-        var xtreamOk = !!(config.BaseUrl && config.Username);
-        setHealthDot(xtreamItem, xtreamOk ? 'ok' : 'grey');
-        xtreamItem.querySelector('.healthLabel').textContent = xtreamOk
-            ? 'XC2EMBY: Connected (' + config.Username + ')'
-            : 'XC2EMBY: Not configured';
+        // Provider dot — show configured state immediately, then health polling takes over
+        var configured = !!(config.BaseUrl && config.Username);
+        if (configured) {
+            setHealthDot(xtreamItem, 'grey');
+            xtreamItem.querySelector('.healthLabel').textContent = 'XC2EMBY: Checking...';
+            startHealthPolling(view);
+        } else {
+            setHealthDot(xtreamItem, 'grey');
+            xtreamItem.querySelector('.healthLabel').textContent = 'XC2EMBY: Not configured';
+        }
 
         // Last sync dot — prefer SyncHistoryJson[0].EndTime (updated on every sync),
         // fall back to LastMovieSyncTimestamp (may be Unix epoch int or ISO string).
@@ -3121,7 +3191,7 @@ function (BaseView, loading) {
     function setHealthDot(itemEl, status) {
         var dot = itemEl.querySelector('.healthDot');
         if (!dot) return;
-        var colours = { ok: accentColor, error: '#cc0000', grey: '#888' };
+        var colours = { ok: '#27ae60', error: '#cc0000', grey: '#888' };
         dot.style.background = colours[status] || colours.grey;
     }
 
