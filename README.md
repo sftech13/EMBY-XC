@@ -45,7 +45,10 @@
 
 ## Features Overview
 
-### Current Release: v1.1.79
+### Current Release: v1.1.80
+
+**v1.1.80**
+- Fixed Emby auth token (`X-Emby-Token`) still leaking in sanitized log exports. Emby wraps token values in non-ASCII Unicode delimiter characters in its HTTP request log lines, causing the sanitizer regex to miss the match. Non-ASCII stripping now runs before sanitization so the regex sees clean text. Also fixed the "Legacy config migration skipped" message appearing in the Errors & Warnings section on every restart — it is a benign informational event (the plugin works correctly regardless) and is now logged at Info level instead of Warn.
 
 **v1.1.79**
 - Fixed Emby auth tokens (`X-Emby-Token`) being exposed in the sanitized log export. Emby includes the session token as a URL query parameter in every HTTP request it logs; the token can be used to authenticate against the server. It is now redacted to `X-Emby-Token=<token-redacted>` in all exported log lines.

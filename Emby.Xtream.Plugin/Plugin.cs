@@ -143,12 +143,13 @@ namespace Emby.Xtream.Plugin
         {
             try
             {
-                if (string.IsNullOrWhiteSpace(ApplicationPaths?.PluginsPath))
+                var pluginsPath = ApplicationPaths?.PluginsPath;
+                if (string.IsNullOrWhiteSpace(pluginsPath))
                 {
                     return;
                 }
 
-                var configDir = Path.Combine(ApplicationPaths.PluginsPath, "configurations");
+                var configDir = Path.Combine(pluginsPath, "configurations");
                 var legacyPath = Path.Combine(configDir, LegacyConfigFileName);
                 var currentPath = Path.Combine(configDir, CurrentConfigFileName);
 
@@ -185,7 +186,7 @@ namespace Emby.Xtream.Plugin
             }
             catch (Exception ex)
             {
-                logger.Warn("Legacy config migration skipped: {0}", ex.Message);
+                logger.Info("Legacy config migration skipped: {0}", ex.Message);
             }
         }
 

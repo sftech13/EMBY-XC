@@ -1892,8 +1892,8 @@ namespace Emby.Xtream.Plugin.Api
             foreach (var section in sections)
                 foreach (var raw in section.Lines)
                 {
-                    var sanitized = LogSanitizer.SanitizeLine(raw, config.Username, config.Password);
-                    sanitized = StripNonAscii(sanitized);
+                    var cleaned = StripNonAscii(raw);
+                    var sanitized = LogSanitizer.SanitizeLine(cleaned, config.Username, config.Password);
                     allSanitized.Add((section.FileName, sanitized));
                 }
 
