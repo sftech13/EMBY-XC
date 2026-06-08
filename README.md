@@ -45,7 +45,10 @@
 
 ## Features Overview
 
-### Current Release: v1.1.74
+### Current Release: v1.1.75
+
+**v1.1.75**
+- Removed "Delete All" buttons from the Danger Zone in Movies, Documentaries, TV Shows, and Docu-Series tabs. The Browse & Delete panel already includes Select All / Deselect All, making the bulk-delete button redundant and unnecessarily risky. The browse panel button label is updated to "Browse & Delete" accordingly.
 
 **v1.1.74**
 - Fixed duplicate STRM files persisting when local media (Radarr/Sonarr) arrives after the XC2EMBY sync already wrote a STRM for the same title. Previously, when the local media filter matched a movie or episode on a subsequent sync, it added the existing STRM to a protection list (preventing orphan cleanup from removing it), so the duplicate stayed on disk indefinitely. Now when the filter detects a match and a STRM already exists, the STRM is deleted immediately and its directory is cleaned up if empty. The deletion count is included in the dashboard Deleted stat. Applies to both movies and TV show episodes.

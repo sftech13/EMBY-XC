@@ -313,22 +313,6 @@ function (BaseView, loading) {
         });
 
         // Delete content buttons
-        view.querySelector('.btnDeleteMovies').addEventListener('click', function () {
-            deleteContent(view, 'Movies');
-        });
-
-        view.querySelector('.btnDeleteDocumentaries').addEventListener('click', function () {
-            deleteContent(view, 'Documentaries');
-        });
-
-        view.querySelector('.btnDeleteSeries').addEventListener('click', function () {
-            deleteContent(view, 'Series');
-        });
-
-        view.querySelector('.btnDeleteDocuSeries').addEventListener('click', function () {
-            deleteContent(view, 'DocuSeries');
-        });
-
         // Selective delete buttons
         view.querySelector('.btnSelectiveDeleteMovies').addEventListener('click', function () {
             openSelectiveDelete(view, 'Movies');
@@ -512,8 +496,6 @@ function (BaseView, loading) {
                 .replace(/btnSyncMovies/g, 'btnSyncDocumentaries')
                 .replace(/btnStopMovies/g, 'btnStopDocumentaries')
                 .replace(/syncMoviesResult/g, 'syncDocumentariesResult')
-                .replace(/btnDeleteMovies/g, 'btnDeleteDocumentaries')
-                .replace(/deleteMoviesResult/g, 'deleteDocumentariesResult')
                 .replace(/btnSelectiveDeleteMovies/g, 'btnSelectiveDeleteDocumentaries')
                 .replace(/selectiveDeleteMoviesPanel/g, 'selectiveDeleteDocumentariesPanel')
                 .replace(/vodCategoryCheckbox/g, 'documentaryCategoryCheckbox')
@@ -552,8 +534,6 @@ function (BaseView, loading) {
                 .replace(/btnSyncSeries/g, 'btnSyncDocuSeries')
                 .replace(/btnStopSeries/g, 'btnStopDocuSeries')
                 .replace(/syncSeriesResult/g, 'syncDocuSeriesResult')
-                .replace(/btnDeleteSeries/g, 'btnDeleteDocuSeries')
-                .replace(/deleteSeriesResult/g, 'deleteDocuSeriesResult')
                 .replace(/btnSelectiveDeleteSeries/g, 'btnSelectiveDeleteDocuSeries')
                 .replace(/selectiveDeleteSeriesPanel/g, 'selectiveDeleteDocuSeriesPanel')
                 .replace(/seriesCategoryCheckbox/g, 'docuSeriesCategoryCheckbox')
@@ -2392,50 +2372,6 @@ function (BaseView, loading) {
         });
 
         loadItems();
-    }
-
-    function deleteContent(view, type) {
-        var map = {
-            Movies: { label: 'movies', result: '.deleteMoviesResult', button: '.btnDeleteMovies', url: 'Movies' },
-            Documentaries: { label: 'documentaries', result: '.deleteDocumentariesResult', button: '.btnDeleteDocumentaries', url: 'Documentaries' },
-            Series: { label: 'TV shows', result: '.deleteSeriesResult', button: '.btnDeleteSeries', url: 'Series' },
-            DocuSeries: { label: 'docu series', result: '.deleteDocuSeriesResult', button: '.btnDeleteDocuSeries', url: 'DocuSeries' }
-        };
-        var entry = map[type];
-        var label = entry.label;
-        var resultClass = entry.result;
-        var btnClass = entry.button;
-        var resultEl = view.querySelector(resultClass);
-        var btn = view.querySelector(btnClass);
-
-        // Inline confirm instead of window.confirm
-        resultEl.innerHTML =
-            '<div style="display:flex; gap:0.5em; align-items:center; flex-wrap:wrap; margin-top:0.3em;">' +
-            '<span style="font-size:0.9em; opacity:0.7;">Delete ALL ' + label + '? This cannot be undone.</span>' +
-            '<button type="button" class="deleteConfirmYes" style="background:#c0392b; color:white; border:none; border-radius:4px; padding:0.3em 0.8em; font-size:0.85em; cursor:pointer; font-weight:600;">Yes, delete all</button>' +
-            '<button type="button" class="deleteConfirmNo button-secondary" style="font-size:0.85em; padding:0.3em 0.8em; border:1px solid rgba(128,128,128,0.3); border-radius:4px; background:transparent; color:inherit; cursor:pointer;">Cancel</button>' +
-            '</div>';
-
-        resultEl.querySelector('.deleteConfirmNo').addEventListener('click', function () {
-            resultEl.innerHTML = '';
-        });
-
-        resultEl.querySelector('.deleteConfirmYes').addEventListener('click', function () {
-            btn.disabled = true;
-            resultEl.innerHTML = '<span style="opacity:0.5;">Deleting ' + label + '...</span>';
-
-            ApiClient.ajax({
-                type: 'DELETE',
-                url: ApiClient.getUrl('XC2EMBY/Content/' + entry.url),
-                dataType: 'json'
-            }).then(function (result) {
-                btn.disabled = false;
-                setPillResult(resultEl, result.Success, result.Message);
-            }).catch(function () {
-                btn.disabled = false;
-                setPillResult(resultEl, false, 'Delete request failed. Check server logs.');
-            });
-        });
     }
 
     function refreshCache(view, resultSelector) {
