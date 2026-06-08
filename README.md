@@ -45,7 +45,10 @@
 
 ## Features Overview
 
-### Current Release: v1.1.75
+### Current Release: v1.1.76
+
+**v1.1.76**
+- Improved sanitized log download readability. The exported file now includes a header (plugin version, export timestamp, line/error/warning counts, which log files were included, redaction notice), an Errors & Warnings section pulled to the top for quick triage, and the full log grouped by source file with section dividers. Filename is now timestamped (`xc2emby-log-YYYYMMDD-HHmmss.txt`). Safe to share for support — all credentials, IPs, and provider hostnames remain redacted.
 
 **v1.1.75**
 - Removed "Delete All" buttons from the Danger Zone in Movies, Documentaries, TV Shows, and Docu-Series tabs. The Browse & Delete panel already includes Select All / Deselect All, making the bulk-delete button redundant and unnecessarily risky. The browse panel button label is updated to "Browse & Delete" accordingly.

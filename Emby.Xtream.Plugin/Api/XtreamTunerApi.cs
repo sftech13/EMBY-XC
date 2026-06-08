@@ -1837,7 +1837,10 @@ namespace Emby.Xtream.Plugin.Api
         {
             var config = Plugin.Instance.Configuration;
             var logDir = Plugin.Instance.PluginPaths.LogDirectoryPath;
-            var lines = new List<string>();
+            var keywords = new[] { "XC2EMBY", "XtreamTuner", "LiveTv" };
+
+            // Collect lines per file so we can label sections
+            var sections = new List<(string FileName, List<string> Lines)>();
 
             try
             {
@@ -1847,10 +1850,9 @@ namespace Emby.Xtream.Plugin.Api
                     .Take(5)
                     .ToArray();
 
-                var keywords = new[] { "XC2EMBY", "XtreamTuner", "LiveTv" };
-
                 foreach (var logFile in logFiles)
                 {
+                    var fileLines = new List<string>();
                     try
                     {
                         using (var reader = new StreamReader(logFile, Encoding.UTF8))
@@ -1862,7 +1864,7 @@ namespace Emby.Xtream.Plugin.Api
                                 {
                                     if (line.IndexOf(kw, StringComparison.OrdinalIgnoreCase) >= 0)
                                     {
-                                        lines.Add(line);
+                                        fileLines.Add(line);
                                         break;
                                     }
                                 }
@@ -1870,26 +1872,96 @@ namespace Emby.Xtream.Plugin.Api
                         }
                     }
                     catch { }
+                    if (fileLines.Count > 0)
+                        sections.Add((Path.GetFileName(logFile), fileLines));
                 }
             }
             catch { }
 
-            // Sanitize PII
-            var sanitized = new StringBuilder();
-            foreach (var line in lines)
+            // Sanitize all lines
+            var allSanitized = new List<(string File, string Line)>();
+            foreach (var section in sections)
+                foreach (var raw in section.Lines)
+                    allSanitized.Add((section.FileName, LogSanitizer.SanitizeLine(raw, config.Username, config.Password)));
+
+            // Classify by severity for the summary
+            int errorCount = 0, warnCount = 0, infoCount = 0;
+            foreach (var (_, line) in allSanitized)
             {
-                var s = LogSanitizer.SanitizeLine(line,
-                    config.Username, config.Password);
-                sanitized.AppendLine(s);
+                if (line.IndexOf(" Error ", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    line.IndexOf("|ERROR|", StringComparison.OrdinalIgnoreCase) >= 0)
+                    errorCount++;
+                else if (line.IndexOf(" Warn ", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                         line.IndexOf("|WARN|", StringComparison.OrdinalIgnoreCase) >= 0)
+                    warnCount++;
+                else
+                    infoCount++;
             }
 
-            if (sanitized.Length == 0)
-                sanitized.AppendLine("No plugin-related log entries found.");
+            var out_ = new StringBuilder();
 
-            var stream = new MemoryStream(Encoding.UTF8.GetBytes(sanitized.ToString()));
+            // ── Header ────────────────────────────────────────────────────────────
+            out_.AppendLine("================================================================");
+            out_.AppendLine("  XC2EMBY Plugin — Sanitized Log Export");
+            out_.AppendLine("  Version  : " + Plugin.Instance.Version);
+            out_.AppendLine("  Exported : " + DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss") + " UTC");
+            out_.AppendLine("  Lines    : " + allSanitized.Count + "  (Errors: " + errorCount + "  Warnings: " + warnCount + "  Info: " + infoCount + ")");
+            out_.AppendLine("  Files    : " + (sections.Count > 0 ? string.Join(", ", sections.ConvertAll(s => s.FileName)) : "none"));
+            out_.AppendLine();
+            out_.AppendLine("  Credentials, IPs, and provider hostnames have been redacted.");
+            out_.AppendLine("  Safe to share for support purposes.");
+            out_.AppendLine("================================================================");
+            out_.AppendLine();
+
+            if (allSanitized.Count == 0)
+            {
+                out_.AppendLine("No XC2EMBY-related log entries found in the last 5 log files.");
+                out_.AppendLine("Try reproducing the issue then downloading again.");
+            }
+            else
+            {
+                // ── Errors & Warnings first ───────────────────────────────────────
+                var problems = allSanitized.Where(x =>
+                    x.Line.IndexOf(" Error ", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    x.Line.IndexOf("|ERROR|", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    x.Line.IndexOf(" Warn ", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    x.Line.IndexOf("|WARN|", StringComparison.OrdinalIgnoreCase) >= 0).ToList();
+
+                if (problems.Count > 0)
+                {
+                    out_.AppendLine("━━━ ERRORS & WARNINGS (" + problems.Count + ") ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                    out_.AppendLine();
+                    foreach (var (_, line) in problems)
+                        out_.AppendLine(line);
+                    out_.AppendLine();
+                }
+
+                // ── Full log by file ─────────────────────────────────────────────
+                out_.AppendLine("━━━ FULL LOG (" + allSanitized.Count + " lines) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                string currentFile = null;
+                foreach (var (file, line) in allSanitized)
+                {
+                    if (file != currentFile)
+                    {
+                        out_.AppendLine();
+                        out_.AppendLine("── " + file + " ──────────────────────────────────────────────────");
+                        currentFile = file;
+                    }
+                    out_.AppendLine(line);
+                }
+            }
+
+            // ── Footer ────────────────────────────────────────────────────────────
+            out_.AppendLine();
+            out_.AppendLine("================================================================");
+            out_.AppendLine("  End of log export");
+            out_.AppendLine("================================================================");
+
+            var filename = "xc2emby-log-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + ".txt";
+            var stream = new MemoryStream(Encoding.UTF8.GetBytes(out_.ToString()));
             var headers = new Dictionary<string, string>
             {
-                { "Content-Disposition", "attachment; filename=\"xtream-tuner-log.txt\"" },
+                { "Content-Disposition", "attachment; filename=\"" + filename + "\"" },
             };
             return ResultFactory.GetResult(Request, stream, "text/plain", headers);
         }
