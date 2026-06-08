@@ -45,7 +45,10 @@
 
 ## Features Overview
 
-### Current Release: v1.1.77
+### Current Release: v1.1.78
+
+**v1.1.78**
+- Fixed sanitized log still showing garbled characters. Emby's `ResultFactory` ignores the `charset` parameter on `text/plain` responses, so declaring UTF-8 had no effect. Replaced all Unicode box-drawing/arrow characters in the log structure (`━`, `─`, `—`) with plain ASCII equivalents (`=`, `-`). Additionally, Emby's HTTP request logger injects Unicode delimiter characters around IP addresses and hostnames in its own log lines; these are now stripped from all log content lines before writing to the export, producing clean readable output (`plex.webhop.me` instead of `plex.webhop.me`).
 
 **v1.1.77**
 - Fixed sanitized log download rendering as garbled characters on most viewers. The response now explicitly declares `charset=utf-8` so browsers and text editors correctly interpret the UTF-8 encoded output. Also fixed a false-positive where plugin version numbers in the form `X.X.X.0` (assembly version, e.g. `1.1.76.0` after an upgrade arrow in the log) were incorrectly redacted as IP addresses — the version-protection regex now also covers the `→` and `->` arrow patterns logged during plugin version changes.

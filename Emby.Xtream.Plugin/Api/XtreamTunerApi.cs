@@ -1833,6 +1833,15 @@ namespace Emby.Xtream.Plugin.Api
             catch { }
         }
 
+        private static string StripNonAscii(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return s;
+            var sb = new StringBuilder(s.Length);
+            foreach (var c in s)
+                if (c >= 32 && c <= 126) sb.Append(c);
+            return sb.ToString();
+        }
+
         public object Get(GetSanitizedLogs request)
         {
             var config = Plugin.Instance.Configuration;
@@ -1878,11 +1887,15 @@ namespace Emby.Xtream.Plugin.Api
             }
             catch { }
 
-            // Sanitize all lines
+            // Sanitize all lines and strip non-ASCII (Emby injects Unicode delimiters around HTTP values)
             var allSanitized = new List<(string File, string Line)>();
             foreach (var section in sections)
                 foreach (var raw in section.Lines)
-                    allSanitized.Add((section.FileName, LogSanitizer.SanitizeLine(raw, config.Username, config.Password)));
+                {
+                    var sanitized = LogSanitizer.SanitizeLine(raw, config.Username, config.Password);
+                    sanitized = StripNonAscii(sanitized);
+                    allSanitized.Add((section.FileName, sanitized));
+                }
 
             // Classify by severity for the summary
             int errorCount = 0, warnCount = 0, infoCount = 0;
@@ -1902,7 +1915,7 @@ namespace Emby.Xtream.Plugin.Api
 
             // ── Header ────────────────────────────────────────────────────────────
             out_.AppendLine("================================================================");
-            out_.AppendLine("  XC2EMBY Plugin — Sanitized Log Export");
+            out_.AppendLine("  XC2EMBY Plugin - Sanitized Log Export");
             out_.AppendLine("  Version  : " + Plugin.Instance.Version);
             out_.AppendLine("  Exported : " + DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss") + " UTC");
             out_.AppendLine("  Lines    : " + allSanitized.Count + "  (Errors: " + errorCount + "  Warnings: " + warnCount + "  Info: " + infoCount + ")");
@@ -1929,7 +1942,7 @@ namespace Emby.Xtream.Plugin.Api
 
                 if (problems.Count > 0)
                 {
-                    out_.AppendLine("━━━ ERRORS & WARNINGS (" + problems.Count + ") ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                    out_.AppendLine("=== ERRORS & WARNINGS (" + problems.Count + ") ===================================");
                     out_.AppendLine();
                     foreach (var (_, line) in problems)
                         out_.AppendLine(line);
@@ -1937,14 +1950,14 @@ namespace Emby.Xtream.Plugin.Api
                 }
 
                 // ── Full log by file ─────────────────────────────────────────────
-                out_.AppendLine("━━━ FULL LOG (" + allSanitized.Count + " lines) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                out_.AppendLine("=== FULL LOG (" + allSanitized.Count + " lines) ====================================");
                 string currentFile = null;
                 foreach (var (file, line) in allSanitized)
                 {
                     if (file != currentFile)
                     {
                         out_.AppendLine();
-                        out_.AppendLine("── " + file + " ──────────────────────────────────────────────────");
+                        out_.AppendLine("-- " + file + " --------------------------------------------------");
                         currentFile = file;
                     }
                     out_.AppendLine(line);
