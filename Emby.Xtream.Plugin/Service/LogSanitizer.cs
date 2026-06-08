@@ -24,6 +24,10 @@ namespace Emby.Xtream.Plugin.Service
             @"(https?://)([^/:]+)(:\d+)?(/player_api\.php|/live/|/movie/|/series/)",
             RegexOptions.Compiled);
 
+        private static readonly Regex EmbyTokenRegex = new Regex(
+            @"X-Emby-Token=[a-zA-Z0-9]+",
+            RegexOptions.Compiled);
+
         /// <summary>
         /// Sanitizes a single log line by redacting PII: known credentials, IP addresses,
         /// Xtream URL credentials, emails, and provider hostnames.
@@ -63,6 +67,9 @@ namespace Emby.Xtream.Plugin.Service
 
             // Redact hostnames in stream URLs
             s = ProviderHostRegex.Replace(s, "$1<provider-host>$3$4");
+
+            // Redact Emby auth tokens from HTTP request URLs
+            s = EmbyTokenRegex.Replace(s, "X-Emby-Token=<token-redacted>");
 
             return s;
         }

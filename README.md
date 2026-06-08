@@ -45,7 +45,10 @@
 
 ## Features Overview
 
-### Current Release: v1.1.78
+### Current Release: v1.1.79
+
+**v1.1.79**
+- Fixed Emby auth tokens (`X-Emby-Token`) being exposed in the sanitized log export. Emby includes the session token as a URL query parameter in every HTTP request it logs; the token can be used to authenticate against the server. It is now redacted to `X-Emby-Token=<token-redacted>` in all exported log lines.
 
 **v1.1.78**
 - Fixed sanitized log still showing garbled characters. Emby's `ResultFactory` ignores the `charset` parameter on `text/plain` responses, so declaring UTF-8 had no effect. Replaced all Unicode box-drawing/arrow characters in the log structure (`━`, `─`, `—`) with plain ASCII equivalents (`=`, `-`). Additionally, Emby's HTTP request logger injects Unicode delimiter characters around IP addresses and hostnames in its own log lines; these are now stripped from all log content lines before writing to the export, producing clean readable output (`plex.webhop.me` instead of `plex.webhop.me`).
