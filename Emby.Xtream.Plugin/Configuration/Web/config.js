@@ -4,6 +4,32 @@ function (BaseView, loading) {
 
     var pluginId = 'ff489847-080b-475c-99fc-f448db175b56';
 
+    function stripRoot(val, root) {
+        val = (val || '').trim();
+        root = (root || '').replace(/\/+$/, '');
+        if (root && val.startsWith(root + '/')) return val.slice(root.length + 1);
+        if (root && val === root) return '';
+        return val;
+    }
+
+    function refreshSubfolderHints(view) {
+        var root = (view.querySelector('.txtStrmLibraryPath').value || '').replace(/\/+$/, '');
+        var pairs = [
+            ['.txtMovieRootFolderName',           '.movieSubfolderHint'],
+            ['.txtDocumentaryRootFolderName',     '.documentarySubfolderHint'],
+            ['.txtSeriesRootFolderName',          '.seriesSubfolderHint'],
+            ['.txtDocuSeriesRootFolderName',      '.docuSeriesSubfolderHint'],
+        ];
+        pairs.forEach(function (p) {
+            var input = view.querySelector(p[0]);
+            var hint  = view.querySelector(p[1]);
+            if (!input || !hint) return;
+            var val = (input.value || '').trim();
+            if (!val) { hint.textContent = ''; return; }
+            hint.textContent = val.startsWith('/') ? val : (root ? root + '/' + val : val);
+        });
+    }
+
     // Use the CSS variable reference directly — the browser resolves it natively.
     // getPropertyValue() returns the *declared* value (e.g. "var(--x)"), not the resolved
     // color, so attempting to parse it in JS always fails. Instead we pass the CSS var
@@ -117,6 +143,12 @@ function (BaseView, loading) {
 
         view.querySelector('.txtStrmLibraryPath').addEventListener('blur', function () {
             validateStrmPath(view);
+            refreshSubfolderHints(view);
+        });
+
+        var subFolderInputs = ['.txtMovieRootFolderName', '.txtDocumentaryRootFolderName', '.txtSeriesRootFolderName', '.txtDocuSeriesRootFolderName'];
+        subFolderInputs.forEach(function (sel) {
+            view.querySelector(sel).addEventListener('input', function () { refreshSubfolderHints(view); });
         });
 
         view.querySelector('.btnBrowseStrmPath').addEventListener('click', function () {
@@ -649,12 +681,14 @@ function (BaseView, loading) {
             instance.selectedDocuSeriesCategoryIds = config.SelectedDocuSeriesCategoryIds || [];
 
             // Sync settings
-            view.querySelector('.txtStrmLibraryPath').value = config.StrmLibraryPath || '/config/xtream';
-            view.querySelector('.txtMovieRootFolderName').value = config.MovieRootFolderName || 'Movies';
-            view.querySelector('.txtDocumentaryRootFolderName').value = config.DocumentaryRootFolderName || 'Documentaries';
-            view.querySelector('.txtSeriesRootFolderName').value = config.SeriesRootFolderName || 'TV Shows';
-            view.querySelector('.txtDocuSeriesRootFolderName').value = config.DocuSeriesRootFolderName || 'Docu Series';
+            var strmRoot = (config.StrmLibraryPath || '/config/xtream').replace(/\/+$/, '');
+            view.querySelector('.txtStrmLibraryPath').value = strmRoot;
+            view.querySelector('.txtMovieRootFolderName').value = stripRoot(config.MovieRootFolderName || 'Movies', strmRoot);
+            view.querySelector('.txtDocumentaryRootFolderName').value = stripRoot(config.DocumentaryRootFolderName || 'Documentaries', strmRoot);
+            view.querySelector('.txtSeriesRootFolderName').value = stripRoot(config.SeriesRootFolderName || 'TV Shows', strmRoot);
+            view.querySelector('.txtDocuSeriesRootFolderName').value = stripRoot(config.DocuSeriesRootFolderName || 'Docu Series', strmRoot);
             validateStrmPath(view);
+            refreshSubfolderHints(view);
             setChecked(view.querySelector('.chkSmartSkipExisting'), config.SmartSkipExisting !== false);
             view.querySelector('.txtSyncParallelism').value = config.SyncParallelism || 3;
             setChecked(view.querySelector('.chkCleanupOrphans'), !!config.CleanupOrphans);

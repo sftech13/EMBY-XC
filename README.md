@@ -45,7 +45,10 @@
 
 ## Features Overview
 
-### Current Release: v1.1.80
+### Current Release: v1.1.81
+
+**v1.1.81**
+- Improved Library Paths UX in Settings. Sub-folder fields (Movies, Documentaries, TV Shows, Docu Series) now display just the folder name instead of the full path when the value is directly under the STRM root (e.g. `Movies` instead of `/media/m3u2strm/Movies`). A small computed full-path hint appears below each field and updates live as you type, so the resolved location is always visible.
 
 **v1.1.80**
 - Fixed Emby auth token (`X-Emby-Token`) still leaking in sanitized log exports. Emby wraps token values in non-ASCII Unicode delimiter characters in its HTTP request log lines, causing the sanitizer regex to miss the match. Non-ASCII stripping now runs before sanitization so the regex sees clean text. Also fixed the "Legacy config migration skipped" message appearing in the Errors & Warnings section on every restart — it is a benign informational event (the plugin works correctly regardless) and is now logged at Info level instead of Warn.
