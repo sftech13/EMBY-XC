@@ -45,16 +45,7 @@
 
 ## Features Overview
 
-### Current Release: v1.1.98
-
-**v1.1.98**
-- Added provider health broadcast notifications. When the IPTV provider goes down or comes back online, all active Emby sessions receive a popup: **"Service Disruption"** / **"Service Restored"**. Only fires on state transitions — one notification per outage, not once per health check. Admin test endpoint available at `GET /XC2EMBY/TestNotification?api_key=<key>`.
-
-**v1.1.97**
-- Fixed provider health status dot inheriting the Emby theme accent color (appeared pink on pink themes). The dot now uses fixed semantic colors: green when the provider is reachable, red on consecutive failures, grey before the first check — regardless of the active Emby theme.
-
-**v1.1.96**
-- Added live provider health monitoring. A status dot in the plugin header shows whether the IPTV provider is currently reachable. The UI polls every 2 minutes; a background scheduled task (`XC2EMBY - Provider Health Check`) runs every 5 minutes. An initial check fires 15 seconds after Emby startup so the dot is populated immediately rather than waiting for the first scheduled run. Test Connection now shows provider account status, expiry date, and max allowed streams. Max Simultaneous Streams is auto-set from the provider on test — no longer a manual field.
+> Current release: **v1.1.101** — see [CHANGELOG.md](CHANGELOG.md) for full version history.
 
 ### Live TV
 - Registers as a native Emby tuner host — channels appear in Live TV just like any other tuner
