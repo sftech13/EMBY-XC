@@ -1474,6 +1474,7 @@ namespace Emby.Xtream.Plugin.Api
             XtreamTunerHost.Instance?.InvalidateChannelCacheTime();
             XtreamServerEntryPoint.Instance?.TriggerChannelRescan();
             XtreamServerEntryPoint.Instance?.TriggerGuideRefresh();
+            XtreamServerEntryPoint.Instance?.TriggerEmbyGuideRefresh();
         }
 
         public object Post(RefreshLogos request)

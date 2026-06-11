@@ -12,6 +12,7 @@ using MediaBrowser.Controller.Plugins;
 using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.LiveTv;
 using MediaBrowser.Model.Logging;
+using MediaBrowser.Model.Tasks;
 using ITunerHost = MediaBrowser.Controller.LiveTv.ITunerHost;
 using IListingsProvider = MediaBrowser.Controller.LiveTv.IListingsProvider;
 
@@ -350,6 +351,35 @@ namespace Emby.Xtream.Plugin.Service
             catch (Exception ex)
             {
                 _logger.Warn("TriggerChannelRescan failed: {0}", ex.Message);
+            }
+        }
+
+        internal void TriggerEmbyGuideRefresh()
+        {
+            try
+            {
+                var taskManager = _appHost.Resolve<ITaskManager>();
+                if (taskManager == null)
+                {
+                    _logger.Warn("TriggerEmbyGuideRefresh: ITaskManager not available");
+                    return;
+                }
+
+                var task = taskManager.ScheduledTasks
+                    .FirstOrDefault(t => string.Equals(t.ScheduledTask.Key, "RefreshGuide", StringComparison.OrdinalIgnoreCase));
+
+                if (task == null)
+                {
+                    _logger.Warn("TriggerEmbyGuideRefresh: RefreshGuide task not found");
+                    return;
+                }
+
+                taskManager.Execute(task, new TaskOptions());
+                _logger.Info("Emby RefreshGuide task queued for full channel reconciliation");
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn("TriggerEmbyGuideRefresh failed: {0}", ex.Message);
             }
         }
 

@@ -199,7 +199,7 @@ namespace Emby.Xtream.Plugin.Service
             {
                 _stream?.Dispose();
                 _response?.Dispose();
-                _httpClient?.Dispose();
+                // _httpClient is a shared instance from Plugin.CreateHttpClient() — do not dispose it
                 _disposed = true;
             }
         }

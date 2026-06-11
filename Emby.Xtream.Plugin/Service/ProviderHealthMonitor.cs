@@ -58,36 +58,30 @@ namespace Emby.Xtream.Plugin.Service
 
             try
             {
-                using (var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+                var client = Plugin.CreateHttpClient(10);
+                var response = await client.GetStringAsync(url).ConfigureAwait(false);
+                using (var doc = System.Text.Json.JsonDocument.Parse(response))
                 {
-                    cts.CancelAfter(TimeSpan.FromSeconds(8));
-                    using (var client = Plugin.CreateHttpClient(10))
+                    var auth = 0;
+                    if (doc.RootElement.TryGetProperty("user_info", out var userInfo) &&
+                        userInfo.TryGetProperty("auth", out var authEl))
                     {
-                        var response = await client.GetStringAsync(url).ConfigureAwait(false);
-                        using (var doc = System.Text.Json.JsonDocument.Parse(response))
-                        {
-                            var auth = 0;
-                            if (doc.RootElement.TryGetProperty("user_info", out var userInfo) &&
-                                userInfo.TryGetProperty("auth", out var authEl))
-                            {
-                                if (authEl.ValueKind == System.Text.Json.JsonValueKind.Number)
-                                    auth = authEl.GetInt32();
-                                else if (authEl.ValueKind == System.Text.Json.JsonValueKind.String &&
-                                         int.TryParse(authEl.GetString(), out var n))
-                                    auth = n;
-                            }
+                        if (authEl.ValueKind == System.Text.Json.JsonValueKind.Number)
+                            auth = authEl.GetInt32();
+                        else if (authEl.ValueKind == System.Text.Json.JsonValueKind.String &&
+                                 int.TryParse(authEl.GetString(), out var n))
+                            auth = n;
+                    }
 
-                            lock (_lock)
-                            {
-                                prevState = _previousIsReachable;
-                                _isReachable = auth == 1;
-                                _lastChecked = DateTime.UtcNow;
-                                _consecutiveFailures = auth == 1 ? 0 : _consecutiveFailures + 1;
-                                _lastError = auth == 1 ? null : "Provider returned auth=0";
-                                newState = _isReachable;
-                                _previousIsReachable = newState;
-                            }
-                        }
+                    lock (_lock)
+                    {
+                        prevState = _previousIsReachable;
+                        _isReachable = auth == 1;
+                        _lastChecked = DateTime.UtcNow;
+                        _consecutiveFailures = auth == 1 ? 0 : _consecutiveFailures + 1;
+                        _lastError = auth == 1 ? null : "Provider returned auth=0";
+                        newState = _isReachable;
+                        _previousIsReachable = newState;
                     }
                 }
             }
