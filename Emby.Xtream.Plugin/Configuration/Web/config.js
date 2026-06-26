@@ -1485,6 +1485,75 @@ function (BaseView, loading) {
                 }
             } catch (e) { /* ignore parse errors */ }
         }
+        renderOrphanedLiveCategories(view, instance, config.OrphanedLiveCategories);
+    }
+
+    // Flags selected Live TV categories that vanished from the provider's category
+    // list on the last refresh (the provider renumbered the category's ID while
+    // keeping its name) and, when a same-named category exists under a new ID,
+    // offers a one-click fix.
+    function renderOrphanedLiveCategories(view, instance, orphanedJson) {
+        var banner = view.querySelector('.orphanedCategoriesBanner');
+        if (!banner) return;
+
+        var orphaned = [];
+        if (orphanedJson) {
+            try { orphaned = JSON.parse(orphanedJson) || []; } catch (e) { orphaned = []; }
+        }
+
+        if (!orphaned.length) {
+            banner.style.display = 'none';
+            banner.innerHTML = '';
+            return;
+        }
+
+        var html = '<div style="font-weight:600; margin-bottom:0.4em;">&#9888; ' + orphaned.length +
+            ' selected categor' + (orphaned.length === 1 ? 'y' : 'ies') + ' no longer exist' + (orphaned.length === 1 ? 's' : '') +
+            ' on the provider:</div>';
+
+        for (var i = 0; i < orphaned.length; i++) {
+            var o = orphaned[i];
+            html += '<div class="orphanRow" style="display:flex; align-items:center; gap:0.5em; margin:0.3em 0; flex-wrap:wrap;">';
+            html += '<span>"' + escapeHtml(o.Name) + '" (was id ' + o.OldId + ') is gone.</span>';
+            if (o.SuggestedId) {
+                html += '<button type="button" class="raised button-secondary btnApplyOrphanFix" ' +
+                    'data-old-id="' + o.OldId + '" data-new-id="' + o.SuggestedId + '" style="padding:0.2em 0.7em; font-size:0.85em;">' +
+                    'Use "' + escapeHtml(o.SuggestedName) + '" (id ' + o.SuggestedId + ') instead</button>';
+            } else {
+                html += '<span style="opacity:0.7; font-style:italic;">No matching category found by name &mdash; pick a replacement manually below.</span>';
+            }
+            html += '</div>';
+        }
+        html += '<div style="opacity:0.7; font-size:0.85em; margin-top:0.3em;">Click "Use ... instead", then Save to apply.</div>';
+
+        banner.innerHTML = html;
+        banner.style.display = 'block';
+
+        var fixButtons = banner.querySelectorAll('.btnApplyOrphanFix');
+        for (var j = 0; j < fixButtons.length; j++) {
+            fixButtons[j].addEventListener('click', function (e) {
+                var btn = e.currentTarget;
+                var oldId = parseInt(btn.getAttribute('data-old-id'), 10);
+                var newId = parseInt(btn.getAttribute('data-new-id'), 10);
+
+                instance.selectedCategoryIds = (instance.selectedCategoryIds || []).filter(function (id) { return id !== oldId; });
+                if (instance.selectedCategoryIds.indexOf(newId) === -1) {
+                    instance.selectedCategoryIds.push(newId);
+                }
+
+                var newBox = view.querySelector('.categoryCheckbox[data-category-id="' + newId + '"]');
+                if (newBox) newBox.checked = true;
+
+                updateCategoryCountBadge(view, 'live');
+
+                var row = btn.closest ? btn.closest('.orphanRow') : btn.parentNode;
+                if (row && row.parentNode) row.parentNode.removeChild(row);
+                if (!banner.querySelector('.btnApplyOrphanFix')) {
+                    banner.style.display = 'none';
+                    banner.innerHTML = '';
+                }
+            });
+        }
     }
 
     function renderCategoryList(view, listSelector, categories, checkboxClass, selectedIds) {
@@ -1575,6 +1644,12 @@ function (BaseView, loading) {
             view.querySelector('.btnSelectAllCategories').disabled = false;
             view.querySelector('.btnDeselectAllCategories').disabled = false;
             updateCategoryCountBadge(view, 'live');
+
+            // The refresh just recomputed orphaned-category info server-side;
+            // re-fetch the saved config to pick it up and render the banner.
+            ApiClient.getPluginConfiguration(pluginId).then(function (freshConfig) {
+                renderOrphanedLiveCategories(view, instance, freshConfig.OrphanedLiveCategories);
+            }).catch(function () { /* non-critical */ });
         }).catch(function () {
             loadingEl.style.display = 'none';
             listEl.innerHTML = '<div style="color:#cc0000;">Failed to load categories. Save your connection settings first, then try again.</div>';

@@ -4,6 +4,10 @@ All notable changes to XC2EMBY are listed here, newest first.
 
 ---
 
+## v1.1.102
+- Added orphaned-category detection for Live TV categories: when a provider renumbers a category's ID (e.g. Peacock 24 → 102), the old ID silently vanishes from future category lists while staying selected. "Refresh Categories" now diffs the previous and fresh category lists, flags any selected ID that disappeared, and — when a category with the same name reappears under a new ID — suggests it as the replacement with a one-click "Use ... instead" button on the config page
+- Fixed deserializing `CachedLiveCategories` into the wrong DTO: `Category` carries Xtream-API snake_case `JsonPropertyName` attributes (`category_id`/`category_name`) that don't match the cache's plain `CategoryId`/`CategoryName` shape, silently zeroing every entry; added a dedicated `CachedCategoryEntry` DTO for the cache format
+
 ## v1.1.101
 - Fixed `ProviderHealthMonitor` disposing the shared `HttpClient` — `using` wrapper removed; static shared instance must never be disposed
 - Fixed `XtreamLiveStream.Dispose()` calling `_httpClient?.Dispose()` — every stream stop was destroying the shared client for all subsequent API calls

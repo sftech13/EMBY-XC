@@ -92,6 +92,11 @@ namespace Emby.Xtream.Plugin
         public string CachedSeriesCategories { get; set; } = string.Empty;
         public string CachedLiveCategories { get; set; } = string.Empty;
 
+        // Selected live category IDs that vanished from the provider's category list
+        // on the most recent refresh (JSON array of OrphanedLiveCategory), with a
+        // same-name match in the fresh list suggested as the likely replacement.
+        public string OrphanedLiveCategories { get; set; } = string.Empty;
+
         // Update tracking
         public string LastInstalledVersion { get; set; } = string.Empty;
         public bool UseBetaChannel { get; set; }

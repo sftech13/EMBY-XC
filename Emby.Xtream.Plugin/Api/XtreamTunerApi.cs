@@ -34,6 +34,25 @@ namespace Emby.Xtream.Plugin.Api
     {
     }
 
+    // A selected live category ID that no longer appears in the provider's category
+    // list, with a same-name match in the fresh list suggested as the likely replacement.
+    public class OrphanedLiveCategory
+    {
+        public int OldId { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public int? SuggestedId { get; set; }
+        public string SuggestedName { get; set; } = string.Empty;
+    }
+
+    // Matches the plain {CategoryId, CategoryName} shape written to CachedLiveCategories.
+    // Category itself can't be reused here — its JsonPropertyName attributes target the
+    // Xtream API's snake_case fields (category_id/category_name), not this cache's shape.
+    public class CachedCategoryEntry
+    {
+        public int CategoryId { get; set; }
+        public string CategoryName { get; set; } = string.Empty;
+    }
+
     [Authenticated(Roles = "Admin")]
     [Route("/XC2EMBY/RefreshCache", "POST", Summary = "Invalidates M3U and EPG caches")]
     public class RefreshCache : IReturnVoid
@@ -435,12 +454,72 @@ namespace Emby.Xtream.Plugin.Api
             var liveTvService = Plugin.Instance.LiveTvService;
             var categories = await liveTvService.GetLiveCategoriesAsync(CancellationToken.None).ConfigureAwait(false);
 
+            DetectOrphanedLiveCategories(config, categories);
+
             // Cache for instant UI loading
             config.CachedLiveCategories = System.Text.Json.JsonSerializer.Serialize(
                     categories.Select(c => new { c.CategoryId, c.CategoryName }).ToList());
             Plugin.Instance.SaveConfiguration();
 
             return categories;
+        }
+
+        // Providers occasionally renumber a category's ID while keeping its name
+        // (e.g. Peacock 24 -> 102). The old ID then silently vanishes from future
+        // category lists, leaving its checkbox selected but orphaned. Compare the
+        // previous cached list against the fresh one so the UI can flag it and,
+        // when a category with the same name reappears under a new ID, suggest it.
+        private static void DetectOrphanedLiveCategories(PluginConfiguration config, List<Category> freshCategories)
+        {
+            var selectedIds = config.SelectedLiveCategoryIds ?? Array.Empty<int>();
+            if (selectedIds.Length == 0 || string.IsNullOrEmpty(config.CachedLiveCategories))
+            {
+                config.OrphanedLiveCategories = string.Empty;
+                return;
+            }
+
+            List<CachedCategoryEntry> previousCategories;
+            try
+            {
+                previousCategories = System.Text.Json.JsonSerializer.Deserialize<List<CachedCategoryEntry>>(config.CachedLiveCategories)
+                    ?? new List<CachedCategoryEntry>();
+            }
+            catch
+            {
+                config.OrphanedLiveCategories = string.Empty;
+                return;
+            }
+
+            var freshIds = new HashSet<int>(freshCategories.Select(c => c.CategoryId));
+            var freshNameToId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var c in freshCategories)
+            {
+                if (!freshNameToId.ContainsKey(c.CategoryName))
+                    freshNameToId[c.CategoryName] = c.CategoryId;
+            }
+
+            var previousNameById = previousCategories
+                .GroupBy(c => c.CategoryId)
+                .ToDictionary(g => g.Key, g => g.First().CategoryName);
+
+            var orphaned = new List<OrphanedLiveCategory>();
+            foreach (var id in selectedIds)
+            {
+                if (freshIds.Contains(id)) continue;
+                if (!previousNameById.TryGetValue(id, out var name)) continue;
+
+                var orphan = new OrphanedLiveCategory { OldId = id, Name = name };
+                if (freshNameToId.TryGetValue(name, out var suggestedId))
+                {
+                    orphan.SuggestedId = suggestedId;
+                    orphan.SuggestedName = name;
+                }
+                orphaned.Add(orphan);
+            }
+
+            config.OrphanedLiveCategories = orphaned.Count > 0
+                ? System.Text.Json.JsonSerializer.Serialize(orphaned)
+                : string.Empty;
         }
 
         public async Task<object> Get(GetVodCategories request)
