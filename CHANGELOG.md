@@ -4,6 +4,9 @@ All notable changes to XC2EMBY are listed here, newest first.
 
 ---
 
+## v1.1.103
+- Fixed `TypeLoadException` on Emby 4.10: `ILiveStream` gained `AddConsumer(string id)` and `RemoveConsumer(string id)` in 4.10.0.x and changed `ConsumerCount` to read-only; `XtreamLiveStream` now implements both methods (backed by an interlocked counter) so the plugin loads on 4.10 while remaining compatible with 4.8/4.9
+
 ## v1.1.102
 - Added orphaned-category detection for Live TV categories: when a provider renumbers a category's ID (e.g. Peacock 24 → 102), the old ID silently vanishes from future category lists while staying selected. "Refresh Categories" now diffs the previous and fresh category lists, flags any selected ID that disappeared, and — when a category with the same name reappears under a new ID — suggests it as the replacement with a one-click "Use ... instead" button on the config page
 - Fixed deserializing `CachedLiveCategories` into the wrong DTO: `Category` carries Xtream-API snake_case `JsonPropertyName` attributes (`category_id`/`category_name`) that don't match the cache's plain `CategoryId`/`CategoryName` shape, silently zeroing every entry; added a dedicated `CachedCategoryEntry` DTO for the cache format

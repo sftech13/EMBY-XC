@@ -32,7 +32,14 @@ namespace Emby.Xtream.Plugin.Service
             DateOpened = DateTimeOffset.UtcNow;
         }
 
-        public int ConsumerCount { get; set; }
+        // Emby 4.10+ replaced the ConsumerCount setter with explicit AddConsumer/RemoveConsumer(string id).
+        // Keep the setter so the class still satisfies the 4.8 interface (which requires get;set;);
+        // the extra setter is ignored by 4.10's read-only interface slot.
+        private int _consumerCount;
+        public int ConsumerCount { get => _consumerCount; set => _consumerCount = value; }
+        public void AddConsumer(string id) => System.Threading.Interlocked.Increment(ref _consumerCount);
+        public void RemoveConsumer(string id) => System.Threading.Interlocked.Decrement(ref _consumerCount);
+
         public string OriginalStreamId { get; set; }
         public string TunerHostId { get; }
         public bool EnableStreamSharing => true;

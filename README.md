@@ -45,7 +45,7 @@
 
 ## Features Overview
 
-> Current release: **v1.1.102** — see [CHANGELOG.md](CHANGELOG.md) for full version history.
+> Current release: **v1.1.103** — see [CHANGELOG.md](CHANGELOG.md) for full version history.
 
 ### Live TV
 - Registers as a native Emby tuner host — channels appear in Live TV just like any other tuner
