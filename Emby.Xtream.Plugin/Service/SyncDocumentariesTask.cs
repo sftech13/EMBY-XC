@@ -49,6 +49,16 @@ namespace Emby.Xtream.Plugin.Service
                 return;
             }
 
+            var health = Plugin.Instance.ProviderHealth;
+            var lastChecked = health.LastChecked;
+            if (lastChecked.HasValue &&
+                (DateTime.UtcNow - lastChecked.Value).TotalMinutes < 15 &&
+                !health.IsReachable)
+            {
+                _logger.Warn("Skipping scheduled documentary sync — provider is unreachable (last error: {0}). Will retry at next scheduled time.", health.LastError ?? "unknown");
+                return;
+            }
+
             var docConfig = BuildDocumentaryConfig(config);
             progress.Report(0);
             await svc.SyncMoviesAsync(

@@ -4,6 +4,10 @@ All notable changes to XC2EMBY are listed here, newest first.
 
 ---
 
+## v1.1.105
+- Added provider health gate to all four scheduled sync tasks: if the health monitor marked the provider unreachable within the last 15 minutes, the sync is skipped with a warning instead of firing thousands of API requests against a down server
+- Added orphan-cleanup guard in series sync: if more than 40% of series returned HTTP errors from the provider during a run (e.g. 429 rate-limit flood during an outage), orphan cleanup is skipped for that run — prevents the "empty writtenPaths during degraded sync → entire library flagged orphaned" scenario; cleanup resumes automatically on the next successful run
+
 ## v1.1.104
 - Fixed `TypeLoadException` on Emby 4.10 (second attempt): v1.1.103 added `AddConsumer`/`RemoveConsumer` as plain public methods, but the C# compiler does not emit `.override` (MethodImpl) entries for plain public methods — it only does so for explicit or virtual interface implementations. Switched to explicit interface implementation (`void ILiveStream.AddConsumer(string id)`), which forces the required MethodImpl table entry. Also replaced the 4.8 NuGet SDK reference with direct references to the Emby 4.10.0.17 DLLs (`libs/emby410/`) so the compiler has the correct interface definition to generate against; bumped `System.Memory` to 4.6.3 to match the 4.10 DLL's dependency
 

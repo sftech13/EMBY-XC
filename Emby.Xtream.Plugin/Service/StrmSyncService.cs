@@ -1272,9 +1272,28 @@ namespace Emby.Xtream.Plugin.Service
 
                 await Task.WhenAll(tasks).ConfigureAwait(false);
 
+                // Guard: if the provider was returning errors for a large fraction of series
+                // (e.g. 429 rate-limit flood during an outage), skip orphan cleanup entirely.
+                // An empty writtenPaths from a degraded run would mark the whole library as
+                // orphaned; the safety threshold catches it but this is a cleaner early exit.
+                bool skipOrphansHighErrorRate = false;
+                if (sp.Total > 10 && providerErrorSkippedCount > 0)
+                {
+                    double errorRatio = (double)providerErrorSkippedCount / sp.Total;
+                    if (errorRatio > 0.40)
+                    {
+                        skipOrphansHighErrorRate = true;
+                        _logger.Warn(
+                            "Orphan cleanup skipped: {0}/{1} ({2:P0}) series returned HTTP errors from the provider — " +
+                            "provider was likely down or rate-limiting during this sync. " +
+                            "Orphan cleanup will run on the next successful sync.",
+                            providerErrorSkippedCount, sp.Total, errorRatio);
+                    }
+                }
+
                 // Cleanup orphans
                 cancellationToken.ThrowIfCancellationRequested();
-                if (config.CleanupOrphans)
+                if (config.CleanupOrphans && !skipOrphansHighErrorRate)
                 {
                     sp.Phase = "Cleaning up orphaned files";
                     var showsRoot = Path.Combine(config.StrmLibraryPath, GetSeriesRootFolderName(config));
