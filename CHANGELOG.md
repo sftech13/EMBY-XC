@@ -4,6 +4,9 @@ All notable changes to XC2EMBY are listed here, newest first.
 
 ---
 
+## v1.1.104
+- Fixed `TypeLoadException` on Emby 4.10 (second attempt): v1.1.103 added `AddConsumer`/`RemoveConsumer` as plain public methods, but the C# compiler does not emit `.override` (MethodImpl) entries for plain public methods — it only does so for explicit or virtual interface implementations. Switched to explicit interface implementation (`void ILiveStream.AddConsumer(string id)`), which forces the required MethodImpl table entry. Also replaced the 4.8 NuGet SDK reference with direct references to the Emby 4.10.0.17 DLLs (`libs/emby410/`) so the compiler has the correct interface definition to generate against; bumped `System.Memory` to 4.6.3 to match the 4.10 DLL's dependency
+
 ## v1.1.103
 - Fixed `TypeLoadException` on Emby 4.10: `ILiveStream` gained `AddConsumer(string id)` and `RemoveConsumer(string id)` in 4.10.0.x and changed `ConsumerCount` to read-only; `XtreamLiveStream` now implements both methods (backed by an interlocked counter) so the plugin loads on 4.10 while remaining compatible with 4.8/4.9
 
