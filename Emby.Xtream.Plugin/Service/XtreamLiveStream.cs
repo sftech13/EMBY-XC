@@ -12,7 +12,7 @@ using MediaBrowser.Model.Logging;
 
 namespace Emby.Xtream.Plugin.Service
 {
-    internal sealed class XtreamLiveStream : ILiveStream, IDisposable
+    internal class XtreamLiveStream : ILiveStream, IDisposable
     {
         private readonly HttpClient _httpClient;
         private readonly ILogger _logger;
@@ -32,15 +32,15 @@ namespace Emby.Xtream.Plugin.Service
             DateOpened = DateTimeOffset.UtcNow;
         }
 
-        // Emby 4.10 changed ILiveStream: ConsumerCount became read-only and
-        // AddConsumer(string)/RemoveConsumer(string) were added in its place.
-        // Explicit interface implementation generates a MethodImpl (.override) entry so
-        // the runtime dispatch table is correctly populated on Emby 4.10.
-        // The public ConsumerCount setter remains for backward compat with 4.8/4.9 callers.
+        // Emby 4.10 added AddConsumer(string)/RemoveConsumer(string) to ILiveStream and made
+        // ConsumerCount read-only. Declaring these as virtual (not explicit interface impl) lets
+        // the CLR find them via vtable name+signature fallback on 4.10 without requiring
+        // compile-time knowledge of the 4.10 interface — so the same binary works on 4.8/4.9
+        // (where ILiveStream has no AddConsumer slot) and on 4.10 (where it does).
         private int _consumerCount;
         public int ConsumerCount { get => _consumerCount; set => _consumerCount = value; }
-        void ILiveStream.AddConsumer(string id) => System.Threading.Interlocked.Increment(ref _consumerCount);
-        void ILiveStream.RemoveConsumer(string id) => System.Threading.Interlocked.Decrement(ref _consumerCount);
+        public virtual void AddConsumer(string id) => System.Threading.Interlocked.Increment(ref _consumerCount);
+        public virtual void RemoveConsumer(string id) => System.Threading.Interlocked.Decrement(ref _consumerCount);
 
         public string OriginalStreamId { get; set; }
         public string TunerHostId { get; }

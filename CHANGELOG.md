@@ -4,6 +4,9 @@ All notable changes to XC2EMBY are listed here, newest first.
 
 ---
 
+## v1.1.106
+- Fixed plugin failing to load on Emby 4.9.x after v1.1.104 switched to direct 4.10.0.17 DLL references: compiling against `MediaBrowser.Controller 4.10.0.17` with `Private=false` hard-bakes that exact version into the plugin manifest — Emby's binding redirects only satisfy old→new (4.8→4.9), not new→old (4.10→4.9), so the plugin failed at assembly load time on 4.9. Reverted csproj to the `mediabrowser.server.core 4.8.0.80` NuGet package so the compiled manifest references `4.8.x`, which is satisfied by both 4.9 and 4.10 via standard binding redirects. Changed `AddConsumer`/`RemoveConsumer` from explicit interface implementations (which required 4.10 DLLs to compile) to `public virtual` methods — virtual methods live in the vtable and the .NET 8 CLR finds them via name+signature fallback when resolving new interface slots on 4.10, while on 4.9 (where `ILiveStream` has no `AddConsumer` slot) they are harmless extra virtual methods
+
 ## v1.1.105
 - Added provider health gate to all four scheduled sync tasks: if the health monitor marked the provider unreachable within the last 15 minutes, the sync is skipped with a warning instead of firing thousands of API requests against a down server
 - Added orphan-cleanup guard in series sync: if more than 40% of series returned HTTP errors from the provider during a run (e.g. 429 rate-limit flood during an outage), orphan cleanup is skipped for that run — prevents the "empty writtenPaths during degraded sync → entire library flagged orphaned" scenario; cleanup resumes automatically on the next successful run

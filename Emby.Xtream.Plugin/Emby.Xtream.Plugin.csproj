@@ -5,7 +5,7 @@
     <LangVersion>7.3</LangVersion>
     <AssemblyName>XC2EMBY.Plugin</AssemblyName>
     <RootNamespace>Emby.Xtream.Plugin</RootNamespace>
-    <VersionPrefix>1.1.105</VersionPrefix>
+    <VersionPrefix>1.1.106</VersionPrefix>
     <VersionSuffix></VersionSuffix>
     <Version Condition="'$(VersionSuffix)' == ''">$(VersionPrefix)</Version>
     <Version Condition="'$(VersionSuffix)' != ''">$(VersionPrefix)-$(VersionSuffix)</Version>
@@ -18,26 +18,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Reference Emby 4.10 DLLs directly; 4.10 changed ILiveStream (AddConsumer/RemoveConsumer).
-         The NuGet SDK package (mediabrowser.server.core) lags behind the actual server release.
-         DLLs extracted from embyserver-netcore_4.10.0.17.zip — update libs/emby410/ when targeting
-         a newer Emby release. -->
-    <Reference Include="MediaBrowser.Controller">
-      <HintPath>..\libs\emby410\MediaBrowser.Controller.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="MediaBrowser.Model">
-      <HintPath>..\libs\emby410\MediaBrowser.Model.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="MediaBrowser.Common">
-      <HintPath>..\libs\emby410\MediaBrowser.Common.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="Emby.Naming">
-      <HintPath>..\libs\emby410\Emby.Naming.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
+    <PackageReference Include="mediabrowser.server.core" Version="4.8.0.80" />
     <PackageReference Include="System.Text.Json" Version="8.0.5" />
     <PackageReference Include="System.IO.Pipelines" Version="8.0.0" />
     <PackageReference Include="System.Memory" Version="4.6.3" />
