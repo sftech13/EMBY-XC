@@ -38,9 +38,27 @@ namespace Emby.Xtream.Plugin.Service
         // compile-time knowledge of the 4.10 interface — so the same binary works on 4.8/4.9
         // (where ILiveStream has no AddConsumer slot) and on 4.10 (where it does).
         private int _consumerCount;
-        public int ConsumerCount { get => _consumerCount; set => _consumerCount = value; }
+        public int ConsumerCount
+        {
+            get => Volatile.Read(ref _consumerCount);
+            set => Interlocked.Exchange(ref _consumerCount, Math.Max(0, value));
+        }
+
         public virtual void AddConsumer(string id) => System.Threading.Interlocked.Increment(ref _consumerCount);
-        public virtual void RemoveConsumer(string id) => System.Threading.Interlocked.Decrement(ref _consumerCount);
+        public virtual void RemoveConsumer(string id)
+        {
+            // Emby can issue a duplicate removal while a client is rapidly changing channels.
+            // Never expose -1: Emby's close path relies on the count reaching zero, and a
+            // negative count can leave an unused ILiveStream registered until server restart.
+            int current;
+            do
+            {
+                current = Volatile.Read(ref _consumerCount);
+                if (current == 0)
+                    return;
+            }
+            while (Interlocked.CompareExchange(ref _consumerCount, current - 1, current) != current);
+        }
 
         public string OriginalStreamId { get; set; }
         public string TunerHostId { get; }

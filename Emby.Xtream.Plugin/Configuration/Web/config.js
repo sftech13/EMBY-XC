@@ -1272,9 +1272,18 @@ function (BaseView, loading) {
             dataType: 'json',
             data: JSON.stringify({ BaseUrl: url, Username: user, Password: pass })
         }).then(function (result) {
-            setPillResult(resultEl, result.Success, result.Message);
             if (result.Success && result.MaxConnections > 0) {
-                view.querySelector('.txtTunerCount').value = result.MaxConnections;
+                // Keep headroom above the provider-reported connection count. Emby's live-TV
+                // lifecycle can briefly overlap the old and new tuner while changing channels,
+                // so matching the provider count exactly can reject an otherwise valid tune.
+                var tunerCapacity = Math.min(
+                    2147483647,
+                    result.MaxConnections * 2);
+                view.querySelector('.txtTunerCount').value = tunerCapacity;
+                setPillResult(resultEl, true,
+                    result.Message + ' · XC2EMBY tuner capacity ' + tunerCapacity);
+            } else {
+                setPillResult(resultEl, result.Success, result.Message);
             }
         }).catch(function () {
             setPillResult(resultEl, false, 'Connection test request failed. Check the Emby server logs.');

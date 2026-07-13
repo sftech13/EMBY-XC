@@ -4,6 +4,10 @@ All notable changes to XC2EMBY are listed here, newest first.
 
 ---
 
+## v1.1.107
+- Double the provider-reported connection limit when deriving XC2EMBY tuner capacity, leaving room for brief channel-change overlap.
+- Prevent live-stream consumer counts from becoming negative during duplicate removals, which could leave stale tuner registrations until restart.
+
 ## v1.1.106
 - Fixed plugin failing to load on Emby 4.9.x after v1.1.104 switched to direct 4.10.0.17 DLL references: compiling against `MediaBrowser.Controller 4.10.0.17` with `Private=false` hard-bakes that exact version into the plugin manifest — Emby's binding redirects only satisfy old→new (4.8→4.9), not new→old (4.10→4.9), so the plugin failed at assembly load time on 4.9. Reverted csproj to the `mediabrowser.server.core 4.8.0.80` NuGet package so the compiled manifest references `4.8.x`, which is satisfied by both 4.9 and 4.10 via standard binding redirects. Changed `AddConsumer`/`RemoveConsumer` from explicit interface implementations (which required 4.10 DLLs to compile) to `public virtual` methods — virtual methods live in the vtable and the .NET 8 CLR finds them via name+signature fallback when resolving new interface slots on 4.10, while on 4.9 (where `ILiveStream` has no `AddConsumer` slot) they are harmless extra virtual methods
 
