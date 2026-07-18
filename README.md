@@ -72,7 +72,7 @@
 ### VOD Movies
 - Syncs Xtream VOD catalog into `.strm` files for Emby library scanning
 - Two folder layout modes in the UI: single folder or custom multi-folder category mapping
-- Smart delta sync — only processes items added since the last run
+- Normalized URL change detection — existing `.strm` files are read and rewritten only when their effective URL changes
 - Optional **Skip Local Media** filter skips XC items already present in your Emby library
 - Optional TMDb folder naming (`Movie Title [tmdbid=123]`) with fallback lookup through Emby
 - Optional Kodi-compatible `.nfo` sidecar files
@@ -86,7 +86,7 @@
 ### TV Shows
 - Syncs Xtream series into `Show/Season XX/Episode.strm` folder structure
 - Same folder modes as movies, plus TVDb/TMDb folder naming
-- Episode hash detection skips unchanged series even when the provider bumps timestamps
+- Episode hashes retain provider delta state, while every local episode URL is verified before any write
 - TVDb ID manual overrides per series name
 - Optional TVDb and TMDB fallback lookups through Emby's provider stack
 - Optional `tvshow.nfo` and per-episode `.nfo` sidecar files with real stream details (codec, resolution, audio) from the provider — prevents Emby from probing STRM episode streams
@@ -604,9 +604,11 @@ When **Skip Local Media** is also enabled, STRMs for items matched against your 
 ### Smart Skip Interaction
 
 Smart skip and orphan cleanup work together:
-- Smart skip avoids re-writing files for unchanged items
+- Normalized URL comparison avoids re-writing files for unchanged items, including harmless URL formatting differences
 - Orphan cleanup removes files for items that have been removed from the provider
 - Both can be active simultaneously
+
+When a completed Movies, Documentaries, TV Shows, or DocuSeries sync adds, changes, or deletes files, XC2EMBY queues one Emby library scan. Unchanged runs do not queue a scan. This is designed for generated libraries with Emby real-time monitoring disabled.
 
 ---
 

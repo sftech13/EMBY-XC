@@ -24,6 +24,8 @@ namespace Emby.Xtream.Plugin.Service
         public int Skipped;
         public int Failed;
         public int Added;
+        public int Changed;
+        public int NfoChanged;
         public int Deleted;
         public volatile bool IsRunning;
 
@@ -75,6 +77,13 @@ namespace Emby.Xtream.Plugin.Service
 
     public class StrmSyncService
     {
+        internal enum StrmWriteResult
+        {
+            Unchanged,
+            Added,
+            Changed,
+        }
+
         private static readonly STJ.JsonSerializerOptions JsonOptions = new STJ.JsonSerializerOptions
         {
             NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString,
@@ -132,6 +141,76 @@ namespace Emby.Xtream.Plugin.Service
             var completed = Volatile.Read(ref syncProgress.Completed);
             var pct = Math.Min(100.0, (double)completed / total * 100.0);
             taskProgress.Report(pct);
+        }
+
+        internal static string NormalizeStreamUrl(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+
+            var normalized = value.Trim().TrimStart('\uFEFF');
+            Uri uri;
+            if (!Uri.TryCreate(normalized, UriKind.Absolute, out uri))
+                return normalized;
+
+            var builder = new UriBuilder(uri)
+            {
+                Scheme = uri.Scheme.ToLowerInvariant(),
+                Host = uri.Host.ToLowerInvariant(),
+            };
+            if ((builder.Scheme == Uri.UriSchemeHttp && builder.Port == 80) ||
+                (builder.Scheme == Uri.UriSchemeHttps && builder.Port == 443))
+                builder.Port = -1;
+
+            return builder.Uri.AbsoluteUri;
+        }
+
+        internal static StrmWriteResult WriteStrmIfChanged(string path, string intendedUrl)
+        {
+            if (File.Exists(path))
+            {
+                var currentUrl = File.ReadAllText(path);
+                if (string.Equals(
+                    NormalizeStreamUrl(currentUrl),
+                    NormalizeStreamUrl(intendedUrl),
+                    StringComparison.Ordinal))
+                    return StrmWriteResult.Unchanged;
+
+                File.WriteAllText(path, intendedUrl);
+                return StrmWriteResult.Changed;
+            }
+
+            var directory = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
+            File.WriteAllText(path, intendedUrl);
+            return StrmWriteResult.Added;
+        }
+
+        private void QueueEmbyLibraryScanIfChanged(string contentType, params SyncProgress[] progressItems)
+        {
+            var changed = progressItems != null && progressItems.Any(p => p != null &&
+                (Volatile.Read(ref p.Added) > 0 ||
+                 Volatile.Read(ref p.Changed) > 0 ||
+                 Volatile.Read(ref p.NfoChanged) > 0 ||
+                 Volatile.Read(ref p.Deleted) > 0));
+            if (!changed) return;
+
+            try
+            {
+                var host = Plugin.InstanceOrNull?.ApplicationHost;
+                var libraryManager = host?.Resolve<MediaBrowser.Controller.Library.ILibraryManager>();
+                if (libraryManager == null)
+                {
+                    _logger.Warn("{0} sync changed files, but ILibraryManager was unavailable; Emby scan was not queued", contentType);
+                    return;
+                }
+
+                libraryManager.QueueLibraryScan();
+                _logger.Info("{0} sync changed files; queued one Emby library scan", contentType);
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn("{0} sync changed files, but the Emby library scan could not be queued: {1}", contentType, ex.Message);
+            }
         }
 
         public StrmSyncService(ILogger logger, HttpClient httpClient = null)
@@ -637,20 +716,6 @@ namespace Emby.Xtream.Plugin.Service
                             return;
                         }
 
-                        // Smart skip: if file already exists AND the movie is not new (delta), skip
-                        var isNewMovie = lastMovieTs == 0 || movie.Added > lastMovieTs;
-                        if (!isNewMovie && config.SmartSkipExisting && File.Exists(strmPath))
-                        {
-                            lock (writtenPaths)
-                            {
-                                writtenPaths.Add(strmPath);
-                            }
-                            Interlocked.Increment(ref mp.Skipped);
-                            Interlocked.Increment(ref mp.Completed);
-                            ReportTaskProgress(mp, taskProgress);
-                            return;
-                        }
-
                         var ext = !string.IsNullOrEmpty(movie.ContainerExtension)
                             ? movie.ContainerExtension
                             : "mp4";
@@ -660,25 +725,19 @@ namespace Emby.Xtream.Plugin.Service
                             "{0}/movie/{1}/{2}/{3}.{4}",
                             config.BaseUrl, config.Username, config.Password, movie.StreamId, ext);
 
-                        Directory.CreateDirectory(movieDir);
-                        var isAnyNewFile = false;
+                        var strmResult = StrmWriteResult.Unchanged;
                         {
                             cancellationToken.ThrowIfCancellationRequested();
-                            var fileExists = File.Exists(strmPath);
-
-                            // Skip write if file content is already up to date (avoids Emby library re-scan)
-                            if (!fileExists || File.ReadAllText(strmPath) != streamUrl)
-                            {
-                                File.WriteAllText(strmPath, streamUrl);
-                                if (!fileExists)
-                                {
-                                    Interlocked.Increment(ref mp.Added);
-                                    isAnyNewFile = true;
-                                }
-                            }
+                            strmResult = WriteStrmIfChanged(strmPath, streamUrl);
+                            if (strmResult == StrmWriteResult.Added)
+                                Interlocked.Increment(ref mp.Added);
+                            else if (strmResult == StrmWriteResult.Changed)
+                                Interlocked.Increment(ref mp.Changed);
+                            else
+                                Interlocked.Increment(ref mp.Skipped);
                             lock (writtenPaths) { writtenPaths.Add(strmPath); }
                         }
-                        if (isAnyNewFile)
+                        if (strmResult == StrmWriteResult.Added)
                         {
                             lock (addedMovieTitles)
                             {
@@ -686,7 +745,7 @@ namespace Emby.Xtream.Plugin.Service
                             }
                         }
 
-                        if (config.EnableNfoFiles)
+                        if (config.EnableNfoFiles && strmResult != StrmWriteResult.Unchanged)
                         {
                             var nfoPath = Path.Combine(movieDir, folderName + ".nfo");
                             var yearMatch = YearInTitleRegex.Match(cleanedName);
@@ -697,7 +756,11 @@ namespace Emby.Xtream.Plugin.Service
                                 if (int.TryParse(yearMatch.Groups[1].Value, NumberStyles.None, CultureInfo.InvariantCulture, out y))
                                     nfoYear = y;
                             }
-                            try { NfoWriter.WriteMovieNfo(nfoPath, cleanedName, tmdbId, nfoYear); }
+                            try
+                            {
+                                if (NfoWriter.WriteMovieNfo(nfoPath, cleanedName, tmdbId, nfoYear))
+                                    Interlocked.Increment(ref mp.NfoChanged);
+                            }
                             catch (Exception ex) { _logger.Debug("NFO write failed for '{0}': {1}", movie.Name, ex.Message); }
                         }
 
@@ -778,8 +841,9 @@ namespace Emby.Xtream.Plugin.Service
                     }
                 }
 
-                _logger.Info("Movie STRM sync completed: {0} written, {1} skipped, {2} failed",
-                    mp.Completed - mp.Skipped, mp.Skipped, mp.Failed);
+                _logger.Info("Movie STRM sync completed: {0} added, {1} changed, {2} skipped, {3} deleted, {4} failed",
+                    mp.Added, mp.Changed, mp.Skipped, mp.Deleted, mp.Failed);
+                QueueEmbyLibraryScanIfChanged(isDocumentaries ? "Documentary" : "Movie", mp);
             }
             catch (OperationCanceledException)
             {
@@ -913,12 +977,10 @@ namespace Emby.Xtream.Plugin.Service
                 var semaphore = new SemaphoreSlim(config.SyncParallelism);
                 int filterDeletedEpisodes = 0;
 
-                // Episode hash cache: load stored hashes so we can skip file I/O for unchanged series
-                var storedHashes = DeserializeEpisodeHashes(config.SeriesEpisodeHashesJson);
+                // Persist hashes as catalog delta state/diagnostics. URL correctness is decided
+                // by comparing every intended episode URL with the corresponding STRM file.
                 var updatedHashes = new ConcurrentDictionary<string, string>();
-                int hashSkippedCount = 0;
                 int noFolderSkippedCount = 0;
-                int tsSkippedCount = 0;
                 int providerErrorSkippedCount = 0;
 
                 var tasks = allSeries.Select(async series =>
@@ -1040,20 +1102,6 @@ namespace Emby.Xtream.Plugin.Service
                         var seriesDir = Path.Combine(config.StrmLibraryPath, subFolder, folderName);
                         var isNewSeries = !Directory.Exists(seriesDir);
 
-                        if (config.EnableNfoFiles)
-                        {
-                            var showNfoPath = Path.Combine(seriesDir, "tvshow.nfo");
-                            var tvdbIdMatch = Regex.Match(folderName, @"\[tvdbid=(\d+)\]");
-                            var tmdbIdMatch = Regex.Match(folderName, @"\[tmdbid=(\d+)\]");
-                            var showTvdbId = tvdbIdMatch.Success ? tvdbIdMatch.Groups[1].Value : null;
-                            var showTmdbId = tmdbIdMatch.Success ? tmdbIdMatch.Groups[1].Value : null;
-                            if (showTmdbId == null && detail?.Info?.TmdbId != null)
-                                showTmdbId = detail.Info.TmdbId.ToString();
-                            Directory.CreateDirectory(seriesDir);
-                            try { NfoWriter.WriteShowNfo(showNfoPath, seriesName, showTvdbId, showTmdbId); }
-                            catch (Exception ex) { _logger.Debug("Show NFO write failed for '{0}': {1}", seriesName, ex.Message); }
-                        }
-
                         // Track max LastModified for delta state
                         long seriesLm = 0;
                         long.TryParse(series.LastModified, NumberStyles.None, CultureInfo.InvariantCulture, out seriesLm);
@@ -1065,68 +1113,13 @@ namespace Emby.Xtream.Plugin.Service
                             }
                         }
 
-                        // Smart skip: skip unchanged series (delta) that already have episodes on disk
-                        var isChangedSeries = lastSeriesTs == 0 || seriesLm > lastSeriesTs;
-                        if (localSeriesFilter == null && !isChangedSeries && config.SmartSkipExisting && Directory.Exists(seriesDir))
-                        {
-                            var existingStrms = Directory.GetFiles(seriesDir, "*.strm", SearchOption.AllDirectories);
-                            if (existingStrms.Length > 0)
-                            {
-                                // Add existing paths so orphan cleanup doesn't remove them
-                                foreach (var existingStrm in existingStrms)
-                                {
-                                    lock (writtenPaths)
-                                    {
-                                        writtenPaths.Add(existingStrm);
-                                    }
-                                }
-                                Interlocked.Increment(ref tsSkippedCount);
-                                Interlocked.Increment(ref sp.Skipped);
-                                Interlocked.Increment(ref sp.Completed);
-                                ReportTaskProgress(sp, taskProgress);
-                                Interlocked.Add(ref ep.Total, existingStrms.Length);
-                                Interlocked.Add(ref ep.Skipped, existingStrms.Length);
-                                // Carry forward the stored hash (unchanged series)
-                                var seriesKey = series.SeriesId.ToString(CultureInfo.InvariantCulture);
-                                string carryHash;
-                                if (storedHashes.TryGetValue(seriesKey, out carryHash))
-                                    updatedHashes[seriesKey] = carryHash;
-                                return;
-                            }
-                        }
-
-                        // Episode hash skip: compare episode ID+ext hash to detect unchanged content
-                        // even when the provider bumped last_modified globally.
+                        // Retain the episode hash as delta state/diagnostics, but always compare
+                        // each intended URL with its file. Timestamp/hash-only fast paths can miss
+                        // BaseUrl, credential, or extension changes.
                         var currentEpHash = ComputeSeriesEpisodeHash(detail.Episodes);
                         var epHashKey = series.SeriesId.ToString(CultureInfo.InvariantCulture);
                         updatedHashes[epHashKey] = currentEpHash;
-
-                        string previousHash;
-                        if (localSeriesFilter == null
-                            && config.SmartSkipExisting
-                            && storedHashes.TryGetValue(epHashKey, out previousHash)
-                            && previousHash == currentEpHash
-                            && Directory.Exists(seriesDir))
-                        {
-                            var existingStrms = Directory.GetFiles(seriesDir, "*.strm", SearchOption.AllDirectories);
-                            if (existingStrms.Length > 0)
-                            {
-                                foreach (var existingStrm in existingStrms)
-                                {
-                                    lock (writtenPaths)
-                                    {
-                                        writtenPaths.Add(existingStrm);
-                                    }
-                                }
-                                Interlocked.Increment(ref sp.Skipped);
-                                Interlocked.Increment(ref sp.Completed);
-                                ReportTaskProgress(sp, taskProgress);
-                                Interlocked.Add(ref ep.Total, existingStrms.Length);
-                                Interlocked.Add(ref ep.Skipped, existingStrms.Length);
-                                Interlocked.Increment(ref hashSkippedCount);
-                                return;
-                            }
-                        }
+                        var seriesFilesChanged = false;
 
                         foreach (var seasonEntry in detail.Episodes)
                         {
@@ -1197,27 +1190,29 @@ namespace Emby.Xtream.Plugin.Service
                                     "{0}/series/{1}/{2}/{3}.{4}",
                                     config.BaseUrl, config.Username, config.Password, episode.Id, ext);
 
-                                // Skip write if file content is already up to date (avoids Emby library re-scan)
-                                var fileExists = File.Exists(strmPath);
-                                if (!fileExists || File.ReadAllText(strmPath) != streamUrl)
+                                var strmResult = WriteStrmIfChanged(strmPath, streamUrl);
+                                if (strmResult == StrmWriteResult.Added)
                                 {
-                                    Directory.CreateDirectory(seasonDir);
-                                    File.WriteAllText(strmPath, streamUrl);
-
-                                    if (!fileExists)
-                                    {
-                                        Interlocked.Increment(ref ep.Added);
-                                    }
+                                    Interlocked.Increment(ref ep.Added);
+                                    seriesFilesChanged = true;
+                                }
+                                else if (strmResult == StrmWriteResult.Changed)
+                                {
+                                    Interlocked.Increment(ref ep.Changed);
+                                    seriesFilesChanged = true;
                                 }
                                 else
-                                {
                                     Interlocked.Increment(ref ep.Skipped);
-                                }
 
-                                if (config.EnableNfoFiles && episode.Info != null)
+                                if (config.EnableNfoFiles && episode.Info != null &&
+                                    strmResult != StrmWriteResult.Unchanged)
                                 {
                                     var nfoPath = Path.ChangeExtension(strmPath, ".nfo");
-                                    try { NfoWriter.WriteEpisodeNfo(nfoPath, rawEpisodeTitle, seasonNum, episodeNum, episode.Info); }
+                                    try
+                                    {
+                                        if (NfoWriter.WriteEpisodeNfo(nfoPath, rawEpisodeTitle, seasonNum, episodeNum, episode.Info))
+                                            Interlocked.Increment(ref ep.NfoChanged);
+                                    }
                                     catch (Exception ex) { _logger.Warn("WriteEpisodeNfo failed for '{0}': {1}", nfoPath, ex.Message); }
                                 }
 
@@ -1228,6 +1223,23 @@ namespace Emby.Xtream.Plugin.Service
                                     writtenPaths.Add(strmPath);
                                 }
                             }
+                        }
+
+                        if (config.EnableNfoFiles && seriesFilesChanged)
+                        {
+                            var showNfoPath = Path.Combine(seriesDir, "tvshow.nfo");
+                            var tvdbIdMatch = Regex.Match(folderName, @"\[tvdbid=(\d+)\]");
+                            var tmdbIdMatch = Regex.Match(folderName, @"\[tmdbid=(\d+)\]");
+                            var showTvdbId = tvdbIdMatch.Success ? tvdbIdMatch.Groups[1].Value : null;
+                            var showTmdbId = tmdbIdMatch.Success ? tmdbIdMatch.Groups[1].Value : null;
+                            if (showTmdbId == null && detail?.Info?.TmdbId != null)
+                                showTmdbId = detail.Info.TmdbId.ToString();
+                            try
+                            {
+                                if (NfoWriter.WriteShowNfo(showNfoPath, seriesName, showTvdbId, showTmdbId))
+                                    Interlocked.Increment(ref sp.NfoChanged);
+                            }
+                            catch (Exception ex) { _logger.Debug("Show NFO write failed for '{0}': {1}", seriesName, ex.Message); }
                         }
 
                         if (isNewSeries)
@@ -1328,13 +1340,9 @@ namespace Emby.Xtream.Plugin.Service
                     _logger.Warn("Series skip: {0} series had no matching folder mapping (check Series Folder Mode settings)", noFolderSkippedCount);
                 if (providerErrorSkippedCount > 0)
                     _logger.Warn("Series skip: {0} series returned HTTP 4xx from provider (no episodes or provider data issue)", providerErrorSkippedCount);
-                if (tsSkippedCount > 0)
-                    _logger.Info("Series skip: {0} series unchanged by timestamp (already up to date on disk)", tsSkippedCount);
-                if (hashSkippedCount > 0)
-                    _logger.Info("Series skip: {0} series unchanged by episode hash (already up to date on disk)", hashSkippedCount);
-
-                _logger.Info("Series STRM sync completed: {0} written, {1} skipped, {2} failed",
-                    sp.Completed - sp.Skipped, sp.Skipped, sp.Failed);
+                _logger.Info("Series STRM sync completed: {0} episodes added, {1} changed, {2} skipped, {3} deleted, {4} failed",
+                    ep.Added, ep.Changed, ep.Skipped, ep.Deleted, sp.Failed);
+                QueueEmbyLibraryScanIfChanged(isDocuSeries ? "DocuSeries" : "Series", sp, ep);
             }
             catch (OperationCanceledException)
             {
@@ -1450,6 +1458,7 @@ namespace Emby.Xtream.Plugin.Service
                     foreach (var s in succeeded)
                         _failedItems.Remove(s);
                 }
+                QueueEmbyLibraryScanIfChanged("Retry", _retryProgress);
             }
             finally
             {
@@ -1484,23 +1493,18 @@ namespace Emby.Xtream.Plugin.Service
                 "{0}/movie/{1}/{2}/{3}.{4}",
                 config.BaseUrl, config.Username, config.Password, item.StreamId, ext);
 
-            var fileExists = File.Exists(strmPath);
-
-            // Skip write if file content is already up to date (avoids Emby library re-scan)
-            if (!fileExists || File.ReadAllText(strmPath) != streamUrl)
-            {
-                Directory.CreateDirectory(movieDir);
-                File.WriteAllText(strmPath, streamUrl);
-
-                if (!fileExists)
-                {
-                    Interlocked.Increment(ref _retryProgress.Added);
-                }
-            }
+            var strmResult = WriteStrmIfChanged(strmPath, streamUrl);
+            if (strmResult == StrmWriteResult.Added)
+                Interlocked.Increment(ref _retryProgress.Added);
+            else if (strmResult == StrmWriteResult.Changed)
+                Interlocked.Increment(ref _retryProgress.Changed);
+            else
+                Interlocked.Increment(ref _retryProgress.Skipped);
 
             lock (writtenPaths) { writtenPaths.Add(strmPath); }
 
-            if (config.EnableNfoFiles && !string.IsNullOrEmpty(item.TmdbId))
+            if (config.EnableNfoFiles && !string.IsNullOrEmpty(item.TmdbId) &&
+                strmResult != StrmWriteResult.Unchanged)
             {
                 var nfoPath = Path.Combine(movieDir, folderName + ".nfo");
                 var yearMatch = YearInTitleRegex.Match(cleanedName);
@@ -1511,7 +1515,11 @@ namespace Emby.Xtream.Plugin.Service
                     if (int.TryParse(yearMatch.Groups[1].Value, NumberStyles.None, CultureInfo.InvariantCulture, out y))
                         nfoYear = y;
                 }
-                try { NfoWriter.WriteMovieNfo(nfoPath, cleanedName, item.TmdbId, nfoYear); }
+                try
+                {
+                    if (NfoWriter.WriteMovieNfo(nfoPath, cleanedName, item.TmdbId, nfoYear))
+                        Interlocked.Increment(ref _retryProgress.NfoChanged);
+                }
                 catch (Exception ex) { _logger.Debug("NFO write failed on retry for '{0}': {1}", item.Name, ex.Message); }
             }
 
@@ -1560,24 +1568,23 @@ namespace Emby.Xtream.Plugin.Service
                         "{0}/series/{1}/{2}/{3}.{4}",
                         config.BaseUrl, config.Username, config.Password, ep.Id, ext);
 
-                    var fileExists = File.Exists(epPath);
+                    var strmResult = WriteStrmIfChanged(epPath, epUrl);
+                    if (strmResult == StrmWriteResult.Added)
+                        Interlocked.Increment(ref _retryProgress.Added);
+                    else if (strmResult == StrmWriteResult.Changed)
+                        Interlocked.Increment(ref _retryProgress.Changed);
+                    else
+                        Interlocked.Increment(ref _retryProgress.Skipped);
 
-                    // Skip write if file content is already up to date (avoids Emby library re-scan)
-                    if (!fileExists || File.ReadAllText(epPath) != epUrl)
-                    {
-                        Directory.CreateDirectory(seasonDir);
-                        File.WriteAllText(epPath, epUrl);
-
-                        if (!fileExists)
-                        {
-                            Interlocked.Increment(ref _retryProgress.Added);
-                        }
-                    }
-
-                    if (config.EnableNfoFiles && ep.Info != null)
+                    if (config.EnableNfoFiles && ep.Info != null &&
+                        strmResult != StrmWriteResult.Unchanged)
                     {
                         var nfoPath = Path.ChangeExtension(epPath, ".nfo");
-                        try { NfoWriter.WriteEpisodeNfo(nfoPath, rawTitle, seasonNum, episodeNum, ep.Info); }
+                        try
+                        {
+                            if (NfoWriter.WriteEpisodeNfo(nfoPath, rawTitle, seasonNum, episodeNum, ep.Info))
+                                Interlocked.Increment(ref _retryProgress.NfoChanged);
+                        }
                         catch { }
                     }
                 }

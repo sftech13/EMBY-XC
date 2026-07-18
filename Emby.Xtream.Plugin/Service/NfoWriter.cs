@@ -8,12 +8,10 @@ namespace Emby.Xtream.Plugin.Service
 {
     internal static class NfoWriter
     {
-        /// <summary>Writes a Kodi-compatible movie NFO. Skips if no TMDB ID or file exists.</summary>
-        public static void WriteMovieNfo(string nfoPath, string title, string tmdbId, int? year)
+        /// <summary>Writes a Kodi-compatible movie NFO when its generated content changed.</summary>
+        public static bool WriteMovieNfo(string nfoPath, string title, string tmdbId, int? year)
         {
-            if (string.IsNullOrEmpty(tmdbId)) return;
-            if (File.Exists(nfoPath)) return;
-
+            if (string.IsNullOrEmpty(tmdbId)) return false;
             var sb = new StringBuilder();
             sb.AppendLine("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>");
             sb.AppendLine("<movie>");
@@ -23,15 +21,13 @@ namespace Emby.Xtream.Plugin.Service
             sb.AppendFormat("  <uniqueid type=\"tmdb\" default=\"true\">{0}</uniqueid>", tmdbId).AppendLine();
             sb.AppendLine("</movie>");
 
-            File.WriteAllText(nfoPath, sb.ToString(), Encoding.UTF8);
+            return WriteIfChanged(nfoPath, sb.ToString());
         }
 
-        /// <summary>Writes a tvshow.nfo. Skips if no provider ID or file exists.</summary>
-        public static void WriteShowNfo(string nfoPath, string title, string tvdbId, string tmdbId)
+        /// <summary>Writes a tvshow.nfo when its generated content changed.</summary>
+        public static bool WriteShowNfo(string nfoPath, string title, string tvdbId, string tmdbId)
         {
-            if (string.IsNullOrEmpty(tvdbId) && string.IsNullOrEmpty(tmdbId)) return;
-            if (File.Exists(nfoPath)) return;
-
+            if (string.IsNullOrEmpty(tvdbId) && string.IsNullOrEmpty(tmdbId)) return false;
             var sb = new StringBuilder();
             sb.AppendLine("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>");
             sb.AppendLine("<tvshow>");
@@ -45,7 +41,7 @@ namespace Emby.Xtream.Plugin.Service
             }
             sb.AppendLine("</tvshow>");
 
-            File.WriteAllText(nfoPath, sb.ToString(), Encoding.UTF8);
+            return WriteIfChanged(nfoPath, sb.ToString());
         }
 
         /// <summary>
@@ -53,22 +49,35 @@ namespace Emby.Xtream.Plugin.Service
         /// If the file doesn't exist, writes a minimal NFO with streamdetails.
         /// If the file exists with empty &lt;streamdetails /&gt;, patches that tag in-place.
         /// </summary>
-        public static void WriteEpisodeNfo(string nfoPath, string title, int season, int episodeNum, EpisodeMediaInfo info)
+        public static bool WriteEpisodeNfo(string nfoPath, string title, int season, int episodeNum, EpisodeMediaInfo info)
         {
             var streamDetailsXml = BuildStreamDetailsXml(info);
-            if (streamDetailsXml == null) return;
+            if (streamDetailsXml == null) return false;
 
             if (File.Exists(nfoPath))
             {
                 var content = File.ReadAllText(nfoPath, Encoding.UTF8);
-                if (content.IndexOf("<streamdetails />", StringComparison.Ordinal) >= 0 ||
-                    content.IndexOf("<streamdetails/>", StringComparison.Ordinal) >= 0)
+                var emptyDetails = content.IndexOf("<streamdetails />", StringComparison.Ordinal) >= 0 ||
+                                   content.IndexOf("<streamdetails/>", StringComparison.Ordinal) >= 0;
+                if (emptyDetails)
                 {
                     content = content.Replace("<streamdetails />", streamDetailsXml)
                                      .Replace("<streamdetails/>", streamDetailsXml);
-                    File.WriteAllText(nfoPath, content, Encoding.UTF8);
+                    return WriteIfChanged(nfoPath, content);
                 }
-                return;
+
+                var start = content.IndexOf("<streamdetails", StringComparison.Ordinal);
+                var endTag = "</streamdetails>";
+                var end = start >= 0
+                    ? content.IndexOf(endTag, start, StringComparison.Ordinal)
+                    : -1;
+                if (start >= 0 && end >= 0)
+                {
+                    var updated = content.Substring(0, start) + streamDetailsXml +
+                                  content.Substring(end + endTag.Length);
+                    return WriteIfChanged(nfoPath, updated);
+                }
+                return false;
             }
 
             var sb = new StringBuilder();
@@ -84,6 +93,16 @@ namespace Emby.Xtream.Plugin.Service
             sb.AppendLine("  </fileinfo>");
             sb.AppendLine("</episodedetails>");
             File.WriteAllText(nfoPath, sb.ToString(), Encoding.UTF8);
+            return true;
+        }
+
+        private static bool WriteIfChanged(string path, string content)
+        {
+            if (File.Exists(path) && string.Equals(File.ReadAllText(path, Encoding.UTF8), content, StringComparison.Ordinal))
+                return false;
+
+            File.WriteAllText(path, content, Encoding.UTF8);
+            return true;
         }
 
         private static string BuildStreamDetailsXml(EpisodeMediaInfo info)

@@ -4,6 +4,12 @@ All notable changes to XC2EMBY are listed here, newest first.
 
 ---
 
+## v1.1.108
+- Centralized STRM writes across Movies, Documentaries, TV Shows, DocuSeries, and retry operations: existing URLs are normalized and compared before writing, so unchanged files retain their timestamps and do not trigger Emby filesystem activity.
+- Removed timestamp/hash-only series fast paths that could leave stale URLs after a provider extension, base URL, or credential change; episode hashes remain persisted as catalog delta state.
+- NFO generation and patching now runs only for newly added or changed STRM items and reports whether it actually changed a sidecar.
+- Added separate changed-file tracking and queue exactly one Emby library scan after a successful content sync changes the filesystem; unchanged syncs do not request a scan.
+
 ## v1.1.107
 - Double the provider-reported connection limit when deriving XC2EMBY tuner capacity, leaving room for brief channel-change overlap.
 - Prevent live-stream consumer counts from becoming negative during duplicate removals, which could leave stale tuner registrations until restart.
