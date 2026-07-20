@@ -4,6 +4,11 @@ All notable changes to XC2EMBY are listed here, newest first.
 
 ---
 
+## v1.1.109
+- Added an opt-in **Isolate Same-Channel Playback Sessions** setting. Shared mode remains the default to minimize provider connections; isolated mode gives each playback a unique Emby media-source identity so stopping one device cannot close another device watching the same channel.
+- Preserved the playback-offer media-source ID through Emby's live-stream opening handoff while keeping provider URLs, channel lookup, codec probing, and codec caching keyed by the original numeric Xtream stream ID.
+- Added playback-mode and media-source identity logging for diagnosing shared versus isolated session behavior without logging provider credentials.
+
 ## v1.1.108
 - Centralized STRM writes across Movies, Documentaries, TV Shows, DocuSeries, and retry operations: existing URLs are normalized and compared before writing, so unchanged files retain their timestamps and do not trigger Emby filesystem activity.
 - Removed timestamp/hash-only series fast paths that could leave stale URLs after a provider extension, base URL, or credential change; episode hashes remain persisted as catalog delta state.
