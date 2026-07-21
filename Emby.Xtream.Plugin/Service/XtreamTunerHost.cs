@@ -436,8 +436,7 @@ namespace Emby.Xtream.Plugin.Service
 
             var config = Plugin.Instance.Configuration;
             var streamUrl = XtreamUrlBuilder.BuildStreamUrl(config, streamId);
-            var mediaSourceId = CreateMediaSourceId(streamId, config.IsolateLiveTvSessions);
-            var mediaSource = CreateMediaSourceInfo(streamId, streamUrl, config.HttpUserAgent, mediaSourceId);
+            var mediaSource = CreateMediaSourceInfo(streamId, streamUrl, config.HttpUserAgent);
 
             return Task.FromResult(new List<MediaSourceInfo> { mediaSource });
         }
@@ -455,23 +454,13 @@ namespace Emby.Xtream.Plugin.Service
 
             var config = Plugin.Instance.Configuration;
             var streamUrl = XtreamUrlBuilder.BuildStreamUrl(config, streamId);
-            var expectedPrefix = GetMediaSourceIdPrefix(streamId);
-            var selectedMediaSourceId = config.IsolateLiveTvSessions
-                && !string.IsNullOrEmpty(mediaSourceId)
-                && mediaSourceId.StartsWith(expectedPrefix + "_", StringComparison.Ordinal)
-                    ? mediaSourceId
-                    : CreateMediaSourceId(streamId, config.IsolateLiveTvSessions);
-            var mediaSource = CreateMediaSourceInfo(
-                streamId, streamUrl, config.HttpUserAgent, selectedMediaSourceId);
+            var mediaSource = CreateMediaSourceInfo(streamId, streamUrl, config.HttpUserAgent);
 
             var httpClient = Plugin.CreateHttpClient();
             ILiveStream liveStream = new XtreamLiveStream(mediaSource, tuner.Id, httpClient, Logger);
 
-            Logger.Info("Opening live stream for channel {0} (stream {1}, mode {2}, mediaSourceId {3})",
-                tunerChannel?.Name ?? tunerChannel?.Id,
-                streamId,
-                config.IsolateLiveTvSessions ? "isolated" : "shared",
-                selectedMediaSourceId);
+            Logger.Info("Opening live stream for channel {0} (stream {1})",
+                tunerChannel?.Name ?? tunerChannel?.Id, streamId);
 
             return Task.FromResult(liveStream);
         }
@@ -718,24 +707,10 @@ namespace Emby.Xtream.Plugin.Service
             return int.TryParse(id, NumberStyles.None, CultureInfo.InvariantCulture, out streamId);
         }
 
-        private static string GetMediaSourceIdPrefix(int streamId)
-        {
-            return "xtream_live_" + streamId.ToString(CultureInfo.InvariantCulture);
-        }
-
-        private static string CreateMediaSourceId(int streamId, bool isolateSession)
-        {
-            var prefix = GetMediaSourceIdPrefix(streamId);
-            return isolateSession ? prefix + "_" + Guid.NewGuid().ToString("N") : prefix;
-        }
-
-        private MediaSourceInfo CreateMediaSourceInfo(
-            int streamId, string streamUrl, string userAgent = null, string mediaSourceId = null)
+        private MediaSourceInfo CreateMediaSourceInfo(int streamId, string streamUrl, string userAgent = null)
         {
             var config   = Plugin.Instance.Configuration;
-            var sourceId = string.IsNullOrEmpty(mediaSourceId)
-                ? CreateMediaSourceId(streamId, config.IsolateLiveTvSessions)
-                : mediaSourceId;
+            var sourceId = "xtream_live_" + streamId.ToString(CultureInfo.InvariantCulture);
             var isTsOutput = string.Equals(config.LiveTvOutputFormat, "ts", StringComparison.OrdinalIgnoreCase);
             var cached = StreamProbeService.GetCachedInfo(streamId);
             var streams = cached != null ? BuildMediaStreamsFromCache(cached) : BuildDefaultMediaStreams();
@@ -802,6 +777,7 @@ namespace Emby.Xtream.Plugin.Service
                 };
                 if (info.VideoWidth  > 0) vs.Width  = info.VideoWidth;
                 if (info.VideoHeight > 0) vs.Height = info.VideoHeight;
+                if (!string.IsNullOrEmpty(info.ColorTransfer)) vs.ColorTransfer = info.ColorTransfer;
                 // DisplayTitle is what the OSD info panel concatenates directly into HTML —
                 // if it is null the JS produces the literal string "undefined" on screen.
                 vs.DisplayTitle = BuildVideoDisplayTitle(info.VideoCodec, info.VideoWidth, info.VideoHeight);

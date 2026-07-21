@@ -4,6 +4,10 @@ All notable changes to XC2EMBY are listed here, newest first.
 
 ---
 
+## v1.1.110
+- Removed the experimental same-channel session isolation setting after Emby 4.9 testing showed that it either invalidated playback source negotiation or continued sharing the original stream. Shared-stream behavior is restored unchanged.
+- Added HDR range detection to the live-stream codec probe: SMPTE ST 2084/PQ is reported as HDR and ARIB STD-B67 is reported as HLG. Clear the codec probe cache once to refresh existing channel metadata.
+
 ## v1.1.109
 - Added an opt-in **Isolate Same-Channel Playback Sessions** setting. Shared mode remains the default to minimize provider connections; isolated mode gives each playback a unique Emby media-source identity so stopping one device cannot close another device watching the same channel.
 - Preserved the playback-offer media-source ID through Emby's live-stream opening handoff while keeping provider URLs, channel lookup, codec probing, and codec caching keyed by the original numeric Xtream stream ID.

@@ -617,7 +617,6 @@ function (BaseView, loading) {
             view.querySelector('.selOutputFormat').value = config.LiveTvOutputFormat || 'ts';
             view.querySelector('.txtTunerCount').value = config.TunerCount > 0 ? config.TunerCount : 1;
             setChecked(view.querySelector('.chkLiveTvDirectPlay'), config.EnableLiveTvDirectPlay !== false);
-            setChecked(view.querySelector('.chkIsolateLiveTvSessions'), !!config.IsolateLiveTvSessions);
             setChecked(view.querySelector('.chkClearLiveTvLogoCacheOnRefresh'), !!config.ClearLiveTvLogoCacheOnRefresh);
             setChecked(view.querySelector('.chkIncludeGroupTitle'), config.IncludeGroupTitleInM3U !== false);
 
@@ -764,7 +763,6 @@ function (BaseView, loading) {
             config.TunerCount = Math.max(1, parseInt(view.querySelector('.txtTunerCount').value, 10) || 1);
             config.IncludeAdultChannels = false;
             config.EnableLiveTvDirectPlay = view.querySelector('.chkLiveTvDirectPlay').checked;
-            config.IsolateLiveTvSessions = view.querySelector('.chkIsolateLiveTvSessions').checked;
             config.ClearLiveTvLogoCacheOnRefresh = view.querySelector('.chkClearLiveTvLogoCacheOnRefresh').checked;
             config.IncludeGroupTitleInM3U = view.querySelector('.chkIncludeGroupTitle').checked;
 

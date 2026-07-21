@@ -82,8 +82,8 @@ namespace Emby.Xtream.Plugin.Service
                         info.CachedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                         _cache[streamId] = info;
                         SaveToConfig();
-                        logger?.Info("[XtreamProbe] Cached codecs for stream {0}: video={1} audio={2}",
-                            streamId, info.VideoCodec ?? "?", info.AudioCodec ?? "?");
+                        logger?.Info("[XtreamProbe] Cached codecs for stream {0}: video={1} range={2} audio={3}",
+                            streamId, info.VideoCodec ?? "?", GetVideoRange(info.ColorTransfer), info.AudioCodec ?? "?");
                     }
                     else
                     {
@@ -213,7 +213,7 @@ namespace Emby.Xtream.Plugin.Service
                     STJ.JsonElement streamsEl;
                     if (!doc.RootElement.TryGetProperty("streams", out streamsEl)) return null;
 
-                    string videoCodec = null, audioCodec = null, audioLang = null;
+                    string videoCodec = null, colorTransfer = null, audioCodec = null, audioLang = null;
                     int videoWidth = 0, videoHeight = 0, audioChannels = 0;
 
                     foreach (var stream in streamsEl.EnumerateArray())
@@ -231,6 +231,8 @@ namespace Emby.Xtream.Plugin.Service
                                 videoWidth = el.TryGetInt32(out var w) ? w : 0;
                             if (stream.TryGetProperty("height", out el))
                                 videoHeight = el.TryGetInt32(out var h) ? h : 0;
+                            if (stream.TryGetProperty("color_transfer", out el))
+                                colorTransfer = el.GetString();
                         }
                         else if (type == "audio" && audioCodec == null)
                         {
@@ -253,6 +255,7 @@ namespace Emby.Xtream.Plugin.Service
                     return new StreamCodecInfo
                     {
                         VideoCodec    = videoCodec,
+                        ColorTransfer = colorTransfer,
                         VideoWidth    = videoWidth,
                         VideoHeight   = videoHeight,
                         AudioCodec    = audioCodec,
@@ -262,6 +265,15 @@ namespace Emby.Xtream.Plugin.Service
                 }
             }
             catch { return null; }
+        }
+
+        private static string GetVideoRange(string colorTransfer)
+        {
+            if (string.Equals(colorTransfer, "smpte2084", StringComparison.OrdinalIgnoreCase))
+                return "HDR";
+            if (string.Equals(colorTransfer, "arib-std-b67", StringComparison.OrdinalIgnoreCase))
+                return "HLG";
+            return "SDR";
         }
 
         private static async Task<string> FindFfprobeAsync(ILogger logger)
@@ -326,6 +338,7 @@ namespace Emby.Xtream.Plugin.Service
     internal class StreamCodecInfo
     {
         public string VideoCodec  { get; set; }
+        public string ColorTransfer { get; set; }
         public int    VideoWidth  { get; set; }
         public int    VideoHeight { get; set; }
 

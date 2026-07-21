@@ -15,10 +15,6 @@ namespace Emby.Xtream.Plugin
         public bool EnableLiveTv { get; set; } = true;
         public string LiveTvOutputFormat { get; set; } = "ts";
         public bool EnableLiveTvDirectPlay { get; set; } = true;
-        // When enabled, each playback offer receives a unique MediaSource.Id so Emby
-        // cannot share one ILiveStream between devices watching the same channel.
-        // Disabled by default to preserve provider-side connection sharing.
-        public bool IsolateLiveTvSessions { get; set; }
         public bool ClearLiveTvLogoCacheOnRefresh { get; set; }
         public int TunerCount { get; set; } = 1;
 
