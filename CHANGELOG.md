@@ -4,7 +4,7 @@ All notable changes to XC2EMBY are listed here, newest first.
 
 ---
 
-## Unreleased
+## v1.1.111
 - Fixed Auto-Sync saves leaving XC2EMBY's Emby scheduled-task triggers empty: the settings page now handles both direct-array and wrapped Emby scheduled-task responses, waits for all four STRM-sync schedules to persist before completing or reloading, and reports malformed responses, missing tasks, or failed trigger updates.
 - Limited Auto-Sync schedule updates to Movies, Documentaries, TV Shows, and DocuSeries so saving plugin settings cannot overwrite unrelated XC2EMBY health, guide-refresh, or manual-task triggers.
 
