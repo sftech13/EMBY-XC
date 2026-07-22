@@ -847,17 +847,21 @@ function (BaseView, loading) {
             var refreshLiveGuide = liveRefreshSettingsChanged(previousLiveSettings, captureLiveRefreshSettings(config));
 
             ApiClient.updatePluginConfiguration(pluginId, config).then(function () {
+                // Updating the plugin configuration can cause Emby to reload this page.
+                // Persist the scheduled-task triggers first so that navigation cannot
+                // interrupt the requests and leave Auto-Sync enabled with no schedule.
+                return applyScheduleToTasks(view, config, ApiClient);
+            }).then(function () {
                 loading.hide();
-                Dashboard.processPluginConfigurationUpdateResult();
-                applyScheduleToTasks(view, config, ApiClient);
                 if (refreshLiveGuide) {
                     refreshCache(view);
                 }
                 if (typeof callback === 'function') callback();
+                Dashboard.processPluginConfigurationUpdateResult();
             }).catch(function (err) {
                 loading.hide();
-                console.error('XC2EMBY: updatePluginConfiguration failed', err);
-                Dashboard.alert('Failed to save configuration. Check the browser console for details.');
+                console.error('XC2EMBY: configuration or scheduled-task update failed', err);
+                Dashboard.alert('XC2EMBY settings or scheduled tasks could not be updated. Check the browser console and Emby log.');
             });
         }).catch(function (err) {
             loading.hide();
@@ -1056,19 +1060,45 @@ function (BaseView, loading) {
     }
 
     function applyScheduleToTasks(view, config, apiClient) {
-        apiClient.ajax({ url: apiClient.getUrl('ScheduledTasks'), type: 'GET' })
-            .then(function (tasks) {
-                tasks.filter(function (t) { return t.Category === 'XC2EMBY'; })
-                    .forEach(function (task) {
-                        var offset = _taskKeyOffsets.hasOwnProperty(task.Key) ? _taskKeyOffsets[task.Key] : 0;
-                        var triggers = buildTriggersForTask(config, offset);
-                        apiClient.ajax({
-                            url: apiClient.getUrl('ScheduledTasks/' + task.Id + '/Triggers'),
-                            type: 'POST',
-                            contentType: 'application/json',
-                            data: JSON.stringify(triggers)
-                        });
+        return apiClient.ajax({
+            url: apiClient.getUrl('ScheduledTasks'),
+            type: 'GET',
+            dataType: 'json'
+        }).then(function (response) {
+                // Emby versions differ here: some return the task array directly,
+                // while others wrap it in an Items property. ajax() may also return
+                // JSON text when a client ignores dataType.
+                if (typeof response === 'string') {
+                    response = JSON.parse(response);
+                }
+                var tasks = Array.isArray(response) ? response : response && response.Items;
+                if (!Array.isArray(tasks)) {
+                    throw new Error('Unexpected ScheduledTasks response from Emby');
+                }
+
+                var syncTasks = tasks.filter(function (task) {
+                    return task.Category === 'XC2EMBY' &&
+                        Object.prototype.hasOwnProperty.call(_taskKeyOffsets, task.Key);
+                });
+
+                var expectedKeys = Object.keys(_taskKeyOffsets);
+                var foundKeys = syncTasks.map(function (task) { return task.Key; });
+                var missingKeys = expectedKeys.filter(function (key) {
+                    return foundKeys.indexOf(key) === -1;
+                });
+                if (missingKeys.length) {
+                    throw new Error('XC2EMBY scheduled task(s) not found: ' + missingKeys.join(', '));
+                }
+
+                return Promise.all(syncTasks.map(function (task) {
+                    var triggers = buildTriggersForTask(config, _taskKeyOffsets[task.Key]);
+                    return apiClient.ajax({
+                        url: apiClient.getUrl('ScheduledTasks/' + task.Id + '/Triggers'),
+                        type: 'POST',
+                        contentType: 'application/json',
+                        data: JSON.stringify(triggers)
                     });
+                }));
             });
     }
 
