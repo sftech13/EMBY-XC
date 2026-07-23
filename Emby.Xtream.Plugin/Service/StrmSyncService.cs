@@ -89,6 +89,24 @@ namespace Emby.Xtream.Plugin.Service
 
     public class StrmSyncService
     {
+        private sealed class NonRetryableProviderHttpException : HttpRequestException
+        {
+            public NonRetryableProviderHttpException(
+                string operation,
+                int statusCode,
+                string reasonPhrase)
+                : base(string.Format(
+                    CultureInfo.InvariantCulture,
+                    "{0} failed: HTTP {1}{2}",
+                    operation,
+                    statusCode,
+                    string.IsNullOrWhiteSpace(reasonPhrase)
+                        ? string.Empty
+                        : " (" + reasonPhrase + ")"))
+            {
+            }
+        }
+
         internal enum StrmWriteResult
         {
             Unchanged,
@@ -150,7 +168,10 @@ namespace Emby.Xtream.Plugin.Service
                     using (var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false))
                     {
                         var statusCode = (int)response.StatusCode;
-                        var retryableStatus = statusCode == 429 || statusCode >= 500;
+                        var retryableStatus =
+                            statusCode == 408 ||
+                            statusCode == 429 ||
+                            statusCode >= 500;
                         if (retryableStatus && attempt < ProviderRetryDelays.Length)
                         {
                             _logger.Warn(
@@ -164,13 +185,39 @@ namespace Emby.Xtream.Plugin.Service
                             continue;
                         }
 
-                        response.EnsureSuccessStatusCode();
+                        if (!response.IsSuccessStatusCode)
+                        {
+                            if (retryableStatus)
+                            {
+                                throw new HttpRequestException(string.Format(
+                                    CultureInfo.InvariantCulture,
+                                    "{0} failed after transient retries: HTTP {1}{2}",
+                                    operation,
+                                    statusCode,
+                                    string.IsNullOrWhiteSpace(response.ReasonPhrase)
+                                        ? string.Empty
+                                        : " (" + response.ReasonPhrase + ")"));
+                            }
+
+                            // Ordinary 4xx responses are provider data decisions,
+                            // not connection failures. Return them immediately so a
+                            // stale 404 does not consume the 2/5/10-second backoff.
+                            throw new NonRetryableProviderHttpException(
+                                operation,
+                                statusCode,
+                                response.ReasonPhrase);
+                        }
+
                         return await response.Content.ReadAsStringAsync().ConfigureAwait(false);
                     }
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
                     throw;
+                }
+                catch (NonRetryableProviderHttpException ex)
+                {
+                    throw new HttpRequestException(ex.Message, ex);
                 }
                 catch (Exception ex) when (
                     attempt < ProviderRetryDelays.Length &&
@@ -568,6 +615,12 @@ namespace Emby.Xtream.Plugin.Service
         public SyncProgress DocuSeriesProgress   => _docuSeriesProgress;
         public SyncProgress SeriesProgress       => _seriesProgress;
         public SyncProgress RetryProgress        => _retryProgress;
+        public bool IsAnySyncRunning =>
+            _movieProgress.IsRunning ||
+            _documentariesProgress.IsRunning ||
+            _seriesProgress.IsRunning ||
+            _docuSeriesProgress.IsRunning ||
+            _retryProgress.IsRunning;
 
         public bool StopActiveSync()
         {

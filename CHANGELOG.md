@@ -4,6 +4,10 @@ All notable changes to XC2EMBY are listed here, newest first.
 
 ---
 
+## v1.1.118
+- Provider health checks now defer while any movie, documentary, TV-show, DocuSeries, or failed-item retry sync is active. Deferred checks preserve the last known status and failure count instead of reporting false outages when the local Xtream server is busy serving synchronization requests.
+- Provider HTTP retry handling now retries only HTTP 408/429/5xx responses and genuine timeout/connection/SSL failures. Ordinary 4xx responses such as stale series-detail 404s return immediately instead of consuming the 2/5/10-second transient backoff.
+
 ## v1.1.117
 - Successful movie, documentary, TV-show, and DocuSeries orphan cleanup now performs a safe bottom-up metadata sweep. Empty directories and directories containing only generated NFO files are removed, including historical leftovers whose STRM was deleted by an older plugin version.
 - Metadata cleanup remains inside the configured content root, skips symbolic links/reparse points, and preserves any directory containing a STRM, artwork, media, or another live subdirectory.

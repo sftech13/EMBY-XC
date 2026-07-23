@@ -46,6 +46,18 @@ namespace Emby.Xtream.Plugin.Service
                 return;
             }
 
+            var syncService = Plugin.InstanceOrNull?.StrmSyncService;
+            if (syncService != null && syncService.IsAnySyncRunning)
+            {
+                // A full series sync can keep the local Xtream server busy enough
+                // for this separate 10-second probe to time out. The sync itself is
+                // stronger evidence of connectivity, so preserve the last known
+                // state and failure count until the next idle health check.
+                _logger.Debug(
+                    "Provider health check deferred while an XC2EMBY content sync is running");
+                return;
+            }
+
             var url = string.Format(
                 System.Globalization.CultureInfo.InvariantCulture,
                 "{0}/player_api.php?username={1}&password={2}",
@@ -121,6 +133,18 @@ namespace Emby.Xtream.Plugin.Service
             }
             catch (Exception ex)
             {
+                // Close the small race where a health request starts immediately
+                // before a sync. If the probe then fails while that sync is active,
+                // treat it as deferred just like the pre-request check above.
+                syncService = Plugin.InstanceOrNull?.StrmSyncService;
+                if (syncService != null && syncService.IsAnySyncRunning)
+                {
+                    _logger.Debug(
+                        "Provider health failure ignored because an XC2EMBY content sync started during the probe: {0}",
+                        ex.Message);
+                    return;
+                }
+
                 lock (_lock)
                 {
                     prevState = _previousIsReachable;
