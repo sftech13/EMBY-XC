@@ -75,6 +75,18 @@ namespace Emby.Xtream.Plugin.Service
         public DateTime FailedAt { get; set; } = DateTime.UtcNow;
     }
 
+    internal sealed class MovieSyncCandidate
+    {
+        public VodStreamInfo Movie { get; set; }
+        public string CleanedName { get; set; }
+        public string FolderName { get; set; }
+        public string MovieDirectory { get; set; }
+        public string StrmPath { get; set; }
+        public string StreamUrl { get; set; }
+        public string TmdbId { get; set; }
+        public bool IsLocallyFiltered { get; set; }
+    }
+
     public class StrmSyncService
     {
         internal enum StrmWriteResult
@@ -101,6 +113,12 @@ namespace Emby.Xtream.Plugin.Service
         private const int MaxHistoryEntries = 10;
         private static readonly HttpClient SharedHttpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
         private static readonly object _sharedClientHeaderLock = new object();
+        private static readonly TimeSpan[] ProviderRetryDelays =
+        {
+            TimeSpan.FromSeconds(2),
+            TimeSpan.FromSeconds(5),
+            TimeSpan.FromSeconds(10),
+        };
 
         // Increment when naming logic changes so existing installs force a full re-sync on next run.
         internal const int CurrentStrmNamingVersion = 1;
@@ -116,6 +134,99 @@ namespace Emby.Xtream.Plugin.Service
             }
         }
 
+        private async Task<string> GetProviderStringWithRetryAsync(
+            string url,
+            string operation,
+            CancellationToken cancellationToken)
+        {
+            Exception lastError = null;
+
+            for (var attempt = 0; attempt <= ProviderRetryDelays.Length; attempt++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                try
+                {
+                    using (var request = new HttpRequestMessage(HttpMethod.Get, url))
+                    using (var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false))
+                    {
+                        var statusCode = (int)response.StatusCode;
+                        var retryableStatus = statusCode == 429 || statusCode >= 500;
+                        if (retryableStatus && attempt < ProviderRetryDelays.Length)
+                        {
+                            _logger.Warn(
+                                "{0} returned HTTP {1}; retry {2}/{3} in {4} seconds",
+                                operation,
+                                statusCode,
+                                attempt + 1,
+                                ProviderRetryDelays.Length,
+                                (int)ProviderRetryDelays[attempt].TotalSeconds);
+                            await Task.Delay(ProviderRetryDelays[attempt], cancellationToken).ConfigureAwait(false);
+                            continue;
+                        }
+
+                        response.EnsureSuccessStatusCode();
+                        return await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                    }
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex) when (
+                    attempt < ProviderRetryDelays.Length &&
+                    (ex is HttpRequestException || ex is TaskCanceledException))
+                {
+                    lastError = ex;
+                    _logger.Warn(
+                        "{0} failed transiently: {1}; retry {2}/{3} in {4} seconds",
+                        operation,
+                        ex.Message,
+                        attempt + 1,
+                        ProviderRetryDelays.Length,
+                        (int)ProviderRetryDelays[attempt].TotalSeconds);
+                    await Task.Delay(ProviderRetryDelays[attempt], cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    lastError = ex;
+                    break;
+                }
+            }
+
+            throw new HttpRequestException(
+                operation + " failed: " + (lastError?.Message ?? "provider request failed"),
+                lastError);
+        }
+
+        private static int ProtectExistingSeriesFiles(
+            string strmLibraryPath,
+            string subFolder,
+            string seriesName,
+            HashSet<string> validPaths)
+        {
+            var parent = Path.Combine(strmLibraryPath, subFolder);
+            if (!Directory.Exists(parent)) return 0;
+
+            var protectedCount = 0;
+            foreach (var seriesDirectory in Directory.GetDirectories(parent, seriesName + "*", SearchOption.TopDirectoryOnly))
+            {
+                var folderName = Path.GetFileName(seriesDirectory);
+                if (!string.Equals(folderName, seriesName, StringComparison.OrdinalIgnoreCase) &&
+                    !folderName.StartsWith(seriesName + " [", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                foreach (var strmPath in Directory.GetFiles(seriesDirectory, "*.strm", SearchOption.AllDirectories))
+                {
+                    lock (validPaths)
+                    {
+                        if (validPaths.Add(strmPath))
+                            protectedCount++;
+                    }
+                }
+            }
+            return protectedCount;
+        }
+
         private readonly ILogger _logger;
         private readonly TmdbLookupService _tmdbLookupService;
         private readonly HttpClient _httpClient;
@@ -125,6 +236,24 @@ namespace Emby.Xtream.Plugin.Service
         private readonly object _failedItemsLock = new object();
         private readonly object _activeSyncLock = new object();
         private CancellationTokenSource _activeSyncCancellation;
+        private readonly object _libraryScanLock = new object();
+        private Timer _libraryScanTimer;
+        private bool _libraryScanPending;
+        private readonly object _catalogObservationLock = new object();
+        private readonly Dictionary<string, CatalogObservation> _catalogObservations =
+            new Dictionary<string, CatalogObservation>(StringComparer.OrdinalIgnoreCase);
+
+        // Automatic content tasks are normally staggered by 30 minutes. A quiet
+        // period combines the complete sequence into one Emby library scan.
+        private static readonly TimeSpan LibraryScanQuietPeriod = TimeSpan.FromMinutes(90);
+        private static readonly TimeSpan ActiveSyncScanRetryDelay = TimeSpan.FromMinutes(15);
+        private const double LargeOrphanRatio = 0.20;
+
+        private sealed class CatalogObservation
+        {
+            public string Fingerprint;
+            public int ConsecutiveCompleteRuns;
+        }
 
         private SyncProgress _movieProgress = new SyncProgress();
         private SyncProgress _documentariesProgress = new SyncProgress();
@@ -141,6 +270,45 @@ namespace Emby.Xtream.Plugin.Service
             var completed = Volatile.Read(ref syncProgress.Completed);
             var pct = Math.Min(100.0, (double)completed / total * 100.0);
             taskProgress.Report(pct);
+        }
+
+        private int ObserveCompleteCatalog(string contentRoot, IEnumerable<string> catalogKeys)
+        {
+            var ordered = catalogKeys
+                .Where(k => !string.IsNullOrEmpty(k))
+                .OrderBy(k => k, StringComparer.Ordinal)
+                .ToArray();
+            string fingerprint;
+            using (var sha = SHA256.Create())
+            {
+                var bytes = Encoding.UTF8.GetBytes(string.Join("\n", ordered));
+                fingerprint = Convert.ToBase64String(sha.ComputeHash(bytes));
+            }
+
+            lock (_catalogObservationLock)
+            {
+                CatalogObservation observation;
+                if (!_catalogObservations.TryGetValue(contentRoot, out observation) ||
+                    !string.Equals(observation.Fingerprint, fingerprint, StringComparison.Ordinal))
+                {
+                    observation = new CatalogObservation
+                    {
+                        Fingerprint = fingerprint,
+                        ConsecutiveCompleteRuns = 1,
+                    };
+                    _catalogObservations[contentRoot] = observation;
+                }
+                else
+                {
+                    observation.ConsecutiveCompleteRuns++;
+                }
+
+                _logger.Info(
+                    "Complete catalog observation for {0}: {1} consecutive identical run(s)",
+                    contentRoot,
+                    observation.ConsecutiveCompleteRuns);
+                return observation.ConsecutiveCompleteRuns;
+            }
         }
 
         internal static string NormalizeStreamUrl(string value)
@@ -185,31 +353,75 @@ namespace Emby.Xtream.Plugin.Service
             return StrmWriteResult.Added;
         }
 
-        private void QueueEmbyLibraryScanIfChanged(string contentType, params SyncProgress[] progressItems)
+        private void CompleteSyncAndCoalesceLibraryScan(string contentType, params SyncProgress[] progressItems)
         {
             var changed = progressItems != null && progressItems.Any(p => p != null &&
                 (Volatile.Read(ref p.Added) > 0 ||
                  Volatile.Read(ref p.Changed) > 0 ||
                  Volatile.Read(ref p.NfoChanged) > 0 ||
                  Volatile.Read(ref p.Deleted) > 0));
-            if (!changed) return;
 
-            try
+            lock (_libraryScanLock)
             {
-                var host = Plugin.InstanceOrNull?.ApplicationHost;
-                var libraryManager = host?.Resolve<MediaBrowser.Controller.Library.ILibraryManager>();
-                if (libraryManager == null)
+                if (changed)
                 {
-                    _logger.Warn("{0} sync changed files, but ILibraryManager was unavailable; Emby scan was not queued", contentType);
+                    _libraryScanPending = true;
+                    _logger.Info(
+                        "{0} sync changed files; one coalesced Emby library scan is pending after a {1}-minute sync quiet period",
+                        contentType,
+                        (int)LibraryScanQuietPeriod.TotalMinutes);
+                }
+
+                // An unchanged task still advances the automatic sequence, so it
+                // postpones a pending scan until that task has also completed.
+                if (!_libraryScanPending) return;
+
+                if (_libraryScanTimer == null)
+                    _libraryScanTimer = new Timer(FlushCoalescedLibraryScan, null, Timeout.Infinite, Timeout.Infinite);
+
+                _libraryScanTimer.Change(LibraryScanQuietPeriod, Timeout.InfiniteTimeSpan);
+            }
+        }
+
+        private void FlushCoalescedLibraryScan(object state)
+        {
+            lock (_libraryScanLock)
+            {
+                if (!_libraryScanPending) return;
+
+                if (_movieProgress.IsRunning ||
+                    _documentariesProgress.IsRunning ||
+                    _seriesProgress.IsRunning ||
+                    _docuSeriesProgress.IsRunning ||
+                    _retryProgress.IsRunning)
+                {
+                    _logger.Info(
+                        "Coalesced Emby library scan remains pending because an XC2EMBY sync is still running; checking again in {0} minutes",
+                        (int)ActiveSyncScanRetryDelay.TotalMinutes);
+                    _libraryScanTimer.Change(ActiveSyncScanRetryDelay, Timeout.InfiniteTimeSpan);
                     return;
                 }
 
-                libraryManager.QueueLibraryScan();
-                _logger.Info("{0} sync changed files; queued one Emby library scan", contentType);
-            }
-            catch (Exception ex)
-            {
-                _logger.Warn("{0} sync changed files, but the Emby library scan could not be queued: {1}", contentType, ex.Message);
+                try
+                {
+                    var host = Plugin.InstanceOrNull?.ApplicationHost;
+                    var libraryManager = host?.Resolve<MediaBrowser.Controller.Library.ILibraryManager>();
+                    if (libraryManager == null)
+                    {
+                        _logger.Warn("XC2EMBY changed files, but ILibraryManager was unavailable; the coalesced Emby scan remains pending");
+                        _libraryScanTimer.Change(ActiveSyncScanRetryDelay, Timeout.InfiniteTimeSpan);
+                        return;
+                    }
+
+                    libraryManager.QueueLibraryScan();
+                    _libraryScanPending = false;
+                    _logger.Info("XC2EMBY sync sequence is quiet; queued one coalesced Emby library scan");
+                }
+                catch (Exception ex)
+                {
+                    _logger.Warn("The coalesced Emby library scan could not be queued and remains pending: {0}", ex.Message);
+                    _libraryScanTimer.Change(ActiveSyncScanRetryDelay, Timeout.InfiniteTimeSpan);
+                }
             }
         }
 
@@ -577,10 +789,16 @@ namespace Emby.Xtream.Plugin.Service
 
                 var writtenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var locallyFilteredPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var preparedMovies = new ConcurrentBag<MovieSyncCandidate>();
+                var moviesRoot = Path.Combine(config.StrmLibraryPath, GetMovieRootFolderName(config));
                 var semaphore = new SemaphoreSlim(config.SyncParallelism);
-                int filterDeletedMovies = 0;
 
-                var tasks = allStreams.Select(async movie =>
+                // Resolve names, provider IDs, target paths, and local-media matches
+                // before writing anything. Several Xtream records can resolve to the
+                // same filesystem path. A two-phase pass lets a local-media match
+                // suppress the entire path and prevents those records racing to
+                // rewrite the same STRM with different stream IDs.
+                var prepareTasks = allStreams.Select(async movie =>
                 {
                     await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
                     try
@@ -689,33 +907,6 @@ namespace Emby.Xtream.Plugin.Service
                         var movieDir = Path.Combine(config.StrmLibraryPath, subFolder, folderName);
                         var strmPath = Path.Combine(movieDir, folderName + ".strm");
 
-                        if (localFilter != null && localFilter.ContainsMovie(providerTmdbId, providerImdbId, cleanedName))
-                        {
-                            if (File.Exists(strmPath))
-                            {
-                                try
-                                {
-                                    File.Delete(strmPath);
-                                    var strmDir = Path.GetDirectoryName(strmPath);
-                                    if (!string.IsNullOrEmpty(strmDir) && Directory.Exists(strmDir) &&
-                                        Directory.GetFileSystemEntries(strmDir).Length == 0)
-                                        Directory.Delete(strmDir);
-                                    Interlocked.Increment(ref filterDeletedMovies);
-                                    _logger.Info("Local media filter: removed duplicate STRM for '{0}' — local file now in library", cleanedName);
-                                }
-                                catch (Exception delEx)
-                                {
-                                    _logger.Warn("Local media filter: could not remove STRM for '{0}': {1}", cleanedName, delEx.Message);
-                                    lock (locallyFilteredPaths) { locallyFilteredPaths.Add(strmPath); }
-                                }
-                            }
-                            _logger.Debug("Local media filter: skipping movie '{0}' (already in library)", cleanedName);
-                            Interlocked.Increment(ref mp.Skipped);
-                            Interlocked.Increment(ref mp.Completed);
-                            ReportTaskProgress(mp, taskProgress);
-                            return;
-                        }
-
                         var ext = !string.IsNullOrEmpty(movie.ContainerExtension)
                             ? movie.ContainerExtension
                             : "mp4";
@@ -725,47 +916,19 @@ namespace Emby.Xtream.Plugin.Service
                             "{0}/movie/{1}/{2}/{3}.{4}",
                             config.BaseUrl, config.Username, config.Password, movie.StreamId, ext);
 
-                        var strmResult = StrmWriteResult.Unchanged;
+                        preparedMovies.Add(new MovieSyncCandidate
                         {
-                            cancellationToken.ThrowIfCancellationRequested();
-                            strmResult = WriteStrmIfChanged(strmPath, streamUrl);
-                            if (strmResult == StrmWriteResult.Added)
-                                Interlocked.Increment(ref mp.Added);
-                            else if (strmResult == StrmWriteResult.Changed)
-                                Interlocked.Increment(ref mp.Changed);
-                            else
-                                Interlocked.Increment(ref mp.Skipped);
-                            lock (writtenPaths) { writtenPaths.Add(strmPath); }
-                        }
-                        if (strmResult == StrmWriteResult.Added)
-                        {
-                            lock (addedMovieTitles)
-                            {
-                                if (addedMovieTitles.Count < 20) addedMovieTitles.Add(cleanedName);
-                            }
-                        }
-
-                        if (config.EnableNfoFiles && strmResult != StrmWriteResult.Unchanged)
-                        {
-                            var nfoPath = Path.Combine(movieDir, folderName + ".nfo");
-                            var yearMatch = YearInTitleRegex.Match(cleanedName);
-                            int? nfoYear = null;
-                            if (yearMatch.Success)
-                            {
-                                int y;
-                                if (int.TryParse(yearMatch.Groups[1].Value, NumberStyles.None, CultureInfo.InvariantCulture, out y))
-                                    nfoYear = y;
-                            }
-                            try
-                            {
-                                if (NfoWriter.WriteMovieNfo(nfoPath, cleanedName, tmdbId, nfoYear))
-                                    Interlocked.Increment(ref mp.NfoChanged);
-                            }
-                            catch (Exception ex) { _logger.Debug("NFO write failed for '{0}': {1}", movie.Name, ex.Message); }
-                        }
-
-                        Interlocked.Increment(ref mp.Completed);
-                        ReportTaskProgress(mp, taskProgress);
+                            Movie = movie,
+                            CleanedName = cleanedName,
+                            FolderName = folderName,
+                            MovieDirectory = movieDir,
+                            StrmPath = strmPath,
+                            StreamUrl = streamUrl,
+                            TmdbId = tmdbId,
+                            IsLocallyFiltered =
+                                localFilter != null &&
+                                localFilter.ContainsMovie(providerTmdbId, providerImdbId, cleanedName),
+                        });
                     }
                     catch (OperationCanceledException)
                     {
@@ -797,7 +960,231 @@ namespace Emby.Xtream.Plugin.Service
                     }
                 });
 
-                await Task.WhenAll(tasks).ConfigureAwait(false);
+                await Task.WhenAll(prepareTasks).ConfigureAwait(false);
+
+                var pathGroups = preparedMovies
+                    .GroupBy(m => m.StrmPath, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                var duplicatePathRecords = pathGroups.Sum(g => Math.Max(0, g.Count() - 1));
+                if (duplicatePathRecords > 0)
+                {
+                    _logger.Info(
+                        "Movie path deduplication: collapsed {0} duplicate provider record(s) across {1} target path(s)",
+                        duplicatePathRecords,
+                        pathGroups.Count(g => g.Count() > 1));
+                }
+
+                int filterDeletedMovies = 0;
+                var writeTasks = pathGroups.Select(async group =>
+                {
+                    await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+                    try
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        var candidates = group
+                            .OrderBy(m => m.Movie.StreamId)
+                            .ToList();
+
+                        // If any provider record for this path matches local media,
+                        // suppress every record for the path. This avoids one record
+                        // deleting the STRM while another recreates it in the same run.
+                        var filteredCandidate = candidates.FirstOrDefault(m => m.IsLocallyFiltered);
+                        if (filteredCandidate != null)
+                        {
+                            lock (locallyFilteredPaths)
+                            {
+                                locallyFilteredPaths.Add(filteredCandidate.StrmPath);
+                            }
+
+                            var strmRemoved = false;
+                            if (File.Exists(filteredCandidate.StrmPath))
+                            {
+                                try
+                                {
+                                    File.Delete(filteredCandidate.StrmPath);
+                                    strmRemoved = true;
+                                    Interlocked.Increment(ref filterDeletedMovies);
+                                    _logger.Info(
+                                        "Local media filter: removed duplicate STRM for '{0}' — local file now in library",
+                                        filteredCandidate.CleanedName);
+                                }
+                                catch (Exception delEx)
+                                {
+                                    _logger.Warn(
+                                        "Local media filter: could not remove STRM for '{0}': {1}",
+                                        filteredCandidate.CleanedName,
+                                        delEx.Message);
+                                }
+                            }
+
+                            // Remove generated metadata after a successful STRM
+                            // deletion, or when a previous run already removed the
+                            // STRM but left metadata behind.
+                            if (strmRemoved || !File.Exists(filteredCandidate.StrmPath))
+                            {
+                                try
+                                {
+                                    DeleteMatchingNfo(filteredCandidate.StrmPath);
+                                    PruneOrphanDirectories(
+                                        Path.GetDirectoryName(filteredCandidate.StrmPath),
+                                        moviesRoot);
+                                }
+                                catch (Exception metadataEx)
+                                {
+                                    _logger.Warn(
+                                        "Local media filter: could not remove generated metadata for '{0}': {1}",
+                                        filteredCandidate.CleanedName,
+                                        metadataEx.Message);
+                                }
+                            }
+
+                            _logger.Debug(
+                                "Local media filter: skipping movie path '{0}' ({1} provider record(s))",
+                                filteredCandidate.CleanedName,
+                                candidates.Count);
+                            Interlocked.Add(ref mp.Skipped, candidates.Count);
+                            Interlocked.Add(ref mp.Completed, candidates.Count);
+                            ReportTaskProgress(mp, taskProgress);
+                            return;
+                        }
+
+                        // Prefer the provider record already stored in the STRM. If
+                        // none matches, use the lowest stream ID for deterministic
+                        // ownership so duplicate catalog entries cannot oscillate.
+                        var owner = candidates[0];
+                        if (File.Exists(owner.StrmPath))
+                        {
+                            try
+                            {
+                                var currentUrl = File.ReadAllText(owner.StrmPath);
+                                var existingOwner = candidates.FirstOrDefault(m =>
+                                    string.Equals(
+                                        NormalizeStreamUrl(currentUrl),
+                                        NormalizeStreamUrl(m.StreamUrl),
+                                        StringComparison.OrdinalIgnoreCase));
+                                if (existingOwner != null)
+                                    owner = existingOwner;
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.Debug(
+                                    "Could not inspect existing duplicate movie path '{0}': {1}",
+                                    owner.StrmPath,
+                                    ex.Message);
+                            }
+                        }
+
+                        if (candidates.Count > 1)
+                            Interlocked.Add(ref mp.Skipped, candidates.Count - 1);
+
+                        var strmResult = WriteStrmIfChanged(owner.StrmPath, owner.StreamUrl);
+                        if (strmResult == StrmWriteResult.Added)
+                            Interlocked.Increment(ref mp.Added);
+                        else if (strmResult == StrmWriteResult.Changed)
+                            Interlocked.Increment(ref mp.Changed);
+                        else
+                            Interlocked.Increment(ref mp.Skipped);
+                        lock (writtenPaths) { writtenPaths.Add(owner.StrmPath); }
+
+                        if (strmResult == StrmWriteResult.Added)
+                        {
+                            lock (addedMovieTitles)
+                            {
+                                if (addedMovieTitles.Count < 20)
+                                    addedMovieTitles.Add(owner.CleanedName);
+                            }
+                        }
+
+                        if (config.EnableNfoFiles && strmResult != StrmWriteResult.Unchanged)
+                        {
+                            var nfoPath = Path.Combine(
+                                owner.MovieDirectory,
+                                owner.FolderName + ".nfo");
+                            var yearMatch = YearInTitleRegex.Match(owner.CleanedName);
+                            int? nfoYear = null;
+                            if (yearMatch.Success)
+                            {
+                                int y;
+                                if (int.TryParse(
+                                    yearMatch.Groups[1].Value,
+                                    NumberStyles.None,
+                                    CultureInfo.InvariantCulture,
+                                    out y))
+                                    nfoYear = y;
+                            }
+
+                            try
+                            {
+                                if (NfoWriter.WriteMovieNfo(
+                                    nfoPath,
+                                    owner.CleanedName,
+                                    owner.TmdbId,
+                                    nfoYear))
+                                    Interlocked.Increment(ref mp.NfoChanged);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.Debug(
+                                    "NFO write failed for '{0}': {1}",
+                                    owner.Movie.Name,
+                                    ex.Message);
+                            }
+                        }
+
+                        Interlocked.Add(ref mp.Completed, candidates.Count);
+                        ReportTaskProgress(mp, taskProgress);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        var failedCandidate = group.First();
+                        _logger.Error(
+                            "Failed to write STRM for movie path '{0}': [{1}] {2}",
+                            failedCandidate.CleanedName,
+                            ex.GetType().Name,
+                            ex.Message);
+                        lock (_failedItemsLock)
+                        {
+                            _failedItems.Add(new FailedSyncItem
+                            {
+                                ItemType = "Movie",
+                                StreamId = failedCandidate.Movie.StreamId,
+                                Name = failedCandidate.Movie.Name,
+                                CategoryId = failedCandidate.Movie.CategoryId,
+                                TmdbId = IsValidTmdbId(failedCandidate.Movie.TmdbId)
+                                    ? failedCandidate.Movie.TmdbId
+                                    : null,
+                                ContainerExtension = failedCandidate.Movie.ContainerExtension,
+                                ErrorMessage = ex.Message,
+                            });
+                        }
+                        var groupCount = group.Count();
+                        if (groupCount > 1)
+                            Interlocked.Add(ref mp.Skipped, groupCount - 1);
+                        Interlocked.Increment(ref mp.Failed);
+                        Interlocked.Add(ref mp.Completed, groupCount);
+                        ReportTaskProgress(mp, taskProgress);
+                    }
+                    finally
+                    {
+                        semaphore.Release();
+                    }
+                });
+
+                await Task.WhenAll(writeTasks).ConfigureAwait(false);
+
+                var movieProviderComplete = Volatile.Read(ref mp.Failed) == 0;
+                if (!movieProviderComplete)
+                {
+                    movieSyncSuccess = false;
+                    mp.Phase = "Incomplete provider data";
+                    _logger.Warn(
+                        "Movie sync is incomplete because {0} item(s) failed; orphan cleanup and sync timestamp updates are blocked",
+                        mp.Failed);
+                }
 
                 if (Volatile.Read(ref movieTmdbCacheChanged) != 0)
                 {
@@ -812,11 +1199,22 @@ namespace Emby.Xtream.Plugin.Service
 
                 // Cleanup orphans
                 cancellationToken.ThrowIfCancellationRequested();
-                if (config.CleanupOrphans)
+                var stableCatalogRuns = movieProviderComplete
+                    ? ObserveCompleteCatalog(
+                        moviesRoot,
+                        allStreams.Select(m =>
+                            m.StreamId.ToString(CultureInfo.InvariantCulture) + "." +
+                            (m.ContainerExtension ?? "mp4")))
+                    : 0;
+                if (config.CleanupOrphans && movieProviderComplete)
                 {
                     mp.Phase = "Cleaning up orphaned files";
-                    var moviesRoot = Path.Combine(config.StrmLibraryPath, GetMovieRootFolderName(config));
-                    var orphans = CollectOrphans(moviesRoot, writtenPaths, config.OrphanSafetyThreshold, locallyFilteredPaths);
+                    var orphans = CollectOrphans(
+                        moviesRoot,
+                        writtenPaths,
+                        config.OrphanSafetyThreshold,
+                        stableCatalogRuns,
+                        locallyFilteredPaths);
                     if (config.EnableOrphanPreview && orphans.Count > 0)
                     {
                         StagePendingOrphans(config, orphans);
@@ -826,12 +1224,18 @@ namespace Emby.Xtream.Plugin.Service
                     {
                         mp.Deleted = DeleteOrphans(orphans, moviesRoot);
                     }
+
+                    var metadataOnlyDirectories = PruneMetadataOnlyDirectories(
+                        moviesRoot,
+                        cancellationToken);
+                    if (metadataOnlyDirectories > 0)
+                        Interlocked.Increment(ref mp.NfoChanged);
                 }
                 mp.Deleted += filterDeletedMovies;
 
                 // Persist the highest Added timestamp seen so next sync can delta from here
                 cancellationToken.ThrowIfCancellationRequested();
-                if (allStreams.Count > 0)
+                if (movieProviderComplete && allStreams.Count > 0)
                 {
                     var maxAdded = allStreams.Max(m => m.Added);
                     if (maxAdded > config.LastMovieSyncTimestamp)
@@ -843,7 +1247,7 @@ namespace Emby.Xtream.Plugin.Service
 
                 _logger.Info("Movie STRM sync completed: {0} added, {1} changed, {2} skipped, {3} deleted, {4} failed",
                     mp.Added, mp.Changed, mp.Skipped, mp.Deleted, mp.Failed);
-                QueueEmbyLibraryScanIfChanged(isDocumentaries ? "Documentary" : "Movie", mp);
+                CompleteSyncAndCoalesceLibraryScan(isDocumentaries ? "Documentary" : "Movie", mp);
             }
             catch (OperationCanceledException)
             {
@@ -974,6 +1378,7 @@ namespace Emby.Xtream.Plugin.Service
 
                 var writtenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var locallyFilteredPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var intendedEpisodeKeys = new ConcurrentBag<string>();
                 var semaphore = new SemaphoreSlim(config.SyncParallelism);
                 int filterDeletedEpisodes = 0;
 
@@ -982,6 +1387,7 @@ namespace Emby.Xtream.Plugin.Service
                 var updatedHashes = new ConcurrentDictionary<string, string>();
                 int noFolderSkippedCount = 0;
                 int providerErrorSkippedCount = 0;
+                int providerDataIncomplete = 0;
 
                 var tasks = allSeries.Select(async series =>
                 {
@@ -1028,17 +1434,35 @@ namespace Emby.Xtream.Plugin.Service
                             bool isClientError = httpEx != null && (
                                 msg.Contains(" 4") ||   // catches "4xx" in the status description
                                 msg.Contains(": 4"));   // "success: 4xx" format
-                            if (isClientError)
+                            var isNotFound = isClientError && msg.Contains("404");
+                            if (isNotFound)
                             {
-                                _logger.Info("Skipping series '{0}' (id={1}): provider returned {2}", series.Name, series.SeriesId, msg);
+                                var protectedCount = ProtectExistingSeriesFiles(
+                                    config.StrmLibraryPath,
+                                    subFolder,
+                                    seriesName,
+                                    writtenPaths);
+                                _logger.Warn(
+                                    "Series '{0}' (id={1}) is listed by the provider but its detail endpoint returned 404; " +
+                                    "protected {2} existing episode file(s) and skipped this stale catalog entry",
+                                    series.Name,
+                                    series.SeriesId,
+                                    protectedCount);
                                 Interlocked.Increment(ref providerErrorSkippedCount);
                                 Interlocked.Increment(ref sp.Skipped);
                                 Interlocked.Increment(ref sp.Completed);
                                 ReportTaskProgress(sp, taskProgress);
                                 return;
                             }
-
-                            _logger.Error("Failed to fetch detail for series '{0}' (id={1}): [{2}] {3}", series.Name, series.SeriesId, ex.GetType().Name, msg);
+                            if (isClientError)
+                            {
+                                _logger.Warn("Series '{0}' (id={1}) could not be validated: provider returned {2}", series.Name, series.SeriesId, msg);
+                                Interlocked.Increment(ref providerErrorSkippedCount);
+                            }
+                            else
+                            {
+                                _logger.Error("Failed to fetch detail for series '{0}' (id={1}): [{2}] {3}", series.Name, series.SeriesId, ex.GetType().Name, msg);
+                            }
                             lock (_failedItemsLock)
                             {
                                 _failedItems.Add(new FailedSyncItem
@@ -1050,6 +1474,7 @@ namespace Emby.Xtream.Plugin.Service
                                     ErrorMessage = msg
                                 });
                             }
+                            Interlocked.Exchange(ref providerDataIncomplete, 1);
                             Interlocked.Increment(ref sp.Failed);
                             Interlocked.Increment(ref sp.Completed);
                             ReportTaskProgress(sp, taskProgress);
@@ -1058,6 +1483,18 @@ namespace Emby.Xtream.Plugin.Service
 
                         if (detail == null || detail.Episodes == null || detail.Episodes.Count == 0)
                         {
+                            var protectedCount = ProtectExistingSeriesFiles(
+                                config.StrmLibraryPath,
+                                subFolder,
+                                seriesName,
+                                writtenPaths);
+                            _logger.Warn(
+                                "Series '{0}' (id={1}) returned no episode detail; protected {2} existing episode file(s) and skipped this empty provider record",
+                                series.Name,
+                                series.SeriesId,
+                                protectedCount);
+                            Interlocked.Increment(ref providerErrorSkippedCount);
+                            Interlocked.Increment(ref sp.Skipped);
                             Interlocked.Increment(ref sp.Completed);
                             ReportTaskProgress(sp, taskProgress);
                             return;
@@ -1184,6 +1621,8 @@ namespace Emby.Xtream.Plugin.Service
                                 var ext = !string.IsNullOrEmpty(episode.ContainerExtension)
                                     ? episode.ContainerExtension
                                     : "mp4";
+                                intendedEpisodeKeys.Add(
+                                    episode.Id.ToString(CultureInfo.InvariantCulture) + "." + ext);
 
                                 var streamUrl = string.Format(
                                     CultureInfo.InvariantCulture,
@@ -1284,32 +1723,34 @@ namespace Emby.Xtream.Plugin.Service
 
                 await Task.WhenAll(tasks).ConfigureAwait(false);
 
-                // Guard: if the provider was returning errors for a large fraction of series
-                // (e.g. 429 rate-limit flood during an outage), skip orphan cleanup entirely.
-                // An empty writtenPaths from a degraded run would mark the whole library as
-                // orphaned; the safety threshold catches it but this is a cleaner early exit.
-                bool skipOrphansHighErrorRate = false;
-                if (sp.Total > 10 && providerErrorSkippedCount > 0)
+                var seriesProviderComplete =
+                    Volatile.Read(ref providerDataIncomplete) == 0 &&
+                    Volatile.Read(ref sp.Failed) == 0;
+                if (!seriesProviderComplete)
                 {
-                    double errorRatio = (double)providerErrorSkippedCount / sp.Total;
-                    if (errorRatio > 0.40)
-                    {
-                        skipOrphansHighErrorRate = true;
-                        _logger.Warn(
-                            "Orphan cleanup skipped: {0}/{1} ({2:P0}) series returned HTTP errors from the provider — " +
-                            "provider was likely down or rate-limiting during this sync. " +
-                            "Orphan cleanup will run on the next successful sync.",
-                            providerErrorSkippedCount, sp.Total, errorRatio);
-                    }
+                    seriesSyncSuccess = false;
+                    sp.Phase = "Incomplete provider data";
+                    _logger.Warn(
+                        "Series sync is incomplete because {0} series could not be fully validated; " +
+                        "orphan cleanup, timestamps, and episode-hash updates are blocked",
+                        sp.Failed);
                 }
 
                 // Cleanup orphans
                 cancellationToken.ThrowIfCancellationRequested();
-                if (config.CleanupOrphans && !skipOrphansHighErrorRate)
+                var showsRoot = Path.Combine(config.StrmLibraryPath, GetSeriesRootFolderName(config));
+                var stableCatalogRuns = seriesProviderComplete
+                    ? ObserveCompleteCatalog(showsRoot, intendedEpisodeKeys)
+                    : 0;
+                if (config.CleanupOrphans && seriesProviderComplete)
                 {
                     sp.Phase = "Cleaning up orphaned files";
-                    var showsRoot = Path.Combine(config.StrmLibraryPath, GetSeriesRootFolderName(config));
-                    var orphans = CollectOrphans(showsRoot, writtenPaths, config.OrphanSafetyThreshold, locallyFilteredPaths);
+                    var orphans = CollectOrphans(
+                        showsRoot,
+                        writtenPaths,
+                        config.OrphanSafetyThreshold,
+                        stableCatalogRuns,
+                        locallyFilteredPaths);
                     if (config.EnableOrphanPreview && orphans.Count > 0)
                     {
                         StagePendingOrphans(config, orphans);
@@ -1321,28 +1762,40 @@ namespace Emby.Xtream.Plugin.Service
                         sp.Deleted = deleted;
                         ep.Deleted = deleted;
                     }
+
+                    var metadataOnlyDirectories = PruneMetadataOnlyDirectories(
+                        showsRoot,
+                        cancellationToken);
+                    if (metadataOnlyDirectories > 0)
+                        Interlocked.Increment(ref sp.NfoChanged);
                 }
                 ep.Deleted += filterDeletedEpisodes;
 
                 // Persist the highest LastModified timestamp seen
                 cancellationToken.ThrowIfCancellationRequested();
-                if (maxSeriesTs > config.LastSeriesSyncTimestamp)
+                if (seriesProviderComplete && maxSeriesTs > config.LastSeriesSyncTimestamp)
                 {
                     config.LastSeriesSyncTimestamp = maxSeriesTs;
                     saveConfig?.Invoke();
                 }
 
                 // Persist episode hashes for next run
-                config.SeriesEpisodeHashesJson = SerializeEpisodeHashes(updatedHashes);
-                saveConfig?.Invoke();
+                if (seriesProviderComplete)
+                {
+                    config.SeriesEpisodeHashesJson = SerializeEpisodeHashes(updatedHashes);
+                    saveConfig?.Invoke();
+                }
 
                 if (noFolderSkippedCount > 0)
                     _logger.Warn("Series skip: {0} series had no matching folder mapping (check Series Folder Mode settings)", noFolderSkippedCount);
                 if (providerErrorSkippedCount > 0)
-                    _logger.Warn("Series skip: {0} series returned HTTP 4xx from provider (no episodes or provider data issue)", providerErrorSkippedCount);
+                    _logger.Warn(
+                        "Series provider skips: {0} stale 404 or empty-detail record(s) were protected",
+                        providerErrorSkippedCount);
+                ep.Failed = sp.Failed;
                 _logger.Info("Series STRM sync completed: {0} episodes added, {1} changed, {2} skipped, {3} deleted, {4} failed",
                     ep.Added, ep.Changed, ep.Skipped, ep.Deleted, sp.Failed);
-                QueueEmbyLibraryScanIfChanged(isDocuSeries ? "DocuSeries" : "Series", sp, ep);
+                CompleteSyncAndCoalesceLibraryScan(isDocuSeries ? "DocuSeries" : "Series", sp, ep);
             }
             catch (OperationCanceledException)
             {
@@ -1382,7 +1835,7 @@ namespace Emby.Xtream.Plugin.Service
                     EpisodeTotal = ep.Total,
                     EpisodeAdded = ep.Added,
                     EpisodeSkipped = ep.Skipped,
-                    EpisodeFailed = ep.Failed,
+                    EpisodeFailed = sp.Failed,
                     EpisodeDeleted = ep.Deleted,
                     AddedSeriesTitles = addedSeriesTitles,
                 });
@@ -1458,7 +1911,7 @@ namespace Emby.Xtream.Plugin.Service
                     foreach (var s in succeeded)
                         _failedItems.Remove(s);
                 }
-                QueueEmbyLibraryScanIfChanged("Retry", _retryProgress);
+                CompleteSyncAndCoalesceLibraryScan("Retry", _retryProgress);
             }
             finally
             {
@@ -1807,7 +2260,8 @@ namespace Emby.Xtream.Plugin.Service
                 "{0}/player_api.php?username={1}&password={2}&action={3}",
                 config.BaseUrl, Uri.EscapeDataString(config.Username ?? string.Empty), Uri.EscapeDataString(config.Password ?? string.Empty), action);
 
-            var json = await _httpClient.GetStringAsync(url).ConfigureAwait(false);
+            var json = await GetProviderStringWithRetryAsync(
+                url, action, cancellationToken).ConfigureAwait(false);
             return XtreamResponseParser.DeserializeCategories(json, JsonOptions);
         }
 
@@ -1849,7 +2303,8 @@ namespace Emby.Xtream.Plugin.Service
                     "{0}/player_api.php?username={1}&password={2}&action=get_vod_streams",
                     config.BaseUrl, Uri.EscapeDataString(config.Username ?? string.Empty), Uri.EscapeDataString(config.Password ?? string.Empty));
 
-                var json = await _httpClient.GetStringAsync(url).ConfigureAwait(false);
+                var json = await GetProviderStringWithRetryAsync(
+                    url, "VOD catalog", cancellationToken).ConfigureAwait(false);
                 allStreams = STJ.JsonSerializer.Deserialize<List<VodStreamInfo>>(json, JsonOptions)
                     ?? new List<VodStreamInfo>();
             }
@@ -1866,7 +2321,10 @@ namespace Emby.Xtream.Plugin.Service
                             "{0}/player_api.php?username={1}&password={2}&action=get_vod_streams&category_id={3}",
                             config.BaseUrl, Uri.EscapeDataString(config.Username ?? string.Empty), Uri.EscapeDataString(config.Password ?? string.Empty), catId);
 
-                        var json = await _httpClient.GetStringAsync(url).ConfigureAwait(false);
+                        var json = await GetProviderStringWithRetryAsync(
+                            url,
+                            "VOD category " + catId.ToString(CultureInfo.InvariantCulture),
+                            cancellationToken).ConfigureAwait(false);
                         var streams = STJ.JsonSerializer.Deserialize<List<VodStreamInfo>>(json, JsonOptions)
                             ?? new List<VodStreamInfo>();
 
@@ -1883,8 +2341,10 @@ namespace Emby.Xtream.Plugin.Service
                     }
                     catch (Exception ex)
                     {
-                        _logger.Warn("Failed to fetch VOD streams for category {0}: {1}", catId, ex.Message);
-                        return new List<VodStreamInfo>();
+                        throw new InvalidOperationException(
+                            "VOD category " + catId.ToString(CultureInfo.InvariantCulture) +
+                            " could not be loaded; sync aborted to preserve the existing library",
+                            ex);
                     }
                     finally
                     {
@@ -1919,7 +2379,10 @@ namespace Emby.Xtream.Plugin.Service
                     Uri.EscapeDataString(config.Password ?? string.Empty),
                     streamId);
 
-                var json = await _httpClient.GetStringAsync(url).ConfigureAwait(false);
+                var json = await GetProviderStringWithRetryAsync(
+                    url,
+                    "VOD detail " + streamId.ToString(CultureInfo.InvariantCulture),
+                    cancellationToken).ConfigureAwait(false);
                 cancellationToken.ThrowIfCancellationRequested();
 
                 string tmdbId = null;
@@ -2238,7 +2701,8 @@ namespace Emby.Xtream.Plugin.Service
                     "{0}/player_api.php?username={1}&password={2}&action=get_series",
                     config.BaseUrl, Uri.EscapeDataString(config.Username ?? string.Empty), Uri.EscapeDataString(config.Password ?? string.Empty));
 
-                var json = await _httpClient.GetStringAsync(url).ConfigureAwait(false);
+                var json = await GetProviderStringWithRetryAsync(
+                    url, "series catalog", cancellationToken).ConfigureAwait(false);
                 allSeries = XtreamResponseParser.DeserializeSeriesList(json, JsonOptions);
             }
             else
@@ -2254,7 +2718,10 @@ namespace Emby.Xtream.Plugin.Service
                             "{0}/player_api.php?username={1}&password={2}&action=get_series&category_id={3}",
                             config.BaseUrl, Uri.EscapeDataString(config.Username ?? string.Empty), Uri.EscapeDataString(config.Password ?? string.Empty), catId);
 
-                        var json = await _httpClient.GetStringAsync(url).ConfigureAwait(false);
+                        var json = await GetProviderStringWithRetryAsync(
+                            url,
+                            "series category " + catId.ToString(CultureInfo.InvariantCulture),
+                            cancellationToken).ConfigureAwait(false);
                         var series = XtreamResponseParser.DeserializeSeriesList(json, JsonOptions);
 
                         // Override category_id to match the requested category (same
@@ -2268,8 +2735,10 @@ namespace Emby.Xtream.Plugin.Service
                     }
                     catch (Exception ex)
                     {
-                        _logger.Warn("Failed to fetch series for category {0}: {1}", catId, ex.Message);
-                        return new List<SeriesInfo>();
+                        throw new InvalidOperationException(
+                            "Series category " + catId.ToString(CultureInfo.InvariantCulture) +
+                            " could not be loaded; sync aborted to preserve the existing library",
+                            ex);
                     }
                     finally
                     {
@@ -2297,7 +2766,10 @@ namespace Emby.Xtream.Plugin.Service
                 "{0}/player_api.php?username={1}&password={2}&action=get_series_info&series_id={3}",
                 config.BaseUrl, Uri.EscapeDataString(config.Username ?? string.Empty), Uri.EscapeDataString(config.Password ?? string.Empty), seriesId);
 
-            var json = await _httpClient.GetStringAsync(url).ConfigureAwait(false);
+            var json = await GetProviderStringWithRetryAsync(
+                url,
+                "series detail " + seriesId.ToString(CultureInfo.InvariantCulture),
+                cancellationToken).ConfigureAwait(false);
             // Some providers return [] or false/null when a series has no detail.
             // Treat anything that isn't a JSON object as empty rather than throwing.
             var trimmed = json == null ? string.Empty : json.TrimStart();
@@ -2312,6 +2784,7 @@ namespace Emby.Xtream.Plugin.Service
             string rootPath,
             HashSet<string> validPaths,
             double safetyThreshold,
+            int consecutiveCompleteCatalogRuns,
             HashSet<string> locallyFilteredPaths = null)
         {
             if (!Directory.Exists(rootPath)) return new List<string>();
@@ -2324,18 +2797,29 @@ namespace Emby.Xtream.Plugin.Service
                     orphans.Add(s);
             }
 
-            if (safetyThreshold > 0 && orphans.Count > 0)
+            if (orphans.Count > 0)
             {
                 var thresholdTotal = existingStrms.Count(s =>
                     locallyFilteredPaths == null || !locallyFilteredPaths.Contains(s));
                 if (thresholdTotal > 10)
                 {
                     double ratio = (double)orphans.Count / thresholdTotal;
-                    if (ratio > safetyThreshold)
+                    if (safetyThreshold > 0 && ratio > safetyThreshold)
                     {
                         _logger.Warn(
                             "Orphan cleanup skipped: {0}/{1} ({2:P0}) exceeds safety threshold {3:P0}",
                             orphans.Count, thresholdTotal, ratio, safetyThreshold);
+                        return new List<string>();
+                    }
+
+                    if (ratio > LargeOrphanRatio && consecutiveCompleteCatalogRuns < 2)
+                    {
+                        _logger.Warn(
+                            "Large orphan cleanup skipped: {0}/{1} ({2:P0}) requires two consecutive identical complete catalogs; observed {3}",
+                            orphans.Count,
+                            thresholdTotal,
+                            ratio,
+                            consecutiveCompleteCatalogRuns);
                         return new List<string>();
                     }
                 }
@@ -2352,15 +2836,8 @@ namespace Emby.Xtream.Plugin.Service
                 {
                     File.Delete(strmFile);
                     removed++;
-                    var dir = Path.GetDirectoryName(strmFile);
-                    while (!string.IsNullOrEmpty(dir) &&
-                           !string.Equals(dir, rootPath, StringComparison.OrdinalIgnoreCase) &&
-                           Directory.Exists(dir) &&
-                           Directory.GetFileSystemEntries(dir).Length == 0)
-                    {
-                        Directory.Delete(dir);
-                        dir = Path.GetDirectoryName(dir);
-                    }
+                    DeleteMatchingNfo(strmFile);
+                    PruneOrphanDirectories(Path.GetDirectoryName(strmFile), rootPath);
                 }
                 catch (Exception ex)
                 {
@@ -2370,6 +2847,175 @@ namespace Emby.Xtream.Plugin.Service
             if (removed > 0)
                 _logger.Info("Removed {0} orphaned STRM files from {1}", removed, rootPath);
             return removed;
+        }
+
+        private static void DeleteMatchingNfo(string strmPath)
+        {
+            var nfoPath = Path.ChangeExtension(strmPath, ".nfo");
+            if (File.Exists(nfoPath))
+                File.Delete(nfoPath);
+        }
+
+        private static void PruneOrphanDirectories(string startDirectory, string rootPath)
+        {
+            var root = Path.GetFullPath(rootPath)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var directory = startDirectory;
+
+            while (!string.IsNullOrEmpty(directory) &&
+                   !string.Equals(
+                       Path.GetFullPath(directory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                       root,
+                       StringComparison.OrdinalIgnoreCase) &&
+                   Directory.Exists(directory))
+            {
+                var entries = Directory.GetFileSystemEntries(directory);
+                var containsSubdirectory = entries.Any(Directory.Exists);
+                var containsNonNfoFile = entries.Any(path =>
+                    File.Exists(path) &&
+                    !string.Equals(Path.GetExtension(path), ".nfo", StringComparison.OrdinalIgnoreCase));
+
+                // Preserve directories that still contain media, artwork, or child
+                // seasons. If only generated NFO metadata remains, remove it.
+                if (containsSubdirectory || containsNonNfoFile)
+                    break;
+
+                foreach (var nfoPath in entries.Where(File.Exists))
+                    File.Delete(nfoPath);
+
+                Directory.Delete(directory);
+                directory = Path.GetDirectoryName(directory);
+            }
+        }
+
+        private int PruneMetadataOnlyDirectories(
+            string rootPath,
+            CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
+                return 0;
+
+            var root = Path.GetFullPath(rootPath)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var rootPrefix = root + Path.DirectorySeparatorChar;
+            var directories = new List<string>();
+            var pending = new Stack<string>();
+            pending.Push(root);
+
+            // Discover directories without following symbolic links/reparse points.
+            // Every candidate must remain below the configured content root.
+            while (pending.Count > 0)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var parent = pending.Pop();
+                string[] children;
+                try
+                {
+                    children = Directory.GetDirectories(parent);
+                }
+                catch (Exception ex)
+                {
+                    _logger.Debug(
+                        "Metadata cleanup could not enumerate '{0}': {1}",
+                        parent,
+                        ex.Message);
+                    continue;
+                }
+
+                foreach (var child in children)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var fullChild = Path.GetFullPath(child)
+                        .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                    if (!fullChild.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase))
+                    {
+                        _logger.Warn(
+                            "Metadata cleanup skipped path outside content root: {0}",
+                            fullChild);
+                        continue;
+                    }
+
+                    try
+                    {
+                        if ((File.GetAttributes(fullChild) & FileAttributes.ReparsePoint) != 0)
+                        {
+                            _logger.Debug(
+                                "Metadata cleanup skipped symbolic link/reparse point '{0}'",
+                                fullChild);
+                            continue;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Debug(
+                            "Metadata cleanup could not inspect '{0}': {1}",
+                            fullChild,
+                            ex.Message);
+                        continue;
+                    }
+
+                    directories.Add(fullChild);
+                    pending.Push(fullChild);
+                }
+            }
+
+            var removedDirectories = 0;
+            var removedNfoFiles = 0;
+            foreach (var directory in directories.OrderByDescending(path => path.Length))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                try
+                {
+                    if (!Directory.Exists(directory))
+                        continue;
+
+                    var entries = Directory.GetFileSystemEntries(directory);
+                    var containsAnythingExceptNfo = false;
+                    foreach (var path in entries)
+                    {
+                        if (!File.Exists(path) ||
+                            !string.Equals(
+                                Path.GetExtension(path),
+                                ".nfo",
+                                StringComparison.OrdinalIgnoreCase) ||
+                            (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+                        {
+                            containsAnythingExceptNfo = true;
+                            break;
+                        }
+                    }
+                    if (containsAnythingExceptNfo)
+                        continue;
+
+                    foreach (var nfoPath in entries)
+                    {
+                        File.Delete(nfoPath);
+                        removedNfoFiles++;
+                    }
+
+                    Directory.Delete(directory);
+                    removedDirectories++;
+                }
+                catch (Exception ex)
+                {
+                    _logger.Debug(
+                        "Metadata cleanup could not remove '{0}': {1}",
+                        directory,
+                        ex.Message);
+                }
+            }
+
+            if (removedDirectories > 0)
+            {
+                _logger.Info(
+                    "Metadata cleanup removed {0} NFO-only/empty director{1} and {2} generated NFO file(s) from {3}",
+                    removedDirectories,
+                    removedDirectories == 1 ? "y" : "ies",
+                    removedNfoFiles,
+                    root);
+            }
+
+            return removedDirectories;
         }
 
         // Stages orphan full paths as relative paths in PendingOrphansJson.
@@ -2422,15 +3068,23 @@ namespace Emby.Xtream.Plugin.Service
                 {
                     File.Delete(full);
                     removed++;
-                    var dir = Path.GetDirectoryName(full);
-                    while (!string.IsNullOrEmpty(dir) &&
-                           !string.Equals(dir, root, StringComparison.OrdinalIgnoreCase) &&
-                           Directory.Exists(dir) &&
-                           Directory.GetFileSystemEntries(dir).Length == 0)
+                    DeleteMatchingNfo(full);
+
+                    // Staged paths are relative to the common STRM root. Stop
+                    // pruning at the content root (Movies, TV Shows, etc.).
+                    var relative = rel.TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                    var firstSeparator = relative.IndexOfAny(new[]
                     {
-                        Directory.Delete(dir);
-                        dir = Path.GetDirectoryName(dir);
-                    }
+                        Path.DirectorySeparatorChar,
+                        Path.AltDirectorySeparatorChar,
+                    });
+                    var contentRootName = firstSeparator >= 0
+                        ? relative.Substring(0, firstSeparator)
+                        : relative;
+                    var contentRoot = string.IsNullOrEmpty(root)
+                        ? root
+                        : Path.Combine(root, contentRootName);
+                    PruneOrphanDirectories(Path.GetDirectoryName(full), contentRoot);
                 }
                 catch (Exception ex)
                 {

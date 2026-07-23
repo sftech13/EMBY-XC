@@ -4,6 +4,34 @@ All notable changes to XC2EMBY are listed here, newest first.
 
 ---
 
+## v1.1.117
+- Successful movie, documentary, TV-show, and DocuSeries orphan cleanup now performs a safe bottom-up metadata sweep. Empty directories and directories containing only generated NFO files are removed, including historical leftovers whose STRM was deleted by an older plugin version.
+- Metadata cleanup remains inside the configured content root, skips symbolic links/reparse points, and preserves any directory containing a STRM, artwork, media, or another live subdirectory.
+
+## v1.1.116
+- Movie sync now resolves and groups provider records by their final STRM path before writing. Local-media matches suppress the entire path, preventing another cross-listed/duplicate record from recreating a filtered STRM during the same run.
+- Duplicate movie paths now have one stable owner. The existing stream URL is preserved when it still belongs to a current provider record; otherwise the lowest stream ID wins deterministically, eliminating repeated URL rewrites caused by parallel records racing for one file.
+- Local-media movie removal now deletes the matching generated NFO and prunes metadata-only directories using the same safe content-root boundary as orphan cleanup.
+
+## v1.1.115
+- Treats series records that return a successful but empty/no-episode detail payload like stale 404 records: existing episode STRMs are protected and the record is reported as a protected skip instead of permanently failing every sync.
+
+## v1.1.114
+- Treats series-list entries whose detail endpoint consistently returns HTTP 404 as stale provider records: existing episode STRMs are explicitly protected from orphan cleanup and the record is reported as a protected skip. Transient SSL/connection/429/5xx failures still mark the run incomplete and block cleanup.
+- Provider request errors no longer misleadingly say "after transient retries" for non-retryable HTTP responses such as 404.
+
+## v1.1.113
+- Orphan cleanup now removes the matching movie or episode NFO with each deleted STRM, removes generated `tvshow.nfo` metadata after the final episode is gone, and prunes empty season/title directories without crossing the configured content root. Staged-orphan commits use the same cleanup behavior.
+- Added transient provider retries with 2/5/10-second backoff for HTTP 429/5xx, timeouts, connection failures, and temporary SSL failures.
+- Category fetches now fail closed instead of turning a failed category into an empty catalog. Incomplete movie/series runs block orphan cleanup and do not advance sync timestamps or episode hashes.
+- Any unresolved series-detail failure now preserves the existing library by blocking cleanup for the entire content run, marks Sync History as failed, and reports the actual failed-series count.
+- Large orphan sets above 20% require two consecutive identical complete provider catalogs before deletion, in addition to the configured percentage threshold.
+- Provider health checks now validate the enabled VOD and series category endpoints after authentication.
+- Fixed VOD Sync History totals becoming negative after large orphan cleanups; orphan deletions are no longer subtracted from the provider catalog total.
+
+## v1.1.112
+- Coalesced STRM sync refreshes: Movies, Documentaries, TV Shows, DocuSeries, and retry operations no longer queue an immediate global Emby scan independently. File changes now set one pending scan, sync completions reset a 90-minute quiet window, and the scan waits until no XC2EMBY sync is running.
+
 ## v1.1.111
 - Fixed Auto-Sync saves leaving XC2EMBY's Emby scheduled-task triggers empty: the settings page now handles both direct-array and wrapped Emby scheduled-task responses, waits for all four STRM-sync schedules to persist before completing or reloading, and reports malformed responses, missing tasks, or failed trigger updates.
 - Limited Auto-Sync schedule updates to Movies, Documentaries, TV Shows, and DocuSeries so saving plugin settings cannot overwrite unrelated XC2EMBY health, guide-refresh, or manual-task triggers.

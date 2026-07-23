@@ -58,7 +58,8 @@ namespace Emby.Xtream.Plugin.Service
 
             try
             {
-                var client = Plugin.CreateHttpClient(10);
+                using (var client = Plugin.CreateHttpClient(10))
+                {
                 var response = await client.GetStringAsync(url).ConfigureAwait(false);
                 using (var doc = System.Text.Json.JsonDocument.Parse(response))
                 {
@@ -73,6 +74,38 @@ namespace Emby.Xtream.Plugin.Service
                             auth = n;
                     }
 
+                    if (auth == 1)
+                    {
+                        // Verify the catalog routes used by synchronization, not
+                        // merely the lightweight account/authentication response.
+                        var apiBase = string.Format(
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            "{0}/player_api.php?username={1}&password={2}&action=",
+                            config.BaseUrl.TrimEnd('/'),
+                            Uri.EscapeDataString(config.Username),
+                            Uri.EscapeDataString(config.Password));
+
+                        if (config.SyncMovies || config.SyncDocumentaries)
+                        {
+                            var vodJson = await client.GetStringAsync(apiBase + "get_vod_categories").ConfigureAwait(false);
+                            using (var vodDoc = System.Text.Json.JsonDocument.Parse(vodJson))
+                            {
+                                if (vodDoc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Array)
+                                    throw new InvalidOperationException("VOD category endpoint returned incomplete data");
+                            }
+                        }
+
+                        if (config.SyncSeries || config.SyncDocuSeries)
+                        {
+                            var seriesJson = await client.GetStringAsync(apiBase + "get_series_categories").ConfigureAwait(false);
+                            using (var seriesDoc = System.Text.Json.JsonDocument.Parse(seriesJson))
+                            {
+                                if (seriesDoc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Array)
+                                    throw new InvalidOperationException("Series category endpoint returned incomplete data");
+                            }
+                        }
+                    }
+
                     lock (_lock)
                     {
                         prevState = _previousIsReachable;
@@ -83,6 +116,7 @@ namespace Emby.Xtream.Plugin.Service
                         newState = _isReachable;
                         _previousIsReachable = newState;
                     }
+                }
                 }
             }
             catch (Exception ex)

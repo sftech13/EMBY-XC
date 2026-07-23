@@ -3002,7 +3002,10 @@ function (BaseView, loading) {
         html += '<tbody>';
 
         function historyVodStats(e) {
-            var total = (e.MoviesTotal || 0) - (e.MoviesDeleted || 0);
+            // MoviesTotal is the provider catalog size processed by the sync.
+            // Orphans are files outside that catalog, so subtracting their
+            // deletion count can produce a meaningless negative total.
+            var total = e.MoviesTotal || 0;
             return total +
                 ' <span style="opacity:0.5;">(' +
                 '<span style="color:' + accentColor + '; opacity:1;">+' + (e.MoviesAdded || 0) + '</span> ' +
