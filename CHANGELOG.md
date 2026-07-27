@@ -4,6 +4,9 @@ All notable changes to XC2EMBY are listed here, newest first.
 
 ---
 
+## v1.1.119
+- Fixed provider health checks disposing XC2EMBY's shared 10-second HTTP client after their first request. Repeated health checks, category requests, and scheduled-sync reachability gates now continue using the shared client instead of failing with `ObjectDisposedException`.
+
 ## v1.1.118
 - Provider health checks now defer while any movie, documentary, TV-show, DocuSeries, or failed-item retry sync is active. Deferred checks preserve the last known status and failure count instead of reporting false outages when the local Xtream server is busy serving synchronization requests.
 - Provider HTTP retry handling now retries only HTTP 408/429/5xx responses and genuine timeout/connection/SSL failures. Ordinary 4xx responses such as stale series-detail 404s return immediately instead of consuming the 2/5/10-second transient backoff.

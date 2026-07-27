@@ -70,8 +70,10 @@ namespace Emby.Xtream.Plugin.Service
 
             try
             {
-                using (var client = Plugin.CreateHttpClient(10))
-                {
+                // Plugin.CreateHttpClient returns a process-wide shared client.
+                // Do not wrap it in using: disposing one health-check reference
+                // breaks every subsequent health, category, and live-TV request.
+                var client = Plugin.CreateHttpClient(10);
                 var response = await client.GetStringAsync(url).ConfigureAwait(false);
                 using (var doc = System.Text.Json.JsonDocument.Parse(response))
                 {
@@ -128,7 +130,6 @@ namespace Emby.Xtream.Plugin.Service
                         newState = _isReachable;
                         _previousIsReachable = newState;
                     }
-                }
                 }
             }
             catch (Exception ex)
