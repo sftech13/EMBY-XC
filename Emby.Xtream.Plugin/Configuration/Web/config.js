@@ -1420,6 +1420,7 @@ function (BaseView, loading) {
                 StreamId: item.StreamId,
                 Name: item.Name,
                 CategoryId: item.CategoryId,
+                CategoryName: item.CategoryName,
                 TmdbId: item.TmdbId,
                 ContainerExtension: item.ContainerExtension
             })

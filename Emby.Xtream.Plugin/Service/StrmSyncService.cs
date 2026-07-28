@@ -316,8 +316,9 @@ namespace Emby.Xtream.Plugin.Service
         private SyncProgress _episodeProgress = new SyncProgress();
         private SyncProgress _retryProgress = new SyncProgress();
 
-        // Serializes AddSingleItemAsync calls against each other and guards the
-        // _retryProgress swap-and-restore trick used there (see AddSingleItemAsync).
+        // Serializes AddSingleItemAsync calls against each other and against
+        // RetryFailedAsync, guarding the _retryProgress swap-and-restore trick
+        // AddSingleItemAsync uses (see AddSingleItemAsync and RetryFailedAsync).
         private readonly SemaphoreSlim _retryProgressSwapGate = new SemaphoreSlim(1, 1);
 
         private static void ReportTaskProgress(SyncProgress syncProgress, IProgress<double> taskProgress)
@@ -1932,55 +1933,70 @@ namespace Emby.Xtream.Plugin.Service
             if (items.Count == 0) return;
 
             var config = Plugin.Instance.Configuration;
-            _retryProgress = new SyncProgress { IsRunning = true, Phase = "Retrying failed items", Total = items.Count };
 
+            // Hold the same gate AddSingleItemAsync uses around its _retryProgress swap for
+            // this run's entire lifetime (not just the initial assignment). AddSingleItemAsync
+            // only checks _retryProgress.IsRunning while holding this gate, so as long as we
+            // hold it for as long as we own _retryProgress, a single add can never observe
+            // IsRunning == false, swap in its own scratch progress, and then stomp this run's
+            // _retryProgress reference out from under it in its own finally block.
+            await _retryProgressSwapGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                var semaphore = new SemaphoreSlim(config.SyncParallelism);
-                var categoryNames = new Dictionary<int, string>();
-                var folderMappings = FolderMappingParser.Parse(config.MovieFolderMappings);
-                var writtenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                var succeeded = new List<FailedSyncItem>();
-                var succeededLock = new object();
+                _retryProgress = new SyncProgress { IsRunning = true, Phase = "Retrying failed items", Total = items.Count };
 
-                var tasks = items.Select(async item =>
+                try
                 {
-                    await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
-                    try
-                    {
-                        if (item.ItemType == "Movie")
-                            await RetryMovieItemAsync(item, config, categoryNames, folderMappings, writtenPaths, cancellationToken).ConfigureAwait(false);
-                        else if (item.ItemType == "Series")
-                            await RetrySeriesItemAsync(item, config, cancellationToken).ConfigureAwait(false);
+                    var semaphore = new SemaphoreSlim(config.SyncParallelism);
+                    var categoryNames = new Dictionary<int, string>();
+                    var folderMappings = FolderMappingParser.Parse(config.MovieFolderMappings);
+                    var writtenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    var succeeded = new List<FailedSyncItem>();
+                    var succeededLock = new object();
 
-                        lock (succeededLock) { succeeded.Add(item); }
-                        Interlocked.Increment(ref _retryProgress.Completed);
-                    }
-                    catch (Exception ex)
+                    var tasks = items.Select(async item =>
                     {
-                        _logger.Error("Retry still failed for '{0}': {1}", item.Name, ex.Message);
-                        Interlocked.Increment(ref _retryProgress.Failed);
-                        Interlocked.Increment(ref _retryProgress.Completed);
-                    }
-                    finally
+                        await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+                        try
+                        {
+                            if (item.ItemType == "Movie")
+                                await RetryMovieItemAsync(item, config, categoryNames, folderMappings, writtenPaths, cancellationToken).ConfigureAwait(false);
+                            else if (item.ItemType == "Series")
+                                await RetrySeriesItemAsync(item, config, cancellationToken).ConfigureAwait(false);
+
+                            lock (succeededLock) { succeeded.Add(item); }
+                            Interlocked.Increment(ref _retryProgress.Completed);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.Error("Retry still failed for '{0}': {1}", item.Name, ex.Message);
+                            Interlocked.Increment(ref _retryProgress.Failed);
+                            Interlocked.Increment(ref _retryProgress.Completed);
+                        }
+                        finally
+                        {
+                            semaphore.Release();
+                        }
+                    });
+
+                    await Task.WhenAll(tasks).ConfigureAwait(false);
+
+                    lock (_failedItemsLock)
                     {
-                        semaphore.Release();
+                        foreach (var s in succeeded)
+                            _failedItems.Remove(s);
                     }
-                });
-
-                await Task.WhenAll(tasks).ConfigureAwait(false);
-
-                lock (_failedItemsLock)
-                {
-                    foreach (var s in succeeded)
-                        _failedItems.Remove(s);
+                    CompleteSyncAndCoalesceLibraryScan("Retry", _retryProgress);
                 }
-                CompleteSyncAndCoalesceLibraryScan("Retry", _retryProgress);
+                finally
+                {
+                    _retryProgress.IsRunning = false;
+                    _retryProgress.Phase = "Retry complete";
+                }
             }
             finally
             {
-                _retryProgress.IsRunning = false;
-                _retryProgress.Phase = "Retry complete";
+                _retryProgressSwapGate.Release();
             }
         }
 
@@ -1989,7 +2005,7 @@ namespace Emby.Xtream.Plugin.Service
         /// Dispatches to the same per-item logic RetryFailedAsync uses so STRM naming,
         /// folder placement, and NFO behavior stay identical to a normal sync/retry.
         /// </summary>
-        public async Task<AddSingleItemResult> AddSingleItemAsync(FailedSyncItem item, CancellationToken cancellationToken)
+        public async Task<AddSingleItemResult> AddSingleItemAsync(FailedSyncItem item, string categoryName, CancellationToken cancellationToken)
         {
             if (item == null)
                 return new AddSingleItemResult { Success = false, Message = "No item supplied." };
@@ -2008,11 +2024,12 @@ namespace Emby.Xtream.Plugin.Service
                 // A single-title add must not pollute that display. If a bulk retry is
                 // currently running it owns _retryProgress for its whole run, so we refuse
                 // to run concurrently rather than swap underneath it — that would steal
-                // increments meant for the real retry's counters (and _retryProgressSwapGate
-                // alone can't prevent that, since RetryFailedAsync never takes the gate).
-                // Otherwise, swap in a scratch SyncProgress for the duration of this call,
-                // restore the real one afterwards, and read the scratch counters to tell
-                // the caller whether anything was actually written.
+                // increments meant for the real retry's counters. RetryFailedAsync also
+                // holds _retryProgressSwapGate for its whole run (see there), so this check
+                // and the swap below can never race against a bulk retry starting or
+                // finishing concurrently. Otherwise, swap in a scratch SyncProgress for the
+                // duration of this call, restore the real one afterwards, and read the
+                // scratch counters to tell the caller whether anything was actually written.
                 if (_retryProgress.IsRunning)
                 {
                     return new AddSingleItemResult
@@ -2029,8 +2046,36 @@ namespace Emby.Xtream.Plugin.Service
                 {
                     if (item.ItemType == "Movie")
                     {
+                        // The Worker search result carries the category name (no extra Xtream
+                        // call needed to look it up). Seed the lookup dict with that single
+                        // entry so BuildContentFolderPath can resolve MovieFolderMode "multiple"
+                        // — without it the dict is empty, the lookup always misses, and the
+                        // item is silently never written.
                         var categoryNames = new Dictionary<int, string>();
+                        if (item.CategoryId.HasValue && !string.IsNullOrWhiteSpace(categoryName))
+                        {
+                            categoryNames[item.CategoryId.Value] = categoryName;
+                        }
+
                         var folderMappings = FolderMappingParser.Parse(config.MovieFolderMappings);
+
+                        // Resolve up front (same inputs RetryMovieItemAsync will use) so a
+                        // resolution failure is reported as an explicit error instead of being
+                        // inferred after the fact from unchanged progress counters.
+                        var targetFolder = BuildContentFolderPath(
+                            config.MovieFolderMode, item.CategoryId, categoryNames, folderMappings, GetMovieRootFolderName(config));
+                        if (targetFolder == null)
+                        {
+                            return new AddSingleItemResult
+                            {
+                                Success = false,
+                                Message = string.Format(
+                                    CultureInfo.InvariantCulture,
+                                    "Could not resolve target folder for category {0}. Check the folder mode / mappings in Settings.",
+                                    item.CategoryId.HasValue ? item.CategoryId.Value.ToString(CultureInfo.InvariantCulture) : "(none)")
+                            };
+                        }
+
                         var writtenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                         await RetryMovieItemAsync(item, config, categoryNames, folderMappings, writtenPaths, cancellationToken).ConfigureAwait(false);
                     }

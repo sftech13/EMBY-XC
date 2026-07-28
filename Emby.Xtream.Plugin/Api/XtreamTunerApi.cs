@@ -301,6 +301,7 @@ namespace Emby.Xtream.Plugin.Api
         public int StreamId { get; set; }
         public string Name { get; set; }
         public string CategoryId { get; set; }
+        public string CategoryName { get; set; }
         public string TmdbId { get; set; }
         public string ContainerExtension { get; set; }
     }
@@ -2167,7 +2168,7 @@ namespace Emby.Xtream.Plugin.Api
             };
 
             var syncService = Plugin.Instance.StrmSyncService;
-            return await syncService.AddSingleItemAsync(item, CancellationToken.None).ConfigureAwait(false);
+            return await syncService.AddSingleItemAsync(item, request.CategoryName, CancellationToken.None).ConfigureAwait(false);
         }
 
         private static string StripNonAscii(string s)
