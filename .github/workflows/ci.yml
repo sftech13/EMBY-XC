@@ -1,0 +1,25 @@
+name: CI
+
+# Compile-checks every push and PR. The Release workflow only runs on v* tags,
+# which meant a broken commit could sit on main unnoticed until release time.
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build plugin
+        run: dotnet build Emby.Xtream.Plugin/Emby.Xtream.Plugin.csproj -c Release
