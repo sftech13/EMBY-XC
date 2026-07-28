@@ -16,9 +16,11 @@ namespace Emby.Xtream.Plugin.Client.Models
     public class EpisodeInfo
     {
         [JsonPropertyName("id")]
+        [JsonConverter(typeof(FlexibleInt32Converter))]
         public int Id { get; set; }
 
         [JsonPropertyName("episode_num")]
+        [JsonConverter(typeof(FlexibleInt32Converter))]
         public int EpisodeNum { get; set; }
 
         [JsonPropertyName("title")]
@@ -31,6 +33,7 @@ namespace Emby.Xtream.Plugin.Client.Models
         public string Plot { get; set; } = string.Empty;
 
         [JsonPropertyName("duration")]
+        [JsonConverter(typeof(StringOrNumberConverter))]
         public string Duration { get; set; } = string.Empty;
 
         [JsonPropertyName("rating")]
@@ -38,6 +41,7 @@ namespace Emby.Xtream.Plugin.Client.Models
         public string Rating { get; set; } = string.Empty;
 
         [JsonPropertyName("season")]
+        [JsonConverter(typeof(FlexibleInt32Converter))]
         public int Season { get; set; }
 
         [JsonPropertyName("info")]

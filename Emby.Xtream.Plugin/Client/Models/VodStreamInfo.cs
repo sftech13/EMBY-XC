@@ -5,6 +5,7 @@ namespace Emby.Xtream.Plugin.Client.Models
     public class VodStreamInfo
     {
         [JsonPropertyName("stream_id")]
+        [JsonConverter(typeof(FlexibleInt32Converter))]
         public int StreamId { get; set; }
 
         [JsonPropertyName("name")]
@@ -29,6 +30,7 @@ namespace Emby.Xtream.Plugin.Client.Models
         public double? Added { get; set; }
 
         [JsonPropertyName("tmdb_id")]
+        [JsonConverter(typeof(StringOrNumberConverter))]
         public string TmdbId { get; set; } = string.Empty;
     }
 }
