@@ -36,6 +36,7 @@ namespace Emby.Xtream.Plugin.Client.Models
         public string CustomSid { get; set; } = string.Empty;
 
         [JsonPropertyName("tv_archive")]
+        [JsonConverter(typeof(FlexibleInt32Converter))]
         public int TvArchive { get; set; }
 
         [JsonPropertyName("direct_source")]
@@ -46,6 +47,7 @@ namespace Emby.Xtream.Plugin.Client.Models
         public int TvArchiveDuration { get; set; }
 
         [JsonPropertyName("is_adult")]
+        [JsonConverter(typeof(FlexibleInt32Converter))]
         public int IsAdult { get; set; }
 
         public bool IsAdultChannel => IsAdult != 0;
