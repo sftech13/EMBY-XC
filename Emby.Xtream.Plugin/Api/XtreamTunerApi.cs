@@ -282,6 +282,50 @@ namespace Emby.Xtream.Plugin.Api
     {
     }
 
+    // Server-side proxy to the Catalog Worker's /api/catalog/search. The Worker's API key
+    // lives only in plugin config and is attached here — it must never reach browser JS.
+    [Authenticated(Roles = "Admin")]
+    [Route("/XC2EMBY/Catalog/Search", "GET", Summary = "Searches the catalog Worker for a single title by name")]
+    public class SearchCatalog : IReturn<CatalogSearchResult>
+    {
+        public string Kind { get; set; }
+        public string Q { get; set; }
+        public int? Limit { get; set; }
+    }
+
+    [Authenticated(Roles = "Admin")]
+    [Route("/XC2EMBY/Catalog/Add", "POST", Summary = "Adds a single title found via catalog search, without a full sync")]
+    public class AddCatalogItem : IReturn<AddSingleItemResult>
+    {
+        public string ItemType { get; set; }
+        public int StreamId { get; set; }
+        public string Name { get; set; }
+        public string CategoryId { get; set; }
+        public string TmdbId { get; set; }
+        public string ContainerExtension { get; set; }
+    }
+
+    // Mirrors the Catalog Worker's /api/catalog/search JSON contract (see plugin docs).
+    public class CatalogSearchItem
+    {
+        public string ItemType { get; set; }
+        public int StreamId { get; set; }
+        public string Name { get; set; }
+        public string CategoryId { get; set; }
+        public string CategoryName { get; set; }
+        public string TmdbId { get; set; }
+        public string ContainerExtension { get; set; }
+        public string Cover { get; set; }
+        public long? AddedAt { get; set; }
+    }
+
+    public class CatalogSearchResult
+    {
+        public bool Success { get; set; }
+        public string Message { get; set; }
+        public List<CatalogSearchItem> Items { get; set; } = new List<CatalogSearchItem>();
+    }
+
     public class TestConnectionResult
     {
         public bool Success { get; set; }
@@ -1986,6 +2030,144 @@ namespace Emby.Xtream.Plugin.Api
                 }
             }
             catch { }
+        }
+
+        public async Task<object> Get(SearchCatalog request)
+        {
+            var config = Plugin.Instance?.Configuration;
+            var result = new CatalogSearchResult();
+
+            if (config == null || string.IsNullOrEmpty(config.CatalogWorkerUrl) || string.IsNullOrEmpty(config.CatalogWorkerApiKey))
+            {
+                result.Success = false;
+                result.Message = "Catalog Worker URL and API Key are not configured. Set them in Settings first.";
+                return result;
+            }
+
+            var kind = (request?.Kind ?? string.Empty).Trim().ToLowerInvariant();
+            if (kind != "movie" && kind != "series")
+            {
+                result.Success = false;
+                result.Message = "kind must be 'movie' or 'series'.";
+                return result;
+            }
+
+            var query = (request?.Q ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(query))
+            {
+                result.Success = false;
+                result.Message = "Search query is required.";
+                return result;
+            }
+
+            var limit = (request?.Limit).HasValue && request.Limit.Value > 0
+                ? Math.Min(request.Limit.Value, 200)
+                : 50;
+
+            var url = string.Format(
+                CultureInfo.InvariantCulture,
+                "{0}/api/catalog/search?kind={1}&q={2}&limit={3}",
+                config.CatalogWorkerUrl.TrimEnd('/'),
+                Uri.EscapeDataString(kind),
+                Uri.EscapeDataString(query),
+                limit);
+
+            try
+            {
+                // Shared client (Plugin.CreateHttpClient) — never mutate its DefaultRequestHeaders
+                // since it's reused process-wide. Attach the API key per-request instead.
+                var httpClient = Plugin.CreateHttpClient();
+                using (var httpRequest = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Get, url))
+                {
+                    httpRequest.Headers.TryAddWithoutValidation("X-Api-Key", config.CatalogWorkerApiKey);
+
+                    using (var response = await httpClient.SendAsync(httpRequest).ConfigureAwait(false))
+                    {
+                        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+
+                        if (!response.IsSuccessStatusCode)
+                        {
+                            result.Success = false;
+                            result.Message = string.Format(
+                                CultureInfo.InvariantCulture,
+                                "Catalog Worker returned HTTP {0}.",
+                                (int)response.StatusCode);
+                            return result;
+                        }
+
+                        var items = System.Text.Json.JsonSerializer.Deserialize<List<CatalogSearchItem>>(
+                            body,
+                            new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+                            ?? new List<CatalogSearchItem>();
+
+                        result.Success = true;
+                        result.Items = items;
+                        return result;
+                    }
+                }
+            }
+            catch (TaskCanceledException)
+            {
+                result.Success = false;
+                result.Message = "Catalog Worker request timed out.";
+                return result;
+            }
+            catch (System.Net.Http.HttpRequestException ex)
+            {
+                result.Success = false;
+                result.Message = "Could not reach the Catalog Worker: " + ex.Message;
+                return result;
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                result.Success = false;
+                result.Message = "Catalog Worker returned an unexpected response format.";
+                return result;
+            }
+            catch (Exception ex)
+            {
+                result.Success = false;
+                result.Message = "Catalog search failed: " + ex.Message;
+                return result;
+            }
+        }
+
+        public async Task<object> Post(AddCatalogItem request)
+        {
+            if (request == null)
+                return new AddSingleItemResult { Success = false, Message = "Request body is required." };
+
+            // Do not trust ItemType blindly — it drives which retry code path runs.
+            var itemType = (request.ItemType ?? string.Empty).Trim();
+            if (itemType != "Movie" && itemType != "Series")
+                return new AddSingleItemResult { Success = false, Message = "itemType must be exactly 'Movie' or 'Series'." };
+
+            if (request.StreamId <= 0)
+                return new AddSingleItemResult { Success = false, Message = "streamId is required." };
+
+            if (string.IsNullOrWhiteSpace(request.Name))
+                return new AddSingleItemResult { Success = false, Message = "name is required." };
+
+            int? categoryId = null;
+            if (!string.IsNullOrWhiteSpace(request.CategoryId))
+            {
+                int parsedCategoryId;
+                if (int.TryParse(request.CategoryId, NumberStyles.Integer, CultureInfo.InvariantCulture, out parsedCategoryId))
+                    categoryId = parsedCategoryId;
+            }
+
+            var item = new FailedSyncItem
+            {
+                ItemType = itemType,
+                StreamId = request.StreamId,
+                Name = request.Name,
+                CategoryId = categoryId,
+                TmdbId = request.TmdbId,
+                ContainerExtension = request.ContainerExtension,
+            };
+
+            var syncService = Plugin.Instance.StrmSyncService;
+            return await syncService.AddSingleItemAsync(item, CancellationToken.None).ConfigureAwait(false);
         }
 
         private static string StripNonAscii(string s)

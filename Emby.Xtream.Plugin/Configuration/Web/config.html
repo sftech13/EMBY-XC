@@ -518,6 +518,10 @@
                             style="background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-2px; cursor:pointer; color:inherit; font-size:1em; opacity:0.7;">
                         Settings
                     </button>
+                    <button type="button" class="tabBtn tabBtnSearch" data-tab="search"
+                            style="background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-2px; cursor:pointer; color:inherit; font-size:1em; opacity:0.7;">
+                        Search
+                    </button>
                 </div>
 
                 <!-- ===== Dashboard ===== -->
@@ -696,6 +700,25 @@
                         </button>
                     </div>
                     <div class="connectionTestResult" style="margin-top:0.5em;"></div>
+                </div>
+
+                <hr style="border:none; border-top:1px solid rgba(128,128,128,0.2); margin:0.25em 0 1.25em;" />
+
+                <div class="verticalSection">
+                    <h2 class="sectionTitle">Catalog Search</h2>
+                    <div class="fieldDescription" style="margin-bottom:0.9em;">
+                        Powers the Search tab, which finds and adds a single title without running a full sync.
+                    </div>
+                    <div class="inputContainer">
+                        <input class="txtCatalogWorkerUrl" type="text" is="emby-input"
+                               label="Catalog Worker URL" />
+                        <div class="fieldDescription">
+                            Base URL of the catalog search Worker, without trailing slash.
+                        </div>
+                    </div>
+                    <div class="inputContainer">
+                        <input class="txtCatalogWorkerApiKey" type="password" is="emby-input" label="Catalog Worker API Key" />
+                    </div>
                 </div>
 
                 <hr style="border:none; border-top:1px solid rgba(128,128,128,0.2); margin:0.25em 0 1.25em;" />
@@ -1380,6 +1403,35 @@
                 </div>
 
                 </div><!-- end tabLiveTv -->
+
+                <!-- ===== Search ===== -->
+                <div class="tabPanel tabSearch" style="display:none;">
+
+                <div class="verticalSection">
+                    <h2 class="sectionTitle">Catalog Search</h2>
+                    <div class="fieldDescription" style="margin-bottom:0.9em;">
+                        Find a single movie or series and add it without running a full sync.
+                        Configure the Catalog Worker URL and API Key in Settings first.
+                    </div>
+                    <div style="display:flex; gap:0.5em; flex-wrap:wrap; align-items:flex-end; margin-bottom:0.75em;">
+                        <div class="selectContainer" style="min-width:9em; margin-bottom:0;">
+                            <select class="selSearchKind" is="emby-select" label="Type">
+                                <option value="movie">Movies</option>
+                                <option value="series">Series</option>
+                            </select>
+                        </div>
+                        <div class="inputContainer" style="flex:1; min-width:14em; margin-bottom:0;">
+                            <input class="txtSearchQuery" type="text" is="emby-input" label="Title" placeholder="Search by name..." />
+                        </div>
+                        <button class="btnCatalogSearch raised button-submit" is="emby-button" type="button" style="flex-shrink:0;">
+                            <span>Search</span>
+                        </button>
+                    </div>
+                    <div class="catalogSearchResult" style="margin-bottom:0.75em;"></div>
+                    <div class="catalogSearchResultsList"></div>
+                </div>
+
+                </div><!-- end tabSearch -->
 
                 <!-- STRM Folder Browser Modal -->
                 <div class="strmBrowserModal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; z-index:9999; background:rgba(0,0,0,0.65); align-items:center; justify-content:center;">

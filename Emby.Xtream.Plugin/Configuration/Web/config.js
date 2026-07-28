@@ -407,6 +407,22 @@ function (BaseView, loading) {
             window.open(ApiClient.getUrl('XC2EMBY/Logs') + '?api_key=' + ApiClient.accessToken(), '_blank');
         });
 
+        // Catalog search tab: search button + Enter-to-search + delegated Add buttons
+        view.querySelector('.btnCatalogSearch').addEventListener('click', function () {
+            searchCatalog(view);
+        });
+        view.querySelector('.txtSearchQuery').addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' || e.keyCode === 13) {
+                e.preventDefault();
+                searchCatalog(view);
+            }
+        });
+        view.querySelector('.catalogSearchResultsList').addEventListener('click', function (e) {
+            var btn = e.target.closest('.btnCatalogAdd');
+            if (!btn) return;
+            addCatalogItem(view, btn);
+        });
+
         // Danger zone toggles (event delegation on form)
         view.querySelector('.xtreamConfigForm').addEventListener('click', function (e) {
             var header = e.target.closest('.danger-zone-header');
@@ -613,6 +629,9 @@ function (BaseView, loading) {
             view.querySelector('.txtPassword').value = config.Password || '';
             view.querySelector('.txtHttpUserAgent').value = config.HttpUserAgent || '';
 
+            view.querySelector('.txtCatalogWorkerUrl').value = config.CatalogWorkerUrl || '';
+            view.querySelector('.txtCatalogWorkerApiKey').value = config.CatalogWorkerApiKey || '';
+
             setChecked(view.querySelector('.chkEnableLiveTv'), config.EnableLiveTv !== false);
             view.querySelector('.selOutputFormat').value = config.LiveTvOutputFormat || 'ts';
             view.querySelector('.txtTunerCount').value = config.TunerCount > 0 ? config.TunerCount : 1;
@@ -757,6 +776,9 @@ function (BaseView, loading) {
             config.Username = view.querySelector('.txtUsername').value;
             config.Password = view.querySelector('.txtPassword').value;
             config.HttpUserAgent = view.querySelector('.txtHttpUserAgent').value;
+
+            config.CatalogWorkerUrl = view.querySelector('.txtCatalogWorkerUrl').value.replace(/\/+$/, '');
+            config.CatalogWorkerApiKey = view.querySelector('.txtCatalogWorkerApiKey').value;
 
             config.EnableLiveTv = view.querySelector('.chkEnableLiveTv').checked;
             config.LiveTvOutputFormat = view.querySelector('.selOutputFormat').value;
@@ -938,8 +960,8 @@ function (BaseView, loading) {
             btns[i].style.borderBottomColor = 'transparent';
         }
 
-        var panelMap = { dashboard: '.tabDashboard', generic: '.tabGeneric', movies: '.tabMovies', documentaries: '.tabDocumentaries', series: '.tabSeries', docuSeries: '.tabDocuSeries', liveTv: '.tabLiveTv' };
-        var btnMap = { dashboard: '.tabBtnDashboard', generic: '.tabBtnGeneric', movies: '.tabBtnMovies', documentaries: '.tabBtnDocumentaries', series: '.tabBtnSeries', docuSeries: '.tabBtnDocuSeries', liveTv: '.tabBtnLiveTv' };
+        var panelMap = { dashboard: '.tabDashboard', generic: '.tabGeneric', movies: '.tabMovies', documentaries: '.tabDocumentaries', series: '.tabSeries', docuSeries: '.tabDocuSeries', liveTv: '.tabLiveTv', search: '.tabSearch' };
+        var btnMap = { dashboard: '.tabBtnDashboard', generic: '.tabBtnGeneric', movies: '.tabBtnMovies', documentaries: '.tabBtnDocumentaries', series: '.tabBtnSeries', docuSeries: '.tabBtnDocuSeries', liveTv: '.tabBtnLiveTv', search: '.tabBtnSearch' };
 
         var panel = view.querySelector(panelMap[tabName]);
         if (panel) panel.style.display = (tabName === 'generic' || tabName === 'liveTv') ? 'grid' : 'block';
@@ -1317,6 +1339,98 @@ function (BaseView, loading) {
             }
         }).catch(function () {
             setPillResult(resultEl, false, 'Connection test request failed. Check the Emby server logs.');
+        });
+    }
+
+    // ---- Catalog search (Search tab: find + add a single title) ----
+
+    function searchCatalog(view) {
+        var kind = view.querySelector('.selSearchKind').value;
+        var query = view.querySelector('.txtSearchQuery').value.trim();
+        var resultEl = view.querySelector('.catalogSearchResult');
+        var listEl = view.querySelector('.catalogSearchResultsList');
+
+        listEl.innerHTML = '';
+
+        if (!query) {
+            setPillResult(resultEl, false, 'Enter a title to search.');
+            return;
+        }
+
+        resultEl.innerHTML = '<span style="opacity:0.5;">Searching...</span>';
+
+        var url = ApiClient.getUrl('XC2EMBY/Catalog/Search', { kind: kind, q: query, limit: 50 });
+        ApiClient.ajax({ type: 'GET', url: url, dataType: 'json' }).then(function (result) {
+            if (!result || !result.Success) {
+                setPillResult(resultEl, false, (result && result.Message) || 'Search failed.');
+                return;
+            }
+            var items = result.Items || [];
+            if (items.length === 0) {
+                setPillResult(resultEl, true, 'No results.');
+                return;
+            }
+            resultEl.innerHTML = '';
+            renderCatalogResults(view, items);
+        }).catch(function () {
+            setPillResult(resultEl, false, 'Search request failed. Check the Emby server logs.');
+        });
+    }
+
+    function renderCatalogResults(view, items) {
+        // Keep the raw items on the view element so Add only needs an index —
+        // avoids round-tripping title/category text through HTML attributes.
+        view._catalogSearchResults = items;
+
+        var listEl = view.querySelector('.catalogSearchResultsList');
+        var rows = items.map(function (item, index) {
+            var cover = item.Cover
+                ? '<img src="' + escapeHtml(item.Cover) + '" style="width:44px; height:64px; object-fit:cover; border-radius:3px; background:rgba(128,128,128,0.15); flex-shrink:0;" onerror="this.style.visibility=\'hidden\'" />'
+                : '<div style="width:44px; height:64px; border-radius:3px; background:rgba(128,128,128,0.15); flex-shrink:0;"></div>';
+            return '<div class="catalogResultRow" style="display:flex; align-items:center; gap:0.75em; padding:0.5em 0.25em; border-bottom:1px solid rgba(128,128,128,0.12);">' +
+                cover +
+                '<div style="flex:1; min-width:0;">' +
+                    '<div style="font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' + escapeHtml(item.Name || '') + '</div>' +
+                    '<div style="opacity:0.6; font-size:0.85em;">' + escapeHtml(item.CategoryName || '') + '</div>' +
+                '</div>' +
+                '<span class="catalogAddResult" data-index="' + index + '" style="flex-shrink:0; font-size:0.85em;"></span>' +
+                '<button class="btnCatalogAdd raised button-secondary" type="button" is="emby-button" data-index="' + index + '" style="flex-shrink:0;"><span>Add</span></button>' +
+            '</div>';
+        }).join('');
+        listEl.innerHTML = rows;
+    }
+
+    function addCatalogItem(view, btn) {
+        var index = parseInt(btn.getAttribute('data-index'), 10);
+        var items = view._catalogSearchResults || [];
+        var item = items[index];
+        if (!item) return;
+
+        var statusEl = view.querySelector('.catalogAddResult[data-index="' + index + '"]');
+        btn.disabled = true;
+        if (statusEl) statusEl.textContent = 'Adding...';
+
+        ApiClient.ajax({
+            type: 'POST',
+            url: ApiClient.getUrl('XC2EMBY/Catalog/Add'),
+            contentType: 'application/json',
+            dataType: 'json',
+            data: JSON.stringify({
+                ItemType: item.ItemType,
+                StreamId: item.StreamId,
+                Name: item.Name,
+                CategoryId: item.CategoryId,
+                TmdbId: item.TmdbId,
+                ContainerExtension: item.ContainerExtension
+            })
+        }).then(function (result) {
+            var success = !!(result && result.Success);
+            if (statusEl) setPillResult(statusEl, success, (result && result.Message) || (success ? 'Added.' : 'Add failed.'));
+            // Leave a successful Add disabled (nothing more to do); allow retry on failure.
+            btn.disabled = success;
+        }).catch(function () {
+            if (statusEl) setPillResult(statusEl, false, 'Add request failed. Check the Emby server logs.');
+            btn.disabled = false;
         });
     }
 

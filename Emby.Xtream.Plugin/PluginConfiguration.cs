@@ -87,6 +87,10 @@ namespace Emby.Xtream.Plugin
         // NFO sidecar files
         public bool EnableNfoFiles { get; set; }
 
+        // Catalog search (find + add a single title without a full sync)
+        public string CatalogWorkerUrl { get; set; } = string.Empty;
+        public string CatalogWorkerApiKey { get; set; } = string.Empty;
+
         // Cached categories (JSON arrays, populated on refresh)
         public string CachedVodCategories { get; set; } = string.Empty;
         public string CachedSeriesCategories { get; set; } = string.Empty;

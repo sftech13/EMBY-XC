@@ -75,6 +75,13 @@ namespace Emby.Xtream.Plugin.Service
         public DateTime FailedAt { get; set; } = DateTime.UtcNow;
     }
 
+    /// <summary>Result of a single-title add via catalog search (see StrmSyncService.AddSingleItemAsync).</summary>
+    public class AddSingleItemResult
+    {
+        public bool Success { get; set; }
+        public string Message { get; set; }
+    }
+
     internal sealed class MovieSyncCandidate
     {
         public VodStreamInfo Movie { get; set; }
@@ -308,6 +315,10 @@ namespace Emby.Xtream.Plugin.Service
         private SyncProgress _seriesProgress = new SyncProgress();
         private SyncProgress _episodeProgress = new SyncProgress();
         private SyncProgress _retryProgress = new SyncProgress();
+
+        // Serializes AddSingleItemAsync calls against each other and guards the
+        // _retryProgress swap-and-restore trick used there (see AddSingleItemAsync).
+        private readonly SemaphoreSlim _retryProgressSwapGate = new SemaphoreSlim(1, 1);
 
         private static void ReportTaskProgress(SyncProgress syncProgress, IProgress<double> taskProgress)
         {
@@ -1970,6 +1981,88 @@ namespace Emby.Xtream.Plugin.Service
             {
                 _retryProgress.IsRunning = false;
                 _retryProgress.Phase = "Retry complete";
+            }
+        }
+
+        /// <summary>
+        /// Adds a single title (found via catalog search) without running a full sync.
+        /// Dispatches to the same per-item logic RetryFailedAsync uses so STRM naming,
+        /// folder placement, and NFO behavior stay identical to a normal sync/retry.
+        /// </summary>
+        public async Task<AddSingleItemResult> AddSingleItemAsync(FailedSyncItem item, CancellationToken cancellationToken)
+        {
+            if (item == null)
+                return new AddSingleItemResult { Success = false, Message = "No item supplied." };
+
+            if (item.ItemType != "Movie" && item.ItemType != "Series")
+                return new AddSingleItemResult { Success = false, Message = "ItemType must be 'Movie' or 'Series'." };
+
+            var config = Plugin.Instance.Configuration;
+
+            await _retryProgressSwapGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                // GOTCHA: RetryMovieItemAsync/RetrySeriesItemAsync report progress by
+                // incrementing the shared _retryProgress counters (Added/Changed/Skipped/
+                // NfoChanged) that drive the "Failed Items" retry panel on the config page.
+                // A single-title add must not pollute that display. If a bulk retry is
+                // currently running it owns _retryProgress for its whole run, so we refuse
+                // to run concurrently rather than swap underneath it — that would steal
+                // increments meant for the real retry's counters (and _retryProgressSwapGate
+                // alone can't prevent that, since RetryFailedAsync never takes the gate).
+                // Otherwise, swap in a scratch SyncProgress for the duration of this call,
+                // restore the real one afterwards, and read the scratch counters to tell
+                // the caller whether anything was actually written.
+                if (_retryProgress.IsRunning)
+                {
+                    return new AddSingleItemResult
+                    {
+                        Success = false,
+                        Message = "A retry or sync operation is currently running. Try again once it finishes."
+                    };
+                }
+
+                var realProgress = _retryProgress;
+                var scratchProgress = new SyncProgress();
+                _retryProgress = scratchProgress;
+                try
+                {
+                    if (item.ItemType == "Movie")
+                    {
+                        var categoryNames = new Dictionary<int, string>();
+                        var folderMappings = FolderMappingParser.Parse(config.MovieFolderMappings);
+                        var writtenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        await RetryMovieItemAsync(item, config, categoryNames, folderMappings, writtenPaths, cancellationToken).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        await RetrySeriesItemAsync(item, config, cancellationToken).ConfigureAwait(false);
+                    }
+                }
+                finally
+                {
+                    _retryProgress = realProgress;
+                }
+
+                if (scratchProgress.Added > 0 || scratchProgress.Changed > 0)
+                    return new AddSingleItemResult { Success = true, Message = "Added." };
+
+                if (scratchProgress.Skipped > 0)
+                    return new AddSingleItemResult { Success = true, Message = "Already exists locally; no changes needed." };
+
+                return new AddSingleItemResult
+                {
+                    Success = false,
+                    Message = "Nothing was written. Check the category/folder mapping configuration for this content type."
+                };
+            }
+            catch (Exception ex)
+            {
+                return new AddSingleItemResult { Success = false, Message = "Add failed: " + ex.Message };
+            }
+            finally
+            {
+                _retryProgressSwapGate.Release();
             }
         }
 
