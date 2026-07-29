@@ -4,6 +4,9 @@ All notable changes to XC2EMBY are listed here, newest first.
 
 ---
 
+## v1.1.121
+- Update checker now points at this fork's releases (`suthar26/EMBY-XC`) instead of upstream. "Check for Update" and "Install Update" previously compared against and downloaded from `sftech13/EMBY-XC`, which never saw this fork's changes.
+
 ## v1.1.120
 - Added a catalog Search tab: search a remote Xtream catalog mirror by name and add a single movie or series without running a full category sync. Requires a Catalog Worker URL/API Key configured in Settings.
 - Fixed series sync silently returning 0 results when a provider sends `last_modified` as a bare JSON number instead of a quoted string. Because the whole series list deserializes in one call, this single-field mismatch previously failed the entire sync with no error surfaced anywhere.
