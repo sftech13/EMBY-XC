@@ -4,6 +4,14 @@ All notable changes to XC2EMBY are listed here, newest first.
 
 ---
 
+## v1.1.120
+- Added a catalog Search tab: search a remote Xtream catalog mirror by name and add a single movie or series without running a full category sync. Requires a Catalog Worker URL/API Key configured in Settings.
+- Fixed series sync silently returning 0 results when a provider sends `last_modified` as a bare JSON number instead of a quoted string. Because the whole series list deserializes in one call, this single-field mismatch previously failed the entire sync with no error surfaced anywhere.
+- Fixed the same class of silent-failure risk on nine other numeric fields (`VodStreamInfo.StreamId`/`TmdbId`, `SeriesDetailInfo` episode id/number/season/duration, `LiveStreamInfo` channel number/id/archive duration/tv-archive/adult flags, `SeriesInfo.SeriesId`, `EpgProgram` start/stop timestamps and has-archive flag) that were vulnerable to the same provider-returns-a-number-as-a-string mismatch.
+- Fixed catalog Search "Add" silently writing nothing when the target folder mode is "multiple" — the category name is now carried through from the search result so the target folder resolves correctly, and a resolution failure is now reported to the user instead of a false success.
+- Closed a race where a single-title catalog add starting at the same moment as a bulk failed-item retry could corrupt the retry's progress counters.
+- Added CI that compiles the plugin on every push to `main`, so a build break is caught immediately instead of at release time.
+
 ## v1.1.119
 - Fixed provider health checks disposing XC2EMBY's shared 10-second HTTP client after their first request. Repeated health checks, category requests, and scheduled-sync reachability gates now continue using the shared client instead of failing with `ObjectDisposedException`.
 
