@@ -4,6 +4,11 @@ All notable changes to XC2EMBY are listed here, newest first.
 
 ---
 
+## v1.1.122
+- Added Watched Series: series added via the Search tab are now checked daily for new episodes. This only ever fetches the specific series IDs you've added — it never runs the category-based TV Shows sync or touches `SelectedSeriesCategoryIds`, so it can't pull the full provider catalog no matter how large it is. Remove a show from the Search tab's Watched Series list to stop checking it, or use "Check Now" to check immediately. Toggle in Settings → Catalog Search.
+- Fixed TV Shows (and DocuSeries) sync silently syncing the entire unfiltered provider catalog when no categories were selected, instead of doing nothing. An empty category selection is the normal state after clearing categories, and previously fell through to the same "no filter" code path used internally to fetch the full catalog for category discovery — on one provider this pulled 7,161 series (1.9GB) and wedged the Emby process at ~99% CPU for over two days. Sync now aborts with "no categories selected" instead.
+- Fixed the Settings page General tab laying out TMDB / TVDb Matching in a half-width row by itself on wide screens. The two-column layout no longer depends on a hardcoded section count, so adding or removing a settings section can't misalign it again.
+
 ## v1.1.121
 - Update checker now points at this fork's releases (`suthar26/EMBY-XC`) instead of upstream. "Check for Update" and "Install Update" previously compared against and downloaded from `sftech13/EMBY-XC`, which never saw this fork's changes.
 

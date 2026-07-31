@@ -75,6 +75,18 @@ namespace Emby.Xtream.Plugin.Service
         public DateTime FailedAt { get; set; } = DateTime.UtcNow;
     }
 
+    /// <summary>A series added via Catalog Search that gets checked daily for new episodes
+    /// (see StrmSyncService.RefreshWatchedSeriesAsync). Independent of category-based sync.</summary>
+    public class WatchedSeriesEntry
+    {
+        public int SeriesId { get; set; }
+        public string Name { get; set; }
+        public int? CategoryId { get; set; }
+        public string CategoryName { get; set; }
+        public DateTime AddedUtc { get; set; } = DateTime.UtcNow;
+        public DateTime? LastCheckedUtc { get; set; }
+    }
+
     /// <summary>Result of a single-title add via catalog search (see StrmSyncService.AddSingleItemAsync).</summary>
     public class AddSingleItemResult
     {
@@ -1405,6 +1417,22 @@ namespace Emby.Xtream.Plugin.Service
                     ? ParseTvdbOverrides(config.TvdbFolderIdOverrides)
                     : null;
 
+                if (config.SelectedSeriesCategoryIds == null || config.SelectedSeriesCategoryIds.Length == 0)
+                {
+                    // No categories selected — do nothing. FetchSeriesListAsync treats an
+                    // empty/null categoryIds array as "no filter" (used intentionally by
+                    // FetchSeriesCategoriesWithFallbackAsync and PopulateMediaStreams to fetch
+                    // the entire catalog), so that meaning must not leak into this caller: an
+                    // empty selection here means the whole unfiltered catalog gets pulled and
+                    // synced instead of nothing. See the 2026-07-31 incident (7,161 series,
+                    // 1.9GB, ~99% CPU for 2.5 days).
+                    seriesSyncSuccess = false;
+                    sp.AbortReason = (isDocuSeries ? "DocuSeries" : "Series") + " sync skipped: no categories selected.";
+                    sp.Phase = "Configuration needed";
+                    _logger.Warn(sp.AbortReason);
+                    return;
+                }
+
                 sp.Phase = "Fetching series list";
                 var allSeries = await FetchSeriesListAsync(config.SelectedSeriesCategoryIds, config, cancellationToken).ConfigureAwait(false);
 
@@ -2109,6 +2137,83 @@ namespace Emby.Xtream.Plugin.Service
             {
                 _retryProgressSwapGate.Release();
             }
+        }
+
+        public List<WatchedSeriesEntry> GetWatchedSeries()
+        {
+            var config = Plugin.InstanceOrNull?.Configuration;
+            if (config == null || string.IsNullOrEmpty(config.WatchedSeriesJson))
+                return new List<WatchedSeriesEntry>();
+            try { return STJ.JsonSerializer.Deserialize<List<WatchedSeriesEntry>>(config.WatchedSeriesJson, JsonOptions) ?? new List<WatchedSeriesEntry>(); }
+            catch { return new List<WatchedSeriesEntry>(); }
+        }
+
+        private static void SaveWatchedSeries(PluginConfiguration config, List<WatchedSeriesEntry> entries)
+        {
+            config.WatchedSeriesJson = STJ.JsonSerializer.Serialize(entries, JsonOptions);
+        }
+
+        public void AddWatchedSeries(WatchedSeriesEntry entry)
+        {
+            var config = Plugin.Instance.Configuration;
+            var entries = GetWatchedSeries();
+            if (entries.Any(w => w.SeriesId == entry.SeriesId)) return;
+            entries.Add(entry);
+            SaveWatchedSeries(config, entries);
+            Plugin.Instance.SaveConfiguration();
+        }
+
+        public bool RemoveWatchedSeries(int seriesId)
+        {
+            var config = Plugin.Instance.Configuration;
+            var entries = GetWatchedSeries();
+            var removed = entries.RemoveAll(w => w.SeriesId == seriesId) > 0;
+            if (removed)
+            {
+                SaveWatchedSeries(config, entries);
+                Plugin.Instance.SaveConfiguration();
+            }
+            return removed;
+        }
+
+        /// <summary>
+        /// Checks every watched series for new episodes, one at a time. Only ever touches
+        /// the series IDs already in the watchlist — never SelectedSeriesCategoryIds or the
+        /// category-based sync path, so it can't repeat the 2026-07-31 incident regardless of
+        /// how large the provider's catalog is.
+        /// </summary>
+        public async Task RefreshWatchedSeriesAsync(CancellationToken cancellationToken)
+        {
+            var config = Plugin.Instance.Configuration;
+            var entries = GetWatchedSeries();
+            if (entries.Count == 0) return;
+
+            foreach (var entry in entries)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                try
+                {
+                    var item = new FailedSyncItem
+                    {
+                        ItemType = "Series",
+                        StreamId = entry.SeriesId,
+                        Name = entry.Name,
+                        CategoryId = entry.CategoryId,
+                    };
+                    // Reuses the exact per-item write path Catalog Search's Add button and the
+                    // Failed Items retry panel use — new episodes get new STRM/NFO, existing
+                    // ones are a no-op via WriteStrmIfChanged's unchanged-content check.
+                    await AddSingleItemAsync(item, entry.CategoryName, cancellationToken).ConfigureAwait(false);
+                    entry.LastCheckedUtc = DateTime.UtcNow;
+                }
+                catch (Exception ex)
+                {
+                    _logger.Warn("Watched series refresh failed for '{0}': {1}", entry.Name, ex.Message);
+                }
+            }
+
+            SaveWatchedSeries(config, entries);
+            Plugin.Instance.SaveConfiguration();
         }
 
         private async Task RetryMovieItemAsync(

@@ -295,21 +295,17 @@
                     .tabGeneric .verticalSection {
                         margin-bottom: 0;
                     }
-                    .tabGeneric .verticalSection:nth-of-type(1) {
+                    /* Left column stacks any number of sections; right column is a
+                       single sidebar section. Adding/removing a section from either
+                       wrapper doesn't require touching this CSS. */
+                    .tabGeneric-main {
                         grid-column: 1;
-                        grid-row: 1;
+                        display: flex;
+                        flex-direction: column;
+                        gap: 1.25em;
                     }
-                    .tabGeneric .verticalSection:nth-of-type(2) {
+                    .tabGeneric-side {
                         grid-column: 2;
-                        grid-row: 1 / span 3;
-                    }
-                    .tabGeneric .verticalSection:nth-of-type(3) {
-                        grid-column: 1;
-                        grid-row: 2;
-                    }
-                    .tabGeneric .verticalSection:nth-of-type(4) {
-                        grid-column: 1;
-                        grid-row: 3;
                     }
                     .settingsSubheading {
                         margin: 1.2em 0 0.7em;
@@ -415,9 +411,9 @@
                         .tabLiveTv {
                             grid-template-columns: 1fr;
                         }
-                        .tabGeneric .verticalSection:nth-of-type(n) {
+                        .tabGeneric-main,
+                        .tabGeneric-side {
                             grid-column: 1;
-                            grid-row: auto;
                         }
                         .tabLiveTv .verticalSection:nth-of-type(n) {
                             grid-column: 1;
@@ -669,6 +665,8 @@
                 <!-- ===== Settings ===== -->
                 <div class="tabPanel tabGeneric" style="display:none;">
 
+                <div class="tabGeneric-main">
+
                 <div class="verticalSection">
                     <h2 class="sectionTitle">Provider</h2>
                     <div class="inputContainer">
@@ -700,25 +698,6 @@
                         </button>
                     </div>
                     <div class="connectionTestResult" style="margin-top:0.5em;"></div>
-                </div>
-
-                <hr style="border:none; border-top:1px solid rgba(128,128,128,0.2); margin:0.25em 0 1.25em;" />
-
-                <div class="verticalSection">
-                    <h2 class="sectionTitle">Catalog Search</h2>
-                    <div class="fieldDescription" style="margin-bottom:0.9em;">
-                        Powers the Search tab, which finds and adds a single title without running a full sync.
-                    </div>
-                    <div class="inputContainer">
-                        <input class="txtCatalogWorkerUrl" type="text" is="emby-input"
-                               label="Catalog Worker URL" />
-                        <div class="fieldDescription">
-                            Base URL of the catalog search Worker, without trailing slash.
-                        </div>
-                    </div>
-                    <div class="inputContainer">
-                        <input class="txtCatalogWorkerApiKey" type="password" is="emby-input" label="Catalog Worker API Key" />
-                    </div>
                 </div>
 
                 <hr style="border:none; border-top:1px solid rgba(128,128,128,0.2); margin:0.25em 0 1.25em;" />
@@ -995,6 +974,39 @@
                         </div>
                     </div>
                 </div>
+
+                </div><!-- end tabGeneric-main -->
+
+                <div class="tabGeneric-side">
+
+                <div class="verticalSection">
+                    <h2 class="sectionTitle">Catalog Search</h2>
+                    <div class="fieldDescription" style="margin-bottom:0.9em;">
+                        Powers the Search tab, which finds and adds a single title without running a full sync.
+                    </div>
+                    <div class="inputContainer">
+                        <input class="txtCatalogWorkerUrl" type="text" is="emby-input"
+                               label="Catalog Worker URL" />
+                        <div class="fieldDescription">
+                            Base URL of the catalog search Worker, without trailing slash.
+                        </div>
+                    </div>
+                    <div class="inputContainer">
+                        <input class="txtCatalogWorkerApiKey" type="password" is="emby-input" label="Catalog Worker API Key" />
+                    </div>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label>
+                            <input class="chkWatchedSeriesAutoRefresh" type="checkbox" is="emby-checkbox" />
+                            <span>Auto-Refresh Watched Series</span>
+                        </label>
+                        <div class="fieldDescription checkboxFieldDescription">
+                            Daily check for new episodes on series added via the Search tab.
+                            Only checks those specific series — never runs the TV Shows category sync.
+                        </div>
+                    </div>
+                </div>
+
+                </div><!-- end tabGeneric-side -->
 
                 </div><!-- end tabGeneric -->
 
@@ -1429,6 +1441,23 @@
                     </div>
                     <div class="catalogSearchResult" style="margin-bottom:0.75em;"></div>
                     <div class="catalogSearchResultsList"></div>
+                </div>
+
+                <hr style="border:none; border-top:1px solid rgba(128,128,128,0.2); margin:0.25em 0 1.25em;" />
+
+                <div class="verticalSection">
+                    <h2 class="sectionTitle">Watched Series</h2>
+                    <div class="fieldDescription" style="margin-bottom:0.75em;">
+                        Series added above are checked daily for new episodes. Only these
+                        series are checked — no category or catalog-wide sync ever runs.
+                    </div>
+                    <div style="display:flex; align-items:center; justify-content:space-between; gap:0.8em; flex-wrap:wrap; margin-bottom:0.6em;">
+                        <button class="btnRefreshWatchedSeriesNow raised button-secondary" is="emby-button" type="button">
+                            <span>Check Now</span>
+                        </button>
+                        <span class="refreshWatchedSeriesResult" style="font-size:0.85em; opacity:0.7;"></span>
+                    </div>
+                    <div class="watchedSeriesList"></div>
                 </div>
 
                 </div><!-- end tabSearch -->

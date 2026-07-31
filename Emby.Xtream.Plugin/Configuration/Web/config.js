@@ -423,6 +423,16 @@ function (BaseView, loading) {
             addCatalogItem(view, btn);
         });
 
+        // Watched Series: Check Now + delegated remove buttons
+        view.querySelector('.btnRefreshWatchedSeriesNow').addEventListener('click', function () {
+            refreshWatchedSeriesNow(view);
+        });
+        view.querySelector('.watchedSeriesList').addEventListener('click', function (e) {
+            var btn = e.target.closest('.btnRemoveWatchedSeries');
+            if (!btn) return;
+            removeWatchedSeries(view, parseInt(btn.getAttribute('data-series-id'), 10));
+        });
+
         // Danger zone toggles (event delegation on form)
         view.querySelector('.xtreamConfigForm').addEventListener('click', function (e) {
             var header = e.target.closest('.danger-zone-header');
@@ -631,6 +641,7 @@ function (BaseView, loading) {
 
             view.querySelector('.txtCatalogWorkerUrl').value = config.CatalogWorkerUrl || '';
             view.querySelector('.txtCatalogWorkerApiKey').value = config.CatalogWorkerApiKey || '';
+            setChecked(view.querySelector('.chkWatchedSeriesAutoRefresh'), config.WatchedSeriesAutoRefreshEnabled !== false);
 
             setChecked(view.querySelector('.chkEnableLiveTv'), config.EnableLiveTv !== false);
             view.querySelector('.selOutputFormat').value = config.LiveTvOutputFormat || 'ts';
@@ -779,6 +790,7 @@ function (BaseView, loading) {
 
             config.CatalogWorkerUrl = view.querySelector('.txtCatalogWorkerUrl').value.replace(/\/+$/, '');
             config.CatalogWorkerApiKey = view.querySelector('.txtCatalogWorkerApiKey').value;
+            config.WatchedSeriesAutoRefreshEnabled = view.querySelector('.chkWatchedSeriesAutoRefresh').checked;
 
             config.EnableLiveTv = view.querySelector('.chkEnableLiveTv').checked;
             config.LiveTvOutputFormat = view.querySelector('.selOutputFormat').value;
@@ -1429,10 +1441,68 @@ function (BaseView, loading) {
             if (statusEl) setPillResult(statusEl, success, (result && result.Message) || (success ? 'Added.' : 'Add failed.'));
             // Leave a successful Add disabled (nothing more to do); allow retry on failure.
             btn.disabled = success;
+            if (success && item.ItemType === 'Series') loadWatchedSeries(view);
         }).catch(function () {
             if (statusEl) setPillResult(statusEl, false, 'Add request failed. Check the Emby server logs.');
             btn.disabled = false;
         });
+    }
+
+    // ---- Watched Series (daily new-episode check for series added via Catalog Search) ----
+
+    function loadWatchedSeries(view) {
+        var listEl = view.querySelector('.watchedSeriesList');
+        if (!listEl) return;
+
+        ApiClient.getJSON(ApiClient.getUrl('XC2EMBY/WatchedSeries')).then(function (entries) {
+            if (!entries || entries.length === 0) {
+                listEl.innerHTML = '<div style="opacity:0.5; font-size:0.9em; padding:0.5em 0;">No series watched yet. Add one above.</div>';
+                return;
+            }
+            var rows = entries.map(function (entry) {
+                var added = entry.AddedUtc ? formatTimeAgo(new Date(entry.AddedUtc)) : '';
+                var checked = entry.LastCheckedUtc ? formatTimeAgo(new Date(entry.LastCheckedUtc)) : 'Never';
+                return '<div class="watchedSeriesRow" style="display:flex; align-items:center; gap:0.75em; padding:0.5em 0.25em; border-bottom:1px solid rgba(128,128,128,0.12);">' +
+                    '<div style="flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600;">' + escapeHtml(entry.Name || '') + '</div>' +
+                    '<div style="opacity:0.6; font-size:0.85em; white-space:nowrap;">Added ' + added + '</div>' +
+                    '<div style="opacity:0.6; font-size:0.85em; white-space:nowrap;">Checked ' + checked + '</div>' +
+                    '<button class="btnRemoveWatchedSeries button-secondary" type="button" is="emby-button" data-series-id="' + entry.SeriesId + '" title="Stop checking for new episodes" style="flex-shrink:0; min-width:2.2em;">&#10005;</button>' +
+                    '</div>';
+            }).join('');
+            listEl.innerHTML = rows;
+        }).catch(function () {
+            listEl.innerHTML = '<div style="opacity:0.5; font-size:0.9em; padding:0.5em 0;">Failed to load watched series.</div>';
+        });
+    }
+
+    function removeWatchedSeries(view, seriesId) {
+        ApiClient.ajax({
+            type: 'DELETE',
+            url: ApiClient.getUrl('XC2EMBY/WatchedSeries'),
+            contentType: 'application/json',
+            data: JSON.stringify({ SeriesId: seriesId }),
+            dataType: 'json'
+        }).then(function () {
+            loadWatchedSeries(view);
+        });
+    }
+
+    function refreshWatchedSeriesNow(view) {
+        var btn = view.querySelector('.btnRefreshWatchedSeriesNow');
+        var resultEl = view.querySelector('.refreshWatchedSeriesResult');
+        if (btn) btn.disabled = true;
+        if (resultEl) resultEl.textContent = 'Checking...';
+
+        ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('XC2EMBY/WatchedSeries/RefreshNow'), dataType: 'json' })
+            .then(function (result) {
+                if (resultEl) resultEl.textContent = (result && result.Message) || 'Done.';
+                loadWatchedSeries(view);
+                if (btn) btn.disabled = false;
+            })
+            .catch(function () {
+                if (resultEl) resultEl.textContent = 'Check failed. Check the Emby server logs.';
+                if (btn) btn.disabled = false;
+            });
     }
 
     // ---- Folder browser ----
@@ -2720,6 +2790,7 @@ function (BaseView, loading) {
 
         loadFailedItems(view);
         loadPendingOrphans(view);
+        loadWatchedSeries(view);
     }
 
     function loadPendingOrphans(view) {

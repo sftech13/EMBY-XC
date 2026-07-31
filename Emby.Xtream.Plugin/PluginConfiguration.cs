@@ -91,6 +91,12 @@ namespace Emby.Xtream.Plugin
         public string CatalogWorkerUrl { get; set; } = string.Empty;
         public string CatalogWorkerApiKey { get; set; } = string.Empty;
 
+        // Watched Series: shows added via Catalog Search are checked daily for new
+        // episodes. JSON array of WatchedSeriesEntry, independent of the category-based
+        // series sync above — never touches SelectedSeriesCategoryIds or that code path.
+        public string WatchedSeriesJson { get; set; } = string.Empty;
+        public bool WatchedSeriesAutoRefreshEnabled { get; set; } = true;
+
         // Cached categories (JSON arrays, populated on refresh)
         public string CachedVodCategories { get; set; } = string.Empty;
         public string CachedSeriesCategories { get; set; } = string.Empty;

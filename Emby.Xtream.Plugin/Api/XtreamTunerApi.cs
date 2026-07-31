@@ -306,6 +306,25 @@ namespace Emby.Xtream.Plugin.Api
         public string ContainerExtension { get; set; }
     }
 
+    [Authenticated(Roles = "Admin")]
+    [Route("/XC2EMBY/WatchedSeries", "GET", Summary = "Lists series added via Catalog Search that are checked daily for new episodes")]
+    public class GetWatchedSeries : IReturn<List<WatchedSeriesEntry>>
+    {
+    }
+
+    [Authenticated(Roles = "Admin")]
+    [Route("/XC2EMBY/WatchedSeries", "DELETE", Summary = "Stops checking a series for new episodes")]
+    public class RemoveWatchedSeries : IReturn<SyncResult>
+    {
+        public int SeriesId { get; set; }
+    }
+
+    [Authenticated(Roles = "Admin")]
+    [Route("/XC2EMBY/WatchedSeries/RefreshNow", "POST", Summary = "Checks all watched series for new episodes immediately")]
+    public class RefreshWatchedSeriesNow : IReturn<SyncResult>
+    {
+    }
+
     // Mirrors the Catalog Worker's /api/catalog/search JSON contract (see plugin docs).
     public class CatalogSearchItem
     {
@@ -2168,7 +2187,62 @@ namespace Emby.Xtream.Plugin.Api
             };
 
             var syncService = Plugin.Instance.StrmSyncService;
-            return await syncService.AddSingleItemAsync(item, request.CategoryName, CancellationToken.None).ConfigureAwait(false);
+            var result = await syncService.AddSingleItemAsync(item, request.CategoryName, CancellationToken.None).ConfigureAwait(false);
+
+            if (itemType == "Series" && result.Success)
+            {
+                syncService.AddWatchedSeries(new WatchedSeriesEntry
+                {
+                    SeriesId = request.StreamId,
+                    Name = request.Name,
+                    CategoryId = categoryId,
+                    CategoryName = request.CategoryName,
+                });
+            }
+
+            return result;
+        }
+
+        public object Get(GetWatchedSeries request)
+        {
+            return Plugin.Instance.StrmSyncService.GetWatchedSeries();
+        }
+
+        public object Delete(RemoveWatchedSeries request)
+        {
+            var removed = Plugin.Instance.StrmSyncService.RemoveWatchedSeries(request.SeriesId);
+            return new SyncResult
+            {
+                Success = removed,
+                Message = removed ? "Removed from watched series." : "Series was not in the watched list.",
+            };
+        }
+
+        public async Task<object> Post(RefreshWatchedSeriesNow request)
+        {
+            var syncService = Plugin.Instance.StrmSyncService;
+            var result = new SyncResult();
+
+            if (syncService.IsAnySyncRunning)
+            {
+                result.Success = false;
+                result.Message = "A sync is already running. Try again once it finishes.";
+                return result;
+            }
+
+            try
+            {
+                await syncService.RefreshWatchedSeriesAsync(CancellationToken.None).ConfigureAwait(false);
+                result.Success = true;
+                result.Message = "Watched series checked for new episodes.";
+            }
+            catch (Exception ex)
+            {
+                result.Success = false;
+                result.Message = "Refresh failed: " + ex.Message;
+            }
+
+            return result;
         }
 
         private static string StripNonAscii(string s)
