@@ -4,6 +4,9 @@ All notable changes to XC2EMBY are listed here, newest first.
 
 ---
 
+## v1.1.120
+- Fixed **Refresh Channel & EPG Cache** starting redundant, overlapping Emby guide rebuilds. The tuner rescan now owns the refresh sequence instead of also launching two explicit guide refresh paths, reducing each cache invalidation from three guide jobs to the required two-stage stale/fresh channel rescan and avoiding unnecessary memory pressure on large guides.
+
 ## v1.1.119
 - Fixed provider health checks disposing XC2EMBY's shared 10-second HTTP client after their first request. Repeated health checks, category requests, and scheduled-sync reachability gates now continue using the shared client instead of failing with `ObjectDisposedException`.
 

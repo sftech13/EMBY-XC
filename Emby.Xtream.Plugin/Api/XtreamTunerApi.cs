@@ -1551,9 +1551,13 @@ namespace Emby.Xtream.Plugin.Api
             // streams are active causes Emby to defer the rescan until all streams end,
             // leaving the guide blank for the entire watch session.
             XtreamTunerHost.Instance?.InvalidateChannelCacheTime();
+
+            // Saving the tuner host already starts Emby's guide refresh. Once the
+            // background channel-cache refresh completes, XtreamTunerHost requests a
+            // second rescan with the fresh channel list. Do not also call
+            // TriggerGuideRefresh() or TriggerEmbyGuideRefresh() here: doing so starts
+            // redundant, overlapping guide rebuilds for the same cache invalidation.
             XtreamServerEntryPoint.Instance?.TriggerChannelRescan();
-            XtreamServerEntryPoint.Instance?.TriggerGuideRefresh();
-            XtreamServerEntryPoint.Instance?.TriggerEmbyGuideRefresh();
         }
 
         public object Post(RefreshLogos request)
