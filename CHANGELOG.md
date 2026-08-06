@@ -4,6 +4,20 @@ All notable changes to XC2EMBY are listed here, newest first.
 
 ---
 
+## v1.1.123
+- Added deterministic episode-path ownership for duplicate series records when metadata-ID folder naming is disabled. Mirrored provider entries can no longer race and alternate the stream ID stored in the same STRM file.
+- Duplicate resolution prefers the record with the most complete episode-path set, then the newest provider timestamp, then the lowest series ID. Only competing episode paths are suppressed, so unique episodes from either record remain available.
+- Duplicate-series detail responses fetched during ownership preflight are reused by the main sync, avoiding duplicate API requests.
+
+## v1.1.122
+- Series-detail SSL, timeout, and other provider failures now protect every existing STRM for only the affected series while allowing orphan cleanup to continue for the rest of a successfully fetched XC series catalog. Main catalog failures, filesystem/write failures, and invalid target paths still block all cleanup.
+- Per-series Smart Skip fingerprints are now committed only after every episode in that series finishes processing successfully, ensuring a partial file-processing failure forces full verification on the next run.
+
+## v1.1.121
+- Added privacy-safe STRM URL change diagnostics that report aggregate endpoint, credential, stream-ID, extension, and other change counts without logging URLs or secrets.
+- Restored **Smart Skip Existing** for series using per-series SHA-256 fingerprints covering episode IDs/extensions and the connection settings embedded in STRM URLs. Expected files are still checked for existence, local-media filtering still runs, and any provider or connection change falls back to a full content comparison.
+- Successful per-series Smart Skip checkpoints are now retained when unrelated provider records fail, while orphan cleanup and the global catalog timestamp remain blocked for safety.
+
 ## v1.1.120
 - Fixed **Refresh Channel & EPG Cache** starting redundant, overlapping Emby guide rebuilds. The tuner rescan now owns the refresh sequence instead of also launching two explicit guide refresh paths, reducing each cache invalidation from three guide jobs to the required two-stage stale/fresh channel rescan and avoiding unnecessary memory pressure on large guides.
 

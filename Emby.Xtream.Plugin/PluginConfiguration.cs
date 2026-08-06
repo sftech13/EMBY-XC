@@ -132,8 +132,9 @@ namespace Emby.Xtream.Plugin
         public string SyncHistoryJson { get; set; } = string.Empty;
 
         /// <summary>
-        /// JSON dictionary mapping series_id → SHA256 hash of episode URLs.
-        /// Used to skip per-episode file I/O when the episode list hasn't changed.
+        /// JSON dictionary mapping series_id → SHA256 fingerprint of episode IDs,
+        /// extensions, and connection settings embedded in generated STRM URLs.
+        /// Used to safely skip per-episode file reads when the intended files are unchanged.
         /// </summary>
         public string SeriesEpisodeHashesJson { get; set; } = string.Empty;
         public string DocuSeriesEpisodeHashesJson { get; set; } = string.Empty;

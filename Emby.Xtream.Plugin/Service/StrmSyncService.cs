@@ -114,6 +114,71 @@ namespace Emby.Xtream.Plugin.Service
             Changed,
         }
 
+        [Flags]
+        internal enum StreamUrlChangeKind
+        {
+            None = 0,
+            Endpoint = 1,
+            Credentials = 2,
+            StreamId = 4,
+            Extension = 8,
+            Other = 16,
+        }
+
+        internal sealed class StreamUrlChangeStats
+        {
+            public int Total;
+            public int Endpoint;
+            public int Credentials;
+            public int StreamId;
+            public int Extension;
+            public int Other;
+
+            public void Record(string currentUrl, string intendedUrl)
+            {
+                var kind = ClassifyStreamUrlChange(currentUrl, intendedUrl);
+                Interlocked.Increment(ref Total);
+                if ((kind & StreamUrlChangeKind.Endpoint) != 0) Interlocked.Increment(ref Endpoint);
+                if ((kind & StreamUrlChangeKind.Credentials) != 0) Interlocked.Increment(ref Credentials);
+                if ((kind & StreamUrlChangeKind.StreamId) != 0) Interlocked.Increment(ref StreamId);
+                if ((kind & StreamUrlChangeKind.Extension) != 0) Interlocked.Increment(ref Extension);
+                if ((kind & StreamUrlChangeKind.Other) != 0) Interlocked.Increment(ref Other);
+            }
+        }
+
+        private sealed class StreamUrlParts
+        {
+            public Uri Uri { get; set; }
+            public string Prefix { get; set; }
+            public string Kind { get; set; }
+            public string Username { get; set; }
+            public string Password { get; set; }
+            public string StreamId { get; set; }
+            public string Extension { get; set; }
+        }
+
+        private sealed class SeriesPathOwnershipPlan
+        {
+            public Dictionary<int, SeriesDetailInfo> PrefetchedDetails { get; } =
+                new Dictionary<int, SeriesDetailInfo>();
+
+            public Dictionary<string, int> EpisodeOwners { get; } =
+                new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+            public Dictionary<string, int> FolderOwners { get; } =
+                new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+            public int DuplicateFolderCount { get; set; }
+            public int CompetingPathCount { get; set; }
+        }
+
+        private sealed class SeriesFolderCandidate
+        {
+            public SeriesInfo Series { get; set; }
+            public string SeriesName { get; set; }
+            public string SeriesDirectory { get; set; }
+        }
+
         private static readonly STJ.JsonSerializerOptions JsonOptions = new STJ.JsonSerializerOptions
         {
             NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString,
@@ -379,7 +444,78 @@ namespace Emby.Xtream.Plugin.Service
             return builder.Uri.AbsoluteUri;
         }
 
-        internal static StrmWriteResult WriteStrmIfChanged(string path, string intendedUrl)
+        private static bool TryParseStreamUrl(string value, out StreamUrlParts parts)
+        {
+            parts = null;
+            Uri uri;
+            if (!Uri.TryCreate(value?.Trim().TrimStart('\uFEFF'), UriKind.Absolute, out uri))
+                return false;
+
+            var segments = uri.AbsolutePath
+                .Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(Uri.UnescapeDataString)
+                .ToArray();
+            var kindIndex = Array.FindLastIndex(
+                segments,
+                segment => string.Equals(segment, "series", StringComparison.OrdinalIgnoreCase) ||
+                           string.Equals(segment, "movie", StringComparison.OrdinalIgnoreCase));
+            if (kindIndex < 0 || segments.Length < kindIndex + 4)
+                return false;
+
+            var streamFile = segments[segments.Length - 1];
+            var extensionIndex = streamFile.LastIndexOf('.');
+            parts = new StreamUrlParts
+            {
+                Uri = uri,
+                Prefix = string.Join("/", segments.Take(kindIndex)),
+                Kind = segments[kindIndex],
+                Username = segments[kindIndex + 1],
+                Password = segments[kindIndex + 2],
+                StreamId = extensionIndex > 0 ? streamFile.Substring(0, extensionIndex) : streamFile,
+                Extension = extensionIndex > 0 ? streamFile.Substring(extensionIndex + 1) : string.Empty,
+            };
+            return true;
+        }
+
+        internal static StreamUrlChangeKind ClassifyStreamUrlChange(string currentUrl, string intendedUrl)
+        {
+            if (string.Equals(
+                NormalizeStreamUrl(currentUrl),
+                NormalizeStreamUrl(intendedUrl),
+                StringComparison.Ordinal))
+                return StreamUrlChangeKind.None;
+
+            StreamUrlParts current;
+            StreamUrlParts intended;
+            if (!TryParseStreamUrl(currentUrl, out current) ||
+                !TryParseStreamUrl(intendedUrl, out intended))
+                return StreamUrlChangeKind.Other;
+
+            var result = StreamUrlChangeKind.None;
+            if (!string.Equals(current.Uri.Scheme, intended.Uri.Scheme, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(current.Uri.Host, intended.Uri.Host, StringComparison.OrdinalIgnoreCase) ||
+                current.Uri.Port != intended.Uri.Port)
+                result |= StreamUrlChangeKind.Endpoint;
+            if (!string.Equals(current.Username, intended.Username, StringComparison.Ordinal) ||
+                !string.Equals(current.Password, intended.Password, StringComparison.Ordinal))
+                result |= StreamUrlChangeKind.Credentials;
+            if (!string.Equals(current.StreamId, intended.StreamId, StringComparison.Ordinal))
+                result |= StreamUrlChangeKind.StreamId;
+            if (!string.Equals(current.Extension, intended.Extension, StringComparison.OrdinalIgnoreCase))
+                result |= StreamUrlChangeKind.Extension;
+            if (!string.Equals(current.Prefix, intended.Prefix, StringComparison.Ordinal) ||
+                !string.Equals(current.Kind, intended.Kind, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(current.Uri.Query, intended.Uri.Query, StringComparison.Ordinal) ||
+                !string.Equals(current.Uri.Fragment, intended.Uri.Fragment, StringComparison.Ordinal))
+                result |= StreamUrlChangeKind.Other;
+
+            return result == StreamUrlChangeKind.None ? StreamUrlChangeKind.Other : result;
+        }
+
+        internal static StrmWriteResult WriteStrmIfChanged(
+            string path,
+            string intendedUrl,
+            StreamUrlChangeStats changeStats = null)
         {
             if (File.Exists(path))
             {
@@ -390,6 +526,7 @@ namespace Emby.Xtream.Plugin.Service
                     StringComparison.Ordinal))
                     return StrmWriteResult.Unchanged;
 
+                changeStats?.Record(currentUrl, intendedUrl);
                 File.WriteAllText(path, intendedUrl);
                 return StrmWriteResult.Changed;
             }
@@ -398,6 +535,21 @@ namespace Emby.Xtream.Plugin.Service
             if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
             File.WriteAllText(path, intendedUrl);
             return StrmWriteResult.Added;
+        }
+
+        private void LogStreamUrlChangeSummary(string contentType, StreamUrlChangeStats stats)
+        {
+            if (stats == null || Volatile.Read(ref stats.Total) == 0) return;
+
+            _logger.Info(
+                "{0} STRM URL changes (privacy-safe; categories may overlap): total={1}, endpoint={2}, credentials={3}, stream-id={4}, extension={5}, other={6}",
+                contentType,
+                Volatile.Read(ref stats.Total),
+                Volatile.Read(ref stats.Endpoint),
+                Volatile.Read(ref stats.Credentials),
+                Volatile.Read(ref stats.StreamId),
+                Volatile.Read(ref stats.Extension),
+                Volatile.Read(ref stats.Other));
         }
 
         private void CompleteSyncAndCoalesceLibraryScan(string contentType, params SyncProgress[] progressItems)
@@ -501,6 +653,34 @@ namespace Emby.Xtream.Plugin.Service
             using (var sha = SHA256.Create())
             {
                 var bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(sb.ToString()));
+                return BitConverter.ToString(bytes).Replace("-", string.Empty).ToLowerInvariant();
+            }
+        }
+
+        /// <summary>
+        /// Combines the provider episode identity with the connection settings that are
+        /// embedded in each STRM. Only the SHA-256 result is persisted; credentials are
+        /// never written to diagnostics or stored separately.
+        /// </summary>
+        internal static string ComputeSeriesSyncFingerprint(
+            Dictionary<string, List<EpisodeInfo>> episodes,
+            PluginConfiguration config)
+        {
+            var episodeHash = ComputeSeriesEpisodeHash(episodes);
+            var baseUrl = NormalizeStreamUrl(config?.BaseUrl ?? string.Empty);
+            var username = config?.Username ?? string.Empty;
+            var password = config?.Password ?? string.Empty;
+            var value = string.Format(
+                CultureInfo.InvariantCulture,
+                "{0}:{1}|{2}:{3}|{4}:{5}|{6}:{7}",
+                episodeHash.Length, episodeHash,
+                baseUrl.Length, baseUrl,
+                username.Length, username,
+                password.Length, password);
+
+            using (var sha = SHA256.Create())
+            {
+                var bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(value));
                 return BitConverter.ToString(bytes).Replace("-", string.Empty).ToLowerInvariant();
             }
         }
@@ -843,6 +1023,7 @@ namespace Emby.Xtream.Plugin.Service
                 var writtenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var locallyFilteredPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var preparedMovies = new ConcurrentBag<MovieSyncCandidate>();
+                var urlChangeStats = new StreamUrlChangeStats();
                 var moviesRoot = Path.Combine(config.StrmLibraryPath, GetMovieRootFolderName(config));
                 var semaphore = new SemaphoreSlim(config.SyncParallelism);
 
@@ -1130,7 +1311,7 @@ namespace Emby.Xtream.Plugin.Service
                         if (candidates.Count > 1)
                             Interlocked.Add(ref mp.Skipped, candidates.Count - 1);
 
-                        var strmResult = WriteStrmIfChanged(owner.StrmPath, owner.StreamUrl);
+                        var strmResult = WriteStrmIfChanged(owner.StrmPath, owner.StreamUrl, urlChangeStats);
                         if (strmResult == StrmWriteResult.Added)
                             Interlocked.Increment(ref mp.Added);
                         else if (strmResult == StrmWriteResult.Changed)
@@ -1298,6 +1479,7 @@ namespace Emby.Xtream.Plugin.Service
                     }
                 }
 
+                LogStreamUrlChangeSummary(isDocumentaries ? "Documentary" : "Movie", urlChangeStats);
                 _logger.Info("Movie STRM sync completed: {0} added, {1} changed, {2} skipped, {3} deleted, {4} failed",
                     mp.Added, mp.Changed, mp.Skipped, mp.Deleted, mp.Failed);
                 CompleteSyncAndCoalesceLibraryScan(isDocumentaries ? "Documentary" : "Movie", mp);
@@ -1396,6 +1578,21 @@ namespace Emby.Xtream.Plugin.Service
                 sp.Phase = "Fetching series list";
                 var allSeries = await FetchSeriesListAsync(config.SelectedSeriesCategoryIds, config, cancellationToken).ConfigureAwait(false);
 
+                // When metadata-ID folder naming is disabled, separate provider records can
+                // resolve to the same series folder. Resolve ownership before the parallel
+                // writer starts so duplicate mirrors cannot race and alternate STRM URLs.
+                var pathOwnership = new SeriesPathOwnershipPlan();
+                if (!config.EnableSeriesIdFolderNaming)
+                {
+                    sp.Phase = "Resolving duplicate series paths";
+                    pathOwnership = await BuildSeriesPathOwnershipPlanAsync(
+                        allSeries,
+                        config,
+                        categoryNames,
+                        folderMappings,
+                        cancellationToken).ConfigureAwait(false);
+                }
+
                 // Delta sync: split into changed and unchanged using LastModified timestamp
                 var lastSeriesTs = config.LastSeriesSyncTimestamp;
                 long maxSeriesTs = lastSeriesTs;
@@ -1435,12 +1632,19 @@ namespace Emby.Xtream.Plugin.Service
                 var semaphore = new SemaphoreSlim(config.SyncParallelism);
                 int filterDeletedEpisodes = 0;
 
-                // Persist hashes as catalog delta state/diagnostics. URL correctness is decided
-                // by comparing every intended episode URL with the corresponding STRM file.
-                var updatedHashes = new ConcurrentDictionary<string, string>();
+                // Each saved value combines episode IDs/extensions with a hash of the
+                // connection settings embedded in STRM URLs. Smart Skip therefore remains
+                // safe across provider and configuration changes without persisting secrets.
+                var storedHashes = DeserializeEpisodeHashes(config.SeriesEpisodeHashesJson);
+                var updatedHashes = new ConcurrentDictionary<string, string>(storedHashes);
+                var urlChangeStats = new StreamUrlChangeStats();
+                int smartSkippedSeries = 0;
+                int smartSkippedEpisodes = 0;
                 int noFolderSkippedCount = 0;
                 int providerErrorSkippedCount = 0;
-                int providerDataIncomplete = 0;
+                int protectedDetailFailureCount = 0;
+                int unsafeProcessingFailureCount = 0;
+                int duplicatePathSkippedCount = 0;
 
                 var tasks = allSeries.Select(async series =>
                 {
@@ -1454,7 +1658,10 @@ namespace Emby.Xtream.Plugin.Service
                         var seriesName = SanitizeFileName(cleanedName);
                         if (string.IsNullOrWhiteSpace(seriesName))
                         {
+                            Interlocked.Increment(ref unsafeProcessingFailureCount);
                             Interlocked.Increment(ref sp.Failed);
+                            Interlocked.Increment(ref sp.Completed);
+                            ReportTaskProgress(sp, taskProgress);
                             return;
                         }
 
@@ -1474,7 +1681,10 @@ namespace Emby.Xtream.Plugin.Service
                         SeriesDetailInfo detail;
                         try
                         {
-                            detail = await FetchSeriesDetailAsync(series.SeriesId, config, cancellationToken).ConfigureAwait(false);
+                            if (!pathOwnership.PrefetchedDetails.TryGetValue(series.SeriesId, out detail))
+                            {
+                                detail = await FetchSeriesDetailAsync(series.SeriesId, config, cancellationToken).ConfigureAwait(false);
+                            }
                         }
                         catch (Exception ex)
                         {
@@ -1509,12 +1719,33 @@ namespace Emby.Xtream.Plugin.Service
                             }
                             if (isClientError)
                             {
-                                _logger.Warn("Series '{0}' (id={1}) could not be validated: provider returned {2}", series.Name, series.SeriesId, msg);
+                                var protectedCount = ProtectExistingSeriesFiles(
+                                    config.StrmLibraryPath,
+                                    subFolder,
+                                    seriesName,
+                                    writtenPaths);
+                                _logger.Warn(
+                                    "Series '{0}' (id={1}) could not be validated: provider returned {2}; protected {3} existing episode file(s)",
+                                    series.Name,
+                                    series.SeriesId,
+                                    msg,
+                                    protectedCount);
                                 Interlocked.Increment(ref providerErrorSkippedCount);
                             }
                             else
                             {
-                                _logger.Error("Failed to fetch detail for series '{0}' (id={1}): [{2}] {3}", series.Name, series.SeriesId, ex.GetType().Name, msg);
+                                var protectedCount = ProtectExistingSeriesFiles(
+                                    config.StrmLibraryPath,
+                                    subFolder,
+                                    seriesName,
+                                    writtenPaths);
+                                _logger.Error(
+                                    "Failed to fetch detail for series '{0}' (id={1}): [{2}] {3}; protected {4} existing episode file(s)",
+                                    series.Name,
+                                    series.SeriesId,
+                                    ex.GetType().Name,
+                                    msg,
+                                    protectedCount);
                             }
                             lock (_failedItemsLock)
                             {
@@ -1527,7 +1758,7 @@ namespace Emby.Xtream.Plugin.Service
                                     ErrorMessage = msg
                                 });
                             }
-                            Interlocked.Exchange(ref providerDataIncomplete, 1);
+                            Interlocked.Increment(ref protectedDetailFailureCount);
                             Interlocked.Increment(ref sp.Failed);
                             Interlocked.Increment(ref sp.Completed);
                             ReportTaskProgress(sp, taskProgress);
@@ -1603,12 +1834,14 @@ namespace Emby.Xtream.Plugin.Service
                             }
                         }
 
-                        // Retain the episode hash as delta state/diagnostics, but always compare
-                        // each intended URL with its file. Timestamp/hash-only fast paths can miss
-                        // BaseUrl, credential, or extension changes.
-                        var currentEpHash = ComputeSeriesEpisodeHash(detail.Episodes);
+                        var currentEpHash = ComputeSeriesSyncFingerprint(detail.Episodes, config);
                         var epHashKey = series.SeriesId.ToString(CultureInfo.InvariantCulture);
-                        updatedHashes[epHashKey] = currentEpHash;
+                        string storedEpHash;
+                        var canSmartSkip = config.SmartSkipExisting &&
+                            storedHashes.TryGetValue(epHashKey, out storedEpHash) &&
+                            string.Equals(storedEpHash, currentEpHash, StringComparison.Ordinal);
+                        if (canSmartSkip)
+                            Interlocked.Increment(ref smartSkippedSeries);
                         var seriesFilesChanged = false;
 
                         foreach (var seasonEntry in detail.Episodes)
@@ -1627,17 +1860,7 @@ namespace Emby.Xtream.Plugin.Service
                                 // "Show - S01E01 - EN - Show - S01E01".
                                 var rawEpisodeTitle = StripEpisodeTitleDuplicate(
                                     episode.Title, seriesName, seasonNum, episodeNum);
-                                var episodeTitle = !string.IsNullOrWhiteSpace(rawEpisodeTitle)
-                                    ? " - " + SanitizeFileName(rawEpisodeTitle)
-                                    : string.Empty;
-
-                                var fileNameBase = string.Format(
-                                    CultureInfo.InvariantCulture,
-                                    "{0} - S{1:D2}E{2:D2}{3}",
-                                    seriesName, seasonNum, episodeNum, episodeTitle);
-                                if (fileNameBase.Length > 240)
-                                    fileNameBase = fileNameBase.Substring(0, 240);
-                                var fileName = fileNameBase + ".strm";
+                                var fileName = BuildEpisodeStrmFileName(seriesName, episode);
 
                                 var strmPath = Path.Combine(seasonDir, fileName);
 
@@ -1677,12 +1900,40 @@ namespace Emby.Xtream.Plugin.Service
                                 intendedEpisodeKeys.Add(
                                     episode.Id.ToString(CultureInfo.InvariantCulture) + "." + ext);
 
+                                int pathOwnerId;
+                                if (pathOwnership.EpisodeOwners.TryGetValue(strmPath, out pathOwnerId) &&
+                                    pathOwnerId != series.SeriesId)
+                                {
+                                    // The preferred mirror owns this exact destination. Count
+                                    // the provider item as handled and protect the shared path
+                                    // from orphan cleanup without allowing a competing rewrite.
+                                    lock (writtenPaths)
+                                    {
+                                        writtenPaths.Add(strmPath);
+                                    }
+                                    Interlocked.Increment(ref duplicatePathSkippedCount);
+                                    Interlocked.Increment(ref ep.Total);
+                                    Interlocked.Increment(ref ep.Skipped);
+                                    continue;
+                                }
+
                                 var streamUrl = string.Format(
                                     CultureInfo.InvariantCulture,
                                     "{0}/series/{1}/{2}/{3}.{4}",
                                     config.BaseUrl, config.Username, config.Password, episode.Id, ext);
 
-                                var strmResult = WriteStrmIfChanged(strmPath, streamUrl);
+                                StrmWriteResult strmResult;
+                                if (canSmartSkip && File.Exists(strmPath))
+                                {
+                                    // The episode identity/extension and connection settings
+                                    // are unchanged, and the expected path still exists.
+                                    strmResult = StrmWriteResult.Unchanged;
+                                    Interlocked.Increment(ref smartSkippedEpisodes);
+                                }
+                                else
+                                {
+                                    strmResult = WriteStrmIfChanged(strmPath, streamUrl, urlChangeStats);
+                                }
                                 if (strmResult == StrmWriteResult.Added)
                                 {
                                     Interlocked.Increment(ref ep.Added);
@@ -1717,7 +1968,11 @@ namespace Emby.Xtream.Plugin.Service
                             }
                         }
 
-                        if (config.EnableNfoFiles && seriesFilesChanged)
+                        int folderOwnerId;
+                        var ownsSeriesFolder =
+                            !pathOwnership.FolderOwners.TryGetValue(seriesDir, out folderOwnerId) ||
+                            folderOwnerId == series.SeriesId;
+                        if (config.EnableNfoFiles && seriesFilesChanged && ownsSeriesFolder)
                         {
                             var showNfoPath = Path.Combine(seriesDir, "tvshow.nfo");
                             var tvdbIdMatch = Regex.Match(folderName, @"\[tvdbid=(\d+)\]");
@@ -1743,6 +1998,11 @@ namespace Emby.Xtream.Plugin.Service
                             }
                         }
 
+                        // Commit the Smart Skip checkpoint only after every episode in
+                        // this series completed successfully. A later file-processing
+                        // exception must leave the previous fingerprint in place so the
+                        // next run performs a full verification.
+                        updatedHashes[epHashKey] = currentEpHash;
                         Interlocked.Increment(ref sp.Completed);
                         ReportTaskProgress(sp, taskProgress);
                     }
@@ -1752,6 +2012,7 @@ namespace Emby.Xtream.Plugin.Service
                     }
                     catch (Exception ex)
                     {
+                        Interlocked.Increment(ref unsafeProcessingFailureCount);
                         _logger.Error("Failed to write STRM for series '{0}' (id={1}): [{2}] {3}", series.Name, series.SeriesId, ex.GetType().Name, ex.Message);
                         lock (_failedItemsLock)
                         {
@@ -1776,26 +2037,41 @@ namespace Emby.Xtream.Plugin.Service
 
                 await Task.WhenAll(tasks).ConfigureAwait(false);
 
-                var seriesProviderComplete =
-                    Volatile.Read(ref providerDataIncomplete) == 0 &&
+                var protectedDetailFailures = Volatile.Read(ref protectedDetailFailureCount);
+                var unsafeProcessingFailures = Volatile.Read(ref unsafeProcessingFailureCount);
+                var seriesFullyValidated =
+                    protectedDetailFailures == 0 &&
+                    unsafeProcessingFailures == 0 &&
                     Volatile.Read(ref sp.Failed) == 0;
-                if (!seriesProviderComplete)
+                var cleanupSafe = unsafeProcessingFailures == 0;
+                if (!seriesFullyValidated)
                 {
                     seriesSyncSuccess = false;
                     sp.Phase = "Incomplete provider data";
-                    _logger.Warn(
-                        "Series sync is incomplete because {0} series could not be fully validated; " +
-                        "orphan cleanup, timestamps, and episode-hash updates are blocked",
-                        sp.Failed);
+                    if (cleanupSafe)
+                    {
+                        _logger.Warn(
+                            "Series sync is incomplete because {0} series detail request(s) failed; " +
+                            "their existing files are protected, cleanup may continue for the rest of the fetched catalog, " +
+                            "and the catalog timestamp remains blocked",
+                            protectedDetailFailures);
+                    }
+                    else
+                    {
+                        _logger.Warn(
+                            "Series sync is incomplete because {0} unsafe processing failure(s) occurred; " +
+                            "orphan cleanup and the catalog timestamp are blocked",
+                            unsafeProcessingFailures);
+                    }
                 }
 
                 // Cleanup orphans
                 cancellationToken.ThrowIfCancellationRequested();
                 var showsRoot = Path.Combine(config.StrmLibraryPath, GetSeriesRootFolderName(config));
-                var stableCatalogRuns = seriesProviderComplete
+                var stableCatalogRuns = cleanupSafe
                     ? ObserveCompleteCatalog(showsRoot, intendedEpisodeKeys)
                     : 0;
-                if (config.CleanupOrphans && seriesProviderComplete)
+                if (config.CleanupOrphans && cleanupSafe)
                 {
                     sp.Phase = "Cleaning up orphaned files";
                     var orphans = CollectOrphans(
@@ -1826,18 +2102,17 @@ namespace Emby.Xtream.Plugin.Service
 
                 // Persist the highest LastModified timestamp seen
                 cancellationToken.ThrowIfCancellationRequested();
-                if (seriesProviderComplete && maxSeriesTs > config.LastSeriesSyncTimestamp)
+                if (seriesFullyValidated && maxSeriesTs > config.LastSeriesSyncTimestamp)
                 {
                     config.LastSeriesSyncTimestamp = maxSeriesTs;
                     saveConfig?.Invoke();
                 }
 
-                // Persist episode hashes for next run
-                if (seriesProviderComplete)
-                {
-                    config.SeriesEpisodeHashesJson = SerializeEpisodeHashes(updatedHashes);
-                    saveConfig?.Invoke();
-                }
+                // Persist successful per-series fingerprints even when another provider
+                // record failed. Failed records retain their previous fingerprints and
+                // will be fully checked on their next successful response.
+                config.SeriesEpisodeHashesJson = SerializeEpisodeHashes(updatedHashes);
+                saveConfig?.Invoke();
 
                 if (noFolderSkippedCount > 0)
                     _logger.Warn("Series skip: {0} series had no matching folder mapping (check Series Folder Mode settings)", noFolderSkippedCount);
@@ -1845,7 +2120,19 @@ namespace Emby.Xtream.Plugin.Service
                     _logger.Warn(
                         "Series provider skips: {0} stale 404 or empty-detail record(s) were protected",
                         providerErrorSkippedCount);
+                if (Volatile.Read(ref smartSkippedSeries) > 0)
+                    _logger.Info(
+                        "Series Smart Skip: {0} series fingerprints unchanged; skipped reading {1} existing STRM file(s)",
+                        Volatile.Read(ref smartSkippedSeries),
+                        Volatile.Read(ref smartSkippedEpisodes));
+                if (Volatile.Read(ref duplicatePathSkippedCount) > 0)
+                    _logger.Info(
+                        "Series duplicate-path protection: skipped {0} competing episode write(s) across {1} duplicate folder(s); {2} shared path(s) had deterministic owners",
+                        Volatile.Read(ref duplicatePathSkippedCount),
+                        pathOwnership.DuplicateFolderCount,
+                        pathOwnership.CompetingPathCount);
                 ep.Failed = sp.Failed;
+                LogStreamUrlChangeSummary(isDocuSeries ? "DocuSeries" : "Series", urlChangeStats);
                 _logger.Info("Series STRM sync completed: {0} episodes added, {1} changed, {2} skipped, {3} deleted, {4} failed",
                     ep.Added, ep.Changed, ep.Skipped, ep.Deleted, sp.Failed);
                 CompleteSyncAndCoalesceLibraryScan(isDocuSeries ? "DocuSeries" : "Series", sp, ep);
@@ -2740,6 +3027,192 @@ namespace Emby.Xtream.Plugin.Service
             }
             double fps;
             return double.TryParse(rFrameRate, NumberStyles.Any, CultureInfo.InvariantCulture, out fps) ? fps : 0;
+        }
+
+        private async Task<SeriesPathOwnershipPlan> BuildSeriesPathOwnershipPlanAsync(
+            List<SeriesInfo> allSeries,
+            PluginConfiguration config,
+            Dictionary<int, string> categoryNames,
+            Dictionary<int, string> folderMappings,
+            CancellationToken cancellationToken)
+        {
+            var plan = new SeriesPathOwnershipPlan();
+            var candidates = new List<SeriesFolderCandidate>();
+
+            foreach (var series in allSeries)
+            {
+                var cleanedName = config.EnableContentNameCleaning
+                    ? ContentNameCleaner.CleanContentName(series.Name, config.ContentRemoveTerms)
+                    : series.Name;
+                var seriesName = SanitizeFileName(cleanedName);
+                if (string.IsNullOrWhiteSpace(seriesName)) continue;
+
+                var subFolder = BuildContentFolderPath(
+                    config.SeriesFolderMode,
+                    series.CategoryId,
+                    categoryNames,
+                    folderMappings,
+                    GetSeriesRootFolderName(config));
+                if (subFolder == null) continue;
+
+                candidates.Add(new SeriesFolderCandidate
+                {
+                    Series = series,
+                    SeriesName = seriesName,
+                    SeriesDirectory = Path.Combine(config.StrmLibraryPath, subFolder, seriesName),
+                });
+            }
+
+            var duplicateGroups = candidates
+                .GroupBy(c => c.SeriesDirectory, StringComparer.OrdinalIgnoreCase)
+                .Where(g => g.Select(c => c.Series.SeriesId).Distinct().Count() > 1)
+                .ToList();
+            if (duplicateGroups.Count == 0) return plan;
+
+            plan.DuplicateFolderCount = duplicateGroups.Count;
+            var duplicateCandidates = duplicateGroups.SelectMany(g => g)
+                .GroupBy(c => c.Series.SeriesId)
+                .Select(g => g.First())
+                .ToList();
+            var fetchedDetails = new ConcurrentDictionary<int, SeriesDetailInfo>();
+            var fetchSemaphore = new SemaphoreSlim(Math.Max(1, config.SyncParallelism));
+            var fetchTasks = duplicateCandidates.Select(async candidate =>
+            {
+                await fetchSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    var detail = await FetchSeriesDetailAsync(
+                        candidate.Series.SeriesId,
+                        config,
+                        cancellationToken).ConfigureAwait(false);
+                    if (detail != null && detail.Episodes != null && detail.Episodes.Count > 0)
+                        fetchedDetails[candidate.Series.SeriesId] = detail;
+                }
+                catch (Exception ex)
+                {
+                    _logger.Warn(
+                        "Duplicate-path preflight could not inspect series '{0}' (id={1}): {2}; normal provider error handling will retry it",
+                        candidate.Series.Name,
+                        candidate.Series.SeriesId,
+                        ex.Message);
+                }
+                finally
+                {
+                    fetchSemaphore.Release();
+                }
+            });
+            await Task.WhenAll(fetchTasks).ConfigureAwait(false);
+            fetchSemaphore.Dispose();
+
+            foreach (var item in fetchedDetails)
+                plan.PrefetchedDetails[item.Key] = item.Value;
+
+            foreach (var group in duplicateGroups)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var resolved = group
+                    .Where(c => fetchedDetails.ContainsKey(c.Series.SeriesId))
+                    .ToList();
+                if (resolved.Count != group.Count())
+                {
+                    _logger.Warn(
+                        "Duplicate series folder '{0}' could not be fully resolved because one or more detail requests failed; no ownership rule was applied",
+                        group.Key);
+                    continue;
+                }
+
+                var pathsBySeries = new Dictionary<int, HashSet<string>>();
+                foreach (var candidate in resolved)
+                {
+                    var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    var detail = fetchedDetails[candidate.Series.SeriesId];
+                    foreach (var season in detail.Episodes.Values)
+                    {
+                        foreach (var episode in season)
+                        {
+                            var seasonNum = episode.Season > 0 ? episode.Season : 1;
+                            var seasonFolder = string.Format(
+                                CultureInfo.InvariantCulture,
+                                "Season {0:D2}",
+                                seasonNum);
+                            paths.Add(Path.Combine(
+                                candidate.SeriesDirectory,
+                                seasonFolder,
+                                BuildEpisodeStrmFileName(candidate.SeriesName, episode)));
+                        }
+                    }
+                    pathsBySeries[candidate.Series.SeriesId] = paths;
+                }
+
+                var rank = resolved
+                    .OrderByDescending(c => pathsBySeries[c.Series.SeriesId].Count)
+                    .ThenByDescending(c => ParseProviderTimestamp(c.Series.LastModified))
+                    .ThenBy(c => c.Series.SeriesId)
+                    .Select((candidate, index) => new { candidate.Series.SeriesId, Index = index })
+                    .ToDictionary(x => x.SeriesId, x => x.Index);
+                plan.FolderOwners[group.Key] = rank.OrderBy(x => x.Value).First().Key;
+
+                var pathCandidates = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
+                foreach (var pair in pathsBySeries)
+                {
+                    foreach (var path in pair.Value)
+                    {
+                        List<int> owners;
+                        if (!pathCandidates.TryGetValue(path, out owners))
+                        {
+                            owners = new List<int>();
+                            pathCandidates[path] = owners;
+                        }
+                        owners.Add(pair.Key);
+                    }
+                }
+
+                foreach (var collision in pathCandidates.Where(p => p.Value.Count > 1))
+                {
+                    plan.EpisodeOwners[collision.Key] = collision.Value
+                        .OrderBy(id => rank[id])
+                        .First();
+                    plan.CompetingPathCount++;
+                }
+            }
+
+            _logger.Info(
+                "Series duplicate-path preflight: {0} duplicate folder(s), {1} competing episode path(s); ownership is deterministic by completeness, freshness, then series ID",
+                plan.DuplicateFolderCount,
+                plan.CompetingPathCount);
+            return plan;
+        }
+
+        private static long ParseProviderTimestamp(string value)
+        {
+            long result;
+            return long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out result)
+                ? result
+                : 0;
+        }
+
+        private static string BuildEpisodeStrmFileName(string seriesName, EpisodeInfo episode)
+        {
+            var seasonNum = episode.Season > 0 ? episode.Season : 1;
+            var episodeNum = episode.EpisodeNum > 0 ? episode.EpisodeNum : 1;
+            var rawEpisodeTitle = StripEpisodeTitleDuplicate(
+                episode.Title,
+                seriesName,
+                seasonNum,
+                episodeNum);
+            var episodeTitle = !string.IsNullOrWhiteSpace(rawEpisodeTitle)
+                ? " - " + SanitizeFileName(rawEpisodeTitle)
+                : string.Empty;
+            var fileNameBase = string.Format(
+                CultureInfo.InvariantCulture,
+                "{0} - S{1:D2}E{2:D2}{3}",
+                seriesName,
+                seasonNum,
+                episodeNum,
+                episodeTitle);
+            if (fileNameBase.Length > 240)
+                fileNameBase = fileNameBase.Substring(0, 240);
+            return fileNameBase + ".strm";
         }
 
         private async Task<List<SeriesInfo>> FetchSeriesListAsync(
