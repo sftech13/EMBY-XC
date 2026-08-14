@@ -991,8 +991,7 @@ namespace Emby.Xtream.Plugin.Api
         public async Task<object> Post(RetryFailed request)
         {
             var syncService = Plugin.Instance.StrmSyncService;
-            if (syncService.MovieProgress.IsRunning || syncService.DocumentariesProgress.IsRunning ||
-                syncService.SeriesProgress.IsRunning || syncService.DocuSeriesProgress.IsRunning)
+            if (syncService.IsAnySyncRunning)
                 return new SyncResult { Success = false, Message = "A sync is already running." };
             if (syncService.FailedItems.Count == 0)
                 return new SyncResult { Success = false, Message = "No failed items to retry." };
@@ -1200,8 +1199,7 @@ namespace Emby.Xtream.Plugin.Api
                 PluginVersion = GetPluginDisplayVersion(),
                 LastSync = history.Count > 0 ? history[0] : null,
                 History = history,
-                IsRunning = syncService.MovieProgress.IsRunning || syncService.DocumentariesProgress.IsRunning ||
-                            syncService.SeriesProgress.IsRunning || syncService.DocuSeriesProgress.IsRunning,
+                IsRunning = syncService.IsAnySyncRunning,
                 AutoSyncOn = config.AutoSyncEnabled,
                 NextSyncTime = nextSyncTime,
                 SyncMovies = config.SyncMovies,

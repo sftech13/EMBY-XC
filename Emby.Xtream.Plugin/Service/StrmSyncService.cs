@@ -11,7 +11,9 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Emby.Xtream.Plugin.Client.Models;
+using MediaBrowser.Controller.Entities;
 using MediaBrowser.Model.Logging;
+using MetadataRefreshOptions = MediaBrowser.Controller.Providers.MetadataRefreshOptions;
 using STJ = System.Text.Json;
 
 namespace Emby.Xtream.Plugin.Service
@@ -346,11 +348,15 @@ namespace Emby.Xtream.Plugin.Service
         private readonly object _historyLock = new object();
         private readonly List<FailedSyncItem> _failedItems = new List<FailedSyncItem>();
         private readonly object _failedItemsLock = new object();
+        private readonly SemaphoreSlim _seriesWriteGate = new SemaphoreSlim(1, 1);
         private readonly object _activeSyncLock = new object();
         private CancellationTokenSource _activeSyncCancellation;
         private readonly object _libraryScanLock = new object();
         private Timer _libraryScanTimer;
         private bool _libraryScanPending;
+        private bool _targetedLibraryRefreshRunning;
+        private readonly HashSet<string> _pendingLibraryRefreshPaths =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly object _catalogObservationLock = new object();
         private readonly Dictionary<string, CatalogObservation> _catalogObservations =
             new Dictionary<string, CatalogObservation>(StringComparer.OrdinalIgnoreCase);
@@ -552,7 +558,10 @@ namespace Emby.Xtream.Plugin.Service
                 Volatile.Read(ref stats.Other));
         }
 
-        private void CompleteSyncAndCoalesceLibraryScan(string contentType, params SyncProgress[] progressItems)
+        private void CompleteSyncAndCoalesceLibraryScan(
+            string contentType,
+            string changedLibraryPath,
+            params SyncProgress[] progressItems)
         {
             var changed = progressItems != null && progressItems.Any(p => p != null &&
                 (Volatile.Read(ref p.Added) > 0 ||
@@ -565,8 +574,10 @@ namespace Emby.Xtream.Plugin.Service
                 if (changed)
                 {
                     _libraryScanPending = true;
+                    if (!string.IsNullOrWhiteSpace(changedLibraryPath))
+                        _pendingLibraryRefreshPaths.Add(Path.GetFullPath(changedLibraryPath));
                     _logger.Info(
-                        "{0} sync changed files; one coalesced Emby library scan is pending after a {1}-minute sync quiet period",
+                        "{0} sync changed files; a targeted Emby refresh is pending after a {1}-minute sync quiet period",
                         contentType,
                         (int)LibraryScanQuietPeriod.TotalMinutes);
                 }
@@ -588,14 +599,15 @@ namespace Emby.Xtream.Plugin.Service
             {
                 if (!_libraryScanPending) return;
 
-                if (_movieProgress.IsRunning ||
+                if (_targetedLibraryRefreshRunning ||
+                    _movieProgress.IsRunning ||
                     _documentariesProgress.IsRunning ||
                     _seriesProgress.IsRunning ||
                     _docuSeriesProgress.IsRunning ||
                     _retryProgress.IsRunning)
                 {
                     _logger.Info(
-                        "Coalesced Emby library scan remains pending because an XC2EMBY sync is still running; checking again in {0} minutes",
+                        "Targeted Emby refresh remains pending because an XC2EMBY sync or refresh is still running; checking again in {0} minutes",
                         (int)ActiveSyncScanRetryDelay.TotalMinutes);
                     _libraryScanTimer.Change(ActiveSyncScanRetryDelay, Timeout.InfiniteTimeSpan);
                     return;
@@ -607,19 +619,103 @@ namespace Emby.Xtream.Plugin.Service
                     var libraryManager = host?.Resolve<MediaBrowser.Controller.Library.ILibraryManager>();
                     if (libraryManager == null)
                     {
-                        _logger.Warn("XC2EMBY changed files, but ILibraryManager was unavailable; the coalesced Emby scan remains pending");
+                        _logger.Warn("XC2EMBY changed files, but ILibraryManager was unavailable; the targeted refresh remains pending");
                         _libraryScanTimer.Change(ActiveSyncScanRetryDelay, Timeout.InfiniteTimeSpan);
                         return;
                     }
 
-                    libraryManager.QueueLibraryScan();
+                    if (libraryManager.IsScanRunning)
+                    {
+                        _logger.Info(
+                            "Targeted Emby refresh is waiting for the active library scan; checking again in {0} minutes",
+                            (int)ActiveSyncScanRetryDelay.TotalMinutes);
+                        _libraryScanTimer.Change(ActiveSyncScanRetryDelay, Timeout.InfiniteTimeSpan);
+                        return;
+                    }
+
+                    var refreshPaths = _pendingLibraryRefreshPaths.ToArray();
+                    if (refreshPaths.Length == 0)
+                    {
+                        _libraryScanPending = false;
+                        return;
+                    }
+
+                    _pendingLibraryRefreshPaths.Clear();
                     _libraryScanPending = false;
-                    _logger.Info("XC2EMBY sync sequence is quiet; queued one coalesced Emby library scan");
+                    _targetedLibraryRefreshRunning = true;
+                    _logger.Info(
+                        "XC2EMBY sync sequence is quiet; starting targeted Emby refresh for {0} changed library root(s): {1}",
+                        refreshPaths.Length,
+                        string.Join(", ", refreshPaths.Select(Path.GetFileName)));
+
+                    _ = Task.Run(() => RunTargetedLibraryRefreshAsync(libraryManager, refreshPaths));
                 }
                 catch (Exception ex)
                 {
-                    _logger.Warn("The coalesced Emby library scan could not be queued and remains pending: {0}", ex.Message);
+                    _logger.Warn("The targeted Emby refresh could not be started and remains pending: {0}", ex.Message);
                     _libraryScanTimer.Change(ActiveSyncScanRetryDelay, Timeout.InfiniteTimeSpan);
+                }
+            }
+        }
+
+        private async Task RunTargetedLibraryRefreshAsync(
+            MediaBrowser.Controller.Library.ILibraryManager libraryManager,
+            string[] refreshPaths)
+        {
+            var failedPaths = new List<string>();
+            try
+            {
+                foreach (var path in refreshPaths)
+                {
+                    try
+                    {
+                        var folder = libraryManager.FindByPath(path, true) as Folder;
+                        if (folder == null)
+                        {
+                            failedPaths.Add(path);
+                            _logger.Warn("Targeted Emby refresh could not find a configured library folder for {0}", path);
+                            continue;
+                        }
+
+                        var options = new MetadataRefreshOptions(BaseItem.FileSystem)
+                        {
+                            EnableRemoteContentProbe = false,
+                            EnableSubtitleDownloading = false,
+                            EnableThumbnailImageExtraction = false,
+                        };
+
+                        await folder.ValidateChildren(
+                            new Progress<double>(),
+                            CancellationToken.None,
+                            options,
+                            true).ConfigureAwait(false);
+                        _logger.Info("Targeted Emby refresh completed for {0}", path);
+                    }
+                    catch (Exception ex)
+                    {
+                        failedPaths.Add(path);
+                        _logger.Warn("Targeted Emby refresh failed for {0}: {1}", path, ex.Message);
+                    }
+                }
+            }
+            finally
+            {
+                lock (_libraryScanLock)
+                {
+                    _targetedLibraryRefreshRunning = false;
+                    foreach (var failedPath in failedPaths)
+                        _pendingLibraryRefreshPaths.Add(failedPath);
+
+                    if (failedPaths.Count > 0)
+                    {
+                        _libraryScanPending = true;
+                        _libraryScanTimer.Change(ActiveSyncScanRetryDelay, Timeout.InfiniteTimeSpan);
+                    }
+                    else if (_libraryScanPending || _pendingLibraryRefreshPaths.Count > 0)
+                    {
+                        _libraryScanPending = true;
+                        _libraryScanTimer.Change(LibraryScanQuietPeriod, Timeout.InfiniteTimeSpan);
+                    }
                 }
             }
         }
@@ -1482,7 +1578,10 @@ namespace Emby.Xtream.Plugin.Service
                 LogStreamUrlChangeSummary(isDocumentaries ? "Documentary" : "Movie", urlChangeStats);
                 _logger.Info("Movie STRM sync completed: {0} added, {1} changed, {2} skipped, {3} deleted, {4} failed",
                     mp.Added, mp.Changed, mp.Skipped, mp.Deleted, mp.Failed);
-                CompleteSyncAndCoalesceLibraryScan(isDocumentaries ? "Documentary" : "Movie", mp);
+                CompleteSyncAndCoalesceLibraryScan(
+                    isDocumentaries ? "Documentary" : "Movie",
+                    moviesRoot,
+                    mp);
             }
             catch (OperationCanceledException)
             {
@@ -1527,6 +1626,24 @@ namespace Emby.Xtream.Plugin.Service
 
         public async Task SyncSeriesAsync(PluginConfiguration config, CancellationToken cancellationToken, Action saveConfig = null, IProgress<double> taskProgress = null, bool isDocuSeries = false)
         {
+            await _seriesWriteGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await SyncSeriesCoreAsync(
+                    config,
+                    cancellationToken,
+                    saveConfig,
+                    taskProgress,
+                    isDocuSeries).ConfigureAwait(false);
+            }
+            finally
+            {
+                _seriesWriteGate.Release();
+            }
+        }
+
+        private async Task SyncSeriesCoreAsync(PluginConfiguration config, CancellationToken cancellationToken, Action saveConfig, IProgress<double> taskProgress, bool isDocuSeries)
+        {
             ApplyUserAgentToSharedClient();
             CheckAndUpgradeNamingVersion(config, saveConfig);
             var sp = new SyncProgress { IsRunning = true, Phase = "Starting series sync" };
@@ -1555,6 +1672,20 @@ namespace Emby.Xtream.Plugin.Service
                         "Or switch back to Single Folder to use the flat category list.";
                     sp.Phase = "Configuration needed";
                     _logger.Warn("Series sync aborted: {0}", sp.AbortReason);
+                    return;
+                }
+
+                if (config.SelectedSeriesCategoryIds == null || config.SelectedSeriesCategoryIds.Length == 0)
+                {
+                    // FetchSeriesListAsync intentionally treats an empty array as an
+                    // unfiltered catalog for internal discovery callers. A user-initiated
+                    // TV/DocuSeries sync must instead fail closed so clearing every category
+                    // cannot download and write the provider's complete series catalog.
+                    seriesSyncSuccess = false;
+                    sp.AbortReason = (isDocuSeries ? "DocuSeries" : "Series") +
+                        " sync skipped: select at least one category.";
+                    sp.Phase = "Configuration needed";
+                    _logger.Warn(sp.AbortReason);
                     return;
                 }
 
@@ -2135,7 +2266,11 @@ namespace Emby.Xtream.Plugin.Service
                 LogStreamUrlChangeSummary(isDocuSeries ? "DocuSeries" : "Series", urlChangeStats);
                 _logger.Info("Series STRM sync completed: {0} episodes added, {1} changed, {2} skipped, {3} deleted, {4} failed",
                     ep.Added, ep.Changed, ep.Skipped, ep.Deleted, sp.Failed);
-                CompleteSyncAndCoalesceLibraryScan(isDocuSeries ? "DocuSeries" : "Series", sp, ep);
+                CompleteSyncAndCoalesceLibraryScan(
+                    isDocuSeries ? "DocuSeries" : "Series",
+                    showsRoot,
+                    sp,
+                    ep);
             }
             catch (OperationCanceledException)
             {
@@ -2203,6 +2338,19 @@ namespace Emby.Xtream.Plugin.Service
 
         public async Task RetryFailedAsync(CancellationToken cancellationToken)
         {
+            await _seriesWriteGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await RetryFailedCoreAsync(cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                _seriesWriteGate.Release();
+            }
+        }
+
+        private async Task RetryFailedCoreAsync(CancellationToken cancellationToken)
+        {
             List<FailedSyncItem> items;
             lock (_failedItemsLock) { items = _failedItems.ToList(); }
             if (items.Count == 0) return;
@@ -2251,7 +2399,7 @@ namespace Emby.Xtream.Plugin.Service
                     foreach (var s in succeeded)
                         _failedItems.Remove(s);
                 }
-                CompleteSyncAndCoalesceLibraryScan("Retry", _retryProgress);
+                CompleteSyncAndCoalesceLibraryScan("Retry", config.StrmLibraryPath, _retryProgress);
             }
             finally
             {

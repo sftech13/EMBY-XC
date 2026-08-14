@@ -5,7 +5,8 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Xml.Linq;
+using Emby.Xtream.Plugin.Client;
+using Emby.Xtream.Plugin.Client.Models;
 using MediaBrowser.Controller.LiveTv;
 using MediaBrowser.Model.Dto;
 using MediaBrowser.Model.LiveTv;
@@ -28,16 +29,11 @@ namespace Emby.Xtream.Plugin.Service
         public string Type => ProviderType;
         public string SetupUrl => string.Empty;
 
-        private volatile XDocument _cachedXml;
-        private volatile Dictionary<string, List<XElement>> _programmeIndex;
-        private readonly SemaphoreSlim _cacheLock = new SemaphoreSlim(1, 1);
-
         public XtreamListingsProvider() { _instance = this; }
 
         public void InvalidateCache()
         {
-            _cachedXml = null;
-            _programmeIndex = null;
+            // The single shared snapshot is owned and invalidated by LiveTvService.
         }
 
         public async Task<List<ProgramInfo>> GetProgramsAsync(
@@ -50,35 +46,32 @@ namespace Emby.Xtream.Plugin.Service
             if (string.IsNullOrEmpty(channelId))
                 return new List<ProgramInfo>();
 
-            var doc = await GetCachedXmlAsync(cancellationToken).ConfigureAwait(false);
-            if (doc == null)
+            var snapshot = await GetSnapshotAsync(cancellationToken).ConfigureAwait(false);
+            if (snapshot == null)
                 return new List<ProgramInfo>();
 
-            var index = _programmeIndex;
             var programs = new List<ProgramInfo>();
 
-            List<XElement> channelProgs;
-            if (index == null || !index.TryGetValue(channelId, out channelProgs))
-                channelProgs = new List<XElement>();
+            if (!snapshot.ProgramsByChannel.TryGetValue(channelId, out var channelProgs))
+                channelProgs = new List<EpgProgram>();
 
             foreach (var prog in channelProgs)
             {
-                // channelId already matches since we indexed by it
-
-                var startStr = prog.Attribute("start")?.Value;
-                var stopStr = prog.Attribute("stop")?.Value;
-
-                if (!TryParseXmltvDate(startStr, out var start) ||
-                    !TryParseXmltvDate(stopStr, out var stop))
+                if (prog.StartTimestamp == 0 || prog.StopTimestamp == 0)
                     continue;
+
+                var start = DateTimeOffset.FromUnixTimeSeconds(prog.StartTimestamp);
+                var stop = DateTimeOffset.FromUnixTimeSeconds(prog.StopTimestamp);
 
                 if (stop <= startDateUtc || start >= endDateUtc)
                     continue;
 
-                var title        = StripEpgQualifiers(prog.Element("title")?.Value ?? "Unknown");
-                var rawSubTitle  = prog.Element("sub-title")?.Value;
+                var title        = StripEpgQualifiers(prog.Title ?? "Unknown");
+                var rawSubTitle  = prog.SubTitle;
                 var episodeTitle = StripEpgQualifiers(rawSubTitle);
-                var genres       = prog.Elements("category").Select(e => e.Value).ToList();
+                var genres       = prog.Categories != null
+                    ? new List<string>(prog.Categories)
+                    : new List<string>();
                 var isMovie      = genres.Any(c =>
                     c.IndexOf("movie", StringComparison.OrdinalIgnoreCase) >= 0 ||
                     c.IndexOf("film", StringComparison.OrdinalIgnoreCase) >= 0);
@@ -99,40 +92,38 @@ namespace Emby.Xtream.Plugin.Service
                 // null-ShowId programs together, linking completely unrelated programs.
                 var showId = (!string.IsNullOrEmpty(seriesKey) && !string.IsNullOrEmpty(episodeKey))
                     ? seriesKey + "::" + episodeKey
-                    : channelId + "::" + startStr;
+                    : channelId + "::" + prog.StartTimestamp.ToString(CultureInfo.InvariantCulture);
 
                 var program = new ProgramInfo
                 {
                     ChannelId      = channelId,
-                    Id             = string.Format(CultureInfo.InvariantCulture, "{0}_{1}", channelId, startStr),
+                    Id             = string.Format(CultureInfo.InvariantCulture, "{0}_{1}", channelId, prog.StartTimestamp),
                     ShowId         = showId,
                     Name           = title,
-                    Overview       = prog.Element("desc")?.Value,
+                    Overview       = prog.Description,
                     StartDate      = start,
                     EndDate        = stop,
                     Genres         = genres,
-                    ImageUrl       = prog.Element("icon")?.Attribute("src")?.Value,
+                    ImageUrl       = prog.ImageUrl,
                     EpisodeTitle   = episodeTitle,
                     IsMovie        = isMovie,
                     IsSports       = isSports,
                     IsNews         = isNews,
                     IsSeries       = !isMovie,
-                    IsLive         = prog.Element("live") != null,
-                    IsNew          = prog.Element("new") != null,
-                    IsRepeat       = prog.Element("previously-shown") != null,
-                    IsPremiere     = prog.Element("premiere") != null,
-                    OfficialRating = prog.Element("rating")?.Element("value")?.Value,
+                    IsLive         = prog.IsLive,
+                    IsNew          = prog.IsNew,
+                    IsRepeat       = prog.IsPreviouslyShown,
+                    IsPremiere     = prog.IsPremiere,
+                    OfficialRating = prog.Rating,
                     // SeriesId feeds SeriesPresentationUniqueKey — used by series timers
                     // to match all episodes of a show. Keep it series-level only.
                     SeriesId       = seriesKey,
                 };
 
                 // Season/episode from xmltv_ns: "S.E.part" (all 0-based)
-                var epNum = prog.Elements("episode-num")
-                    .FirstOrDefault(e => e.Attribute("system")?.Value == "xmltv_ns");
-                if (epNum != null)
+                if (!string.IsNullOrEmpty(prog.EpisodeNumXmltvNs))
                 {
-                    var parts = epNum.Value.Split('.');
+                    var parts = prog.EpisodeNumXmltvNs.Split('.');
                     if (parts.Length >= 1 && int.TryParse(parts[0].Trim(), out var s))
                         program.SeasonNumber = s + 1;
                     if (parts.Length >= 2 && int.TryParse(parts[1].Trim(), out var ep))
@@ -142,18 +133,10 @@ namespace Emby.Xtream.Plugin.Service
                 // Fallback: onscreen "S01 E01" or "S1E1" when xmltv_ns is absent
                 if (program.SeasonNumber == null)
                 {
-                    var onscreen = prog.Elements("episode-num")
-                        .FirstOrDefault(e => string.Equals(
-                            e.Attribute("system")?.Value, "onscreen", StringComparison.OrdinalIgnoreCase));
-                    if (onscreen != null)
-                        TryParseOnscreenEpisode(onscreen.Value, program);
+                    TryParseOnscreenEpisode(prog.EpisodeNumOnscreen, program);
                 }
 
-                // Production year from <date>YYYY...</date>
-                var dateVal = prog.Element("date")?.Value;
-                if (!string.IsNullOrEmpty(dateVal) && dateVal.Length >= 4 &&
-                    int.TryParse(dateVal.Substring(0, 4), out var year))
-                    program.ProductionYear = year;
+                program.ProductionYear = prog.ProductionYear;
 
                 programs.Add(program);
             }
@@ -204,20 +187,20 @@ namespace Emby.Xtream.Plugin.Service
             ListingsProviderInfo info,
             CancellationToken cancellationToken)
         {
-            var doc = await GetCachedXmlAsync(cancellationToken).ConfigureAwait(false);
-            if (doc == null)
+            var snapshot = await GetSnapshotAsync(cancellationToken).ConfigureAwait(false);
+            if (snapshot == null)
                 return new List<ChannelInfo>();
 
-            var sourceAliases = await GetSourceAliasesByXmltvIdAsync(doc, cancellationToken).ConfigureAwait(false);
+            var xmltvIds = new HashSet<string>(
+                snapshot.DisplayNamesByChannel.Keys,
+                StringComparer.OrdinalIgnoreCase);
+            var sourceAliases = await GetSourceAliasesByXmltvIdAsync(xmltvIds, cancellationToken).ConfigureAwait(false);
 
-            return doc.Descendants("channel")
-                .Select(c =>
+            return snapshot.DisplayNamesByChannel
+                .Select(entry =>
                 {
-                    var id = c.Attribute("id")?.Value ?? string.Empty;
-                    var names = c.Elements("display-name")
-                        .Select(e => e.Value)
-                        .Where(n => !string.IsNullOrWhiteSpace(n))
-                        .ToList();
+                    var id = entry.Key;
+                    var names = new List<string>(entry.Value);
                     if (sourceAliases.TryGetValue(id, out var aliases))
                         names.AddRange(aliases);
                     var name = names.FirstOrDefault() ?? string.Empty;
@@ -233,84 +216,39 @@ namespace Emby.Xtream.Plugin.Service
                 .ToList();
         }
 
-        private async Task<XDocument> GetCachedXmlAsync(CancellationToken cancellationToken)
+        private static async Task<XmltvSnapshot> GetSnapshotAsync(CancellationToken cancellationToken)
         {
             var liveTvService = Plugin.Instance?.LiveTvService;
-            if (liveTvService == null)
-                return _cachedXml;
-
-            var doc = await liveTvService.GetXmltvDocumentAsync(cancellationToken).ConfigureAwait(false);
-            if (doc == null)
-                return _cachedXml;
-
-            // Fast path: document reference is unchanged, index is still valid.
-            if (ReferenceEquals(doc, _cachedXml) && _programmeIndex != null)
-                return doc;
-
-            await _cacheLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-            try
-            {
-                if (ReferenceEquals(doc, _cachedXml) && _programmeIndex != null)
-                    return doc;
-
-                // Build programme index keyed by channel attribute for O(1) per-channel lookups.
-                var newIndex = new Dictionary<string, List<XElement>>(StringComparer.OrdinalIgnoreCase);
-                foreach (var prog in doc.Descendants("programme"))
-                {
-                    var chAttr = prog.Attribute("channel")?.Value;
-                    if (string.IsNullOrEmpty(chAttr)) continue;
-                    List<XElement> list;
-                    if (!newIndex.TryGetValue(chAttr, out list))
-                    {
-                        list = new List<XElement>();
-                        newIndex[chAttr] = list;
-                    }
-                    list.Add(prog);
-                }
-                _programmeIndex = newIndex;
-                _cachedXml = doc;
-                return doc;
-            }
-            catch
-            {
-                return _cachedXml;
-            }
-            finally
-            {
-                _cacheLock.Release();
-            }
+            return liveTvService == null
+                ? null
+                : await liveTvService.GetXmltvSnapshotAsync(cancellationToken).ConfigureAwait(false);
         }
 
         // Called by XtreamTunerHost during channel build to normalize EpgChannelId → XMLTV id.
         internal async Task<HashSet<string>> GetXmltvChannelIdsAsync(CancellationToken cancellationToken)
         {
-            var doc = await GetCachedXmlAsync(cancellationToken).ConfigureAwait(false);
-            if (doc == null) return null;
-            var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var ch in doc.Descendants("channel"))
-            {
-                var id = ch.Attribute("id")?.Value;
-                if (!string.IsNullOrEmpty(id)) ids.Add(id);
-            }
-            return ids;
+            var snapshot = await GetSnapshotAsync(cancellationToken).ConfigureAwait(false);
+            return snapshot == null
+                ? null
+                : new HashSet<string>(snapshot.DisplayNamesByChannel.Keys, StringComparer.OrdinalIgnoreCase);
         }
 
         internal async Task<Dictionary<string, string[]>> GetXmltvChannelAliasesAsync(CancellationToken cancellationToken)
         {
-            var doc = await GetCachedXmlAsync(cancellationToken).ConfigureAwait(false);
-            if (doc == null)
+            var snapshot = await GetSnapshotAsync(cancellationToken).ConfigureAwait(false);
+            if (snapshot == null)
                 return new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
 
-            var sourceAliases = await GetSourceAliasesByXmltvIdAsync(doc, cancellationToken).ConfigureAwait(false);
+            var xmltvIds = new HashSet<string>(
+                snapshot.DisplayNamesByChannel.Keys,
+                StringComparer.OrdinalIgnoreCase);
+            var sourceAliases = await GetSourceAliasesByXmltvIdAsync(xmltvIds, cancellationToken).ConfigureAwait(false);
 
-            return doc.Descendants("channel")
-                .Select(c =>
+            return snapshot.DisplayNamesByChannel
+                .Select(entry =>
                 {
-                    var id = c.Attribute("id")?.Value ?? string.Empty;
-                    var names = c.Elements("display-name")
-                        .Select(e => e.Value)
-                        .Where(n => !string.IsNullOrWhiteSpace(n))
-                        .ToList();
+                    var id = entry.Key;
+                    var names = new List<string>(entry.Value);
                     if (sourceAliases.TryGetValue(id, out var aliases))
                         names.AddRange(aliases);
 
@@ -321,25 +259,23 @@ namespace Emby.Xtream.Plugin.Service
                     };
                 })
                 .Where(x => !string.IsNullOrEmpty(x.Id))
-                .GroupBy(x => x.Id, StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(g => g.Key, g => g.First().Aliases, StringComparer.OrdinalIgnoreCase);
+                .ToDictionary(x => x.Id, x => x.Aliases, StringComparer.OrdinalIgnoreCase);
         }
 
         internal async Task<Dictionary<string, int>> GetXmltvProgramCountsAsync(CancellationToken cancellationToken)
         {
-            var doc = await GetCachedXmlAsync(cancellationToken).ConfigureAwait(false);
-            if (doc == null)
+            var snapshot = await GetSnapshotAsync(cancellationToken).ConfigureAwait(false);
+            if (snapshot == null)
                 return new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
-            return doc.Descendants("programme")
-                .Select(p => p.Attribute("channel")?.Value)
-                .Where(id => !string.IsNullOrEmpty(id))
-                .GroupBy(id => id, StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase);
+            return snapshot.ProgramsByChannel.ToDictionary(
+                entry => entry.Key,
+                entry => entry.Value.Count,
+                StringComparer.OrdinalIgnoreCase);
         }
 
         private async Task<Dictionary<string, List<string>>> GetSourceAliasesByXmltvIdAsync(
-            XDocument doc,
+            HashSet<string> xmltvIds,
             CancellationToken cancellationToken)
         {
             var result = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
@@ -348,12 +284,6 @@ namespace Emby.Xtream.Plugin.Service
                 var liveTvService = Plugin.Instance?.LiveTvService;
                 if (liveTvService == null)
                     return result;
-
-                var xmltvIds = new HashSet<string>(
-                    doc.Descendants("channel")
-                        .Select(c => c.Attribute("id")?.Value)
-                        .Where(id => !string.IsNullOrEmpty(id)),
-                    StringComparer.OrdinalIgnoreCase);
 
                 var cfg = Plugin.Instance.Configuration;
                 var channels = await liveTvService.GetFilteredChannelsAsync(cancellationToken).ConfigureAwait(false);
@@ -449,15 +379,5 @@ namespace Emby.Xtream.Plugin.Service
             return epgChannelId;
         }
 
-        private static bool TryParseXmltvDate(string input, out DateTimeOffset result)
-        {
-            result = default(DateTimeOffset);
-            if (string.IsNullOrEmpty(input)) return false;
-            var unix = Client.XmltvParser.ParseXmltvTimestamp(input);
-            // unix == 0 means parse failure (epoch timestamps don't appear in TV guide data)
-            if (unix == 0) return false;
-            result = DateTimeOffset.FromUnixTimeSeconds(unix);
-            return true;
-        }
     }
 }

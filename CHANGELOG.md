@@ -4,6 +4,17 @@ All notable changes to XC2EMBY are listed here, newest first.
 
 ---
 
+## v1.1.125
+- Reworked proxied Live TV into one upstream connection with bounded per-viewer fan-out buffers, so viewers of the same channel share one provider slot without a slow or disconnected client blocking the others. Added upstream-stall reconnect handling and close/handoff race protection.
+- Replaced the retained XMLTV `XDocument`, XML node index, and duplicate parsed cache with one forward-only streaming snapshot. Only selected channels and the configured guide window are kept; a real 116,974-program feed now parses with about 197 MB peak memory in an isolated test.
+- Large generated `epg.xml` strings are no longer cached when they exceed 16 MB, preventing another full guide copy from remaining pinned for the cache TTL.
+- Replaced XC2EMBY's delayed global Emby library scan with coalesced recursive refreshes limited to the Movies, Documentaries, TV Shows, and DocuSeries roots that actually changed. Unrelated local libraries are no longer scanned after a STRM sync.
+
+## v1.1.124
+- TV Shows and DocuSeries sync now fail closed when no categories are selected instead of treating an empty selection as an unfiltered full-catalog request.
+- Hardened Xtream JSON parsing for providers that inconsistently encode series, episode, VOD, Live TV, and EPG numeric values as either strings or numbers.
+- Added a continuous-integration workflow that compile-checks every push to `main` and every pull request.
+
 ## v1.1.123
 - Added deterministic episode-path ownership for duplicate series records when metadata-ID folder naming is disabled. Mirrored provider entries can no longer race and alternate the stream ID stored in the same STRM file.
 - Duplicate resolution prefers the record with the most complete episode-path set, then the newest provider timestamp, then the lowest series ID. Only competing episode paths are suppressed, so unique episodes from either record remain available.

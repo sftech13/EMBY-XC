@@ -6,7 +6,6 @@ using System.Net.Http;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Xml.Linq;
 using Emby.Xtream.Plugin.Client;
 using Emby.Xtream.Plugin.Client.Models;
 using MediaBrowser.Model.Logging;
@@ -34,10 +33,10 @@ namespace Emby.Xtream.Plugin.Service
         private Dictionary<int, (List<EpgProgram> Programs, DateTime CacheTime)> _perChannelEpgCache
             = new Dictionary<int, (List<EpgProgram>, DateTime)>();
 
-        // XMLTV bulk EPG cache: shared between XtreamListingsProvider (XDocument) and epg.xml endpoint (EpgPrograms).
-        // Both are populated in one fetch; XtreamListingsProvider calls GetXmltvDocumentAsync() instead of fetching independently.
-        private volatile XDocument _xmltvDocument;
-        private volatile Dictionary<string, List<EpgProgram>> _xmltvCache;
+        // One compact, forward-only XMLTV snapshot is shared by the guide provider and
+        // epg.xml endpoint. Never retain the source XML DOM: a large provider feed can
+        // expand to many gigabytes as XDocument/XElement objects.
+        private volatile XmltvSnapshot _xmltvSnapshot;
         private long _xmltvCacheTimeTicks = DateTime.MinValue.Ticks;
         private volatile bool _xmltvFailed;
         private long _xmltvFailTimeTicks = DateTime.MinValue.Ticks;
@@ -120,8 +119,21 @@ namespace Emby.Xtream.Plugin.Service
                 var channels = await GetFilteredChannelsAsync(cancellationToken).ConfigureAwait(false);
                 var epgXml = await GenerateXmltvAsync(channels, config, cancellationToken).ConfigureAwait(false);
 
-                _cachedEpgXml = epgXml;
-                _epgCacheTime = DateTime.UtcNow;
+                // A large XML string uses two bytes per character and is already backed by
+                // the compact program snapshot. Do not pin another very large copy for the
+                // full cache TTL; ordinary-sized endpoint responses still benefit from cache.
+                if (epgXml.Length <= 16 * 1024 * 1024)
+                {
+                    _cachedEpgXml = epgXml;
+                    _epgCacheTime = DateTime.UtcNow;
+                }
+                else
+                {
+                    _cachedEpgXml = null;
+                    _epgCacheTime = DateTime.MinValue;
+                    _logger.Info("Generated XMLTV response is {0} MB; skipping string cache to bound memory",
+                        epgXml.Length / (1024 * 1024));
+                }
 
                 return epgXml;
             }
@@ -162,8 +174,7 @@ namespace Emby.Xtream.Plugin.Service
             {
                 _perChannelEpgCache = new Dictionary<int, (List<EpgProgram>, DateTime)>();
             }
-            _xmltvDocument = null;
-            _xmltvCache = null;
+            _xmltvSnapshot = null;
             Interlocked.Exchange(ref _xmltvCacheTimeTicks, DateTime.MinValue.Ticks);
             _xmltvFailed = false;
             Interlocked.Exchange(ref _xmltvFailTimeTicks, DateTime.MinValue.Ticks);
@@ -483,7 +494,7 @@ namespace Emby.Xtream.Plugin.Service
             }
 
             // 2. Try XMLTV bulk cache if available and fresh
-            var xmltvCacheFresh = _xmltvCache != null && DateTime.UtcNow - new DateTime(Interlocked.Read(ref _xmltvCacheTimeTicks), DateTimeKind.Utc) < cacheTtl;
+            var xmltvCacheFresh = _xmltvSnapshot != null && DateTime.UtcNow - new DateTime(Interlocked.Read(ref _xmltvCacheTimeTicks), DateTimeKind.Utc) < cacheTtl;
             if (xmltvCacheFresh)
             {
                 var programs = PopulateFromXmltvCache(streamId);
@@ -538,7 +549,8 @@ namespace Emby.Xtream.Plugin.Service
             }
 
             List<EpgProgram> xmltvPrograms;
-            if (_xmltvCache == null || !_xmltvCache.TryGetValue(epgChannelId, out xmltvPrograms))
+            var snapshot = _xmltvSnapshot;
+            if (snapshot == null || !snapshot.ProgramsByChannel.TryGetValue(epgChannelId, out xmltvPrograms))
                 return null;
 
             lock (_perChannelEpgLock)
@@ -550,7 +562,7 @@ namespace Emby.Xtream.Plugin.Service
         }
 
         /// <summary>
-        /// Attempts to fetch the full XMLTV EPG from /xmltv.php and populate _xmltvCache.
+        /// Streams the full XMLTV EPG from /xmltv.php into a bounded snapshot.
         /// Builds the stream_id ↔ epg_channel_id mapping from the channel list.
         /// Returns true on success, false if the fetch failed (sets _xmltvFailed).
         /// </summary>
@@ -563,7 +575,7 @@ namespace Emby.Xtream.Plugin.Service
                 var cacheTtl = TimeSpan.FromMinutes(config.CacheDurationMinutes);
 
                 // Already fresh?
-                if (_xmltvCache != null && DateTime.UtcNow - new DateTime(Interlocked.Read(ref _xmltvCacheTimeTicks), DateTimeKind.Utc) < cacheTtl)
+                if (_xmltvSnapshot != null && DateTime.UtcNow - new DateTime(Interlocked.Read(ref _xmltvCacheTimeTicks), DateTimeKind.Utc) < cacheTtl)
                     return true;
 
                 string url;
@@ -586,34 +598,54 @@ namespace Emby.Xtream.Plugin.Service
                     // Build stream_id → epg_channel_id mapping from the channel list
                     var channels = await GetFilteredChannelsAsync(cancellationToken).ConfigureAwait(false);
                     var mapping = new Dictionary<int, string>(channels.Count);
+                    var includedEpgIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                     foreach (var ch in channels)
                     {
                         var epgId = !string.IsNullOrEmpty(ch.EpgChannelId)
                             ? ch.EpgChannelId
                             : ch.StreamId.ToString(CultureInfo.InvariantCulture);
                         mapping[ch.StreamId] = epgId;
+                        includedEpgIds.Add(epgId);
+
+                        // The provider sometimes adds a numeric suffix to JSON epg_channel_id
+                        // while omitting it in XMLTV (CBSKCBS.us7 -> CBSKCBS.us).
+                        var stripped = epgId.TrimEnd('0', '1', '2', '3', '4', '5', '6', '7', '8', '9');
+                        if (!string.IsNullOrEmpty(stripped)) includedEpgIds.Add(stripped);
                     }
 
                     var now = DateTimeOffset.UtcNow;
                     var filterEndUnix = now.AddDays(config.EpgDaysToFetch).ToUnixTimeSeconds();
 
-                    // Load XDocument from the HTTP stream once.
-                    // XtreamListingsProvider uses _xmltvDocument directly (no second download).
-                    // _xmltvCache is derived from the same DOM for the /epg.xml endpoint.
-                    XDocument loadedDoc;
+                    XmltvSnapshot loadedSnapshot;
                     var epgHttpClient = Plugin.CreateHttpClient(180);
                     using (var stream = await epgHttpClient.GetStreamAsync(url).ConfigureAwait(false))
                     {
-                        loadedDoc = XDocument.Load(stream);
+                        loadedSnapshot = XmltvParser.Parse(
+                            stream,
+                            now.ToUnixTimeSeconds(),
+                            filterEndUnix,
+                            includedEpgIds);
                     }
 
-                    _xmltvDocument = loadedDoc;
-                    _xmltvCache = XmltvParser.ParseDocument(loadedDoc, now.ToUnixTimeSeconds(), filterEndUnix);
+                    var actualXmltvIds = new HashSet<string>(
+                        loadedSnapshot.DisplayNamesByChannel.Keys,
+                        StringComparer.OrdinalIgnoreCase);
+                    foreach (var ch in channels)
+                    {
+                        if (mapping.TryGetValue(ch.StreamId, out var rawId))
+                            mapping[ch.StreamId] = XtreamListingsProvider.ResolveToXmltvId(rawId, actualXmltvIds);
+                    }
+
+                    _xmltvSnapshot = loadedSnapshot;
                     _epgChannelIdByStreamId = mapping;
                     Interlocked.Exchange(ref _xmltvCacheTimeTicks, DateTime.UtcNow.Ticks);
                     _xmltvFailed = false;
 
-                    _logger.Info("XMLTV EPG fetched: {0} channels with program data", _xmltvCache.Count);
+                    _logger.Info(
+                        "XMLTV EPG streamed: {0} programs for {1} selected channels ({2} XMLTV channel definitions)",
+                        loadedSnapshot.ProgramCount,
+                        loadedSnapshot.ProgramsByChannel.Count,
+                        loadedSnapshot.DisplayNamesByChannel.Count);
                     return true;
                 }
                 catch (Exception ex)
@@ -634,17 +666,17 @@ namespace Emby.Xtream.Plugin.Service
         }
 
         /// <summary>
-        /// Returns the cached XMLTV XDocument, fetching if stale. Used by XtreamListingsProvider
-        /// so both the guide and epg.xml endpoint share one download of xmltv.php.
+        /// Returns the compact XMLTV snapshot, fetching if stale. The source stream is parsed
+        /// once and discarded so guide refreshes cannot retain a multi-gigabyte XML DOM.
         /// </summary>
-        internal async Task<XDocument> GetXmltvDocumentAsync(CancellationToken cancellationToken)
+        internal async Task<XmltvSnapshot> GetXmltvSnapshotAsync(CancellationToken cancellationToken)
         {
             var config = Plugin.Instance.Configuration;
             if (config.EpgSource == EpgSourceMode.Disabled)
                 return null;
 
             var cacheTtl = TimeSpan.FromMinutes(config.CacheDurationMinutes);
-            var fresh = _xmltvDocument != null
+            var fresh = _xmltvSnapshot != null
                 && DateTime.UtcNow - new DateTime(Interlocked.Read(ref _xmltvCacheTimeTicks), DateTimeKind.Utc) < cacheTtl;
 
             if (!fresh)
@@ -655,7 +687,7 @@ namespace Emby.Xtream.Plugin.Service
                     await TryFetchXmltvEpgAsync(cancellationToken).ConfigureAwait(false);
             }
 
-            return _xmltvDocument;
+            return _xmltvSnapshot;
         }
 
         private async Task<EpgListings> FetchEpgForChannelAsync(int streamId, CancellationToken cancellationToken)

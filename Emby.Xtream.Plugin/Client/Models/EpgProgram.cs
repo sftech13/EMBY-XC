@@ -32,12 +32,15 @@ namespace Emby.Xtream.Plugin.Client.Models
         public string ChannelId { get; set; } = string.Empty;
 
         [JsonPropertyName("start_timestamp")]
+        [JsonConverter(typeof(FlexibleInt64Converter))]
         public long StartTimestamp { get; set; }
 
         [JsonPropertyName("stop_timestamp")]
+        [JsonConverter(typeof(FlexibleInt64Converter))]
         public long StopTimestamp { get; set; }
 
         [JsonPropertyName("has_archive")]
+        [JsonConverter(typeof(FlexibleInt32Converter))]
         public int HasArchive { get; set; }
 
         // Not from JSON — populated by XMLTV parser only
@@ -50,6 +53,8 @@ namespace Emby.Xtream.Plugin.Client.Models
         [JsonIgnore] public List<string> Categories { get; set; }
         [JsonIgnore] public string SubTitle { get; set; }
         [JsonIgnore] public string EpisodeNumOnscreen { get; set; }
+        [JsonIgnore] public string EpisodeNumXmltvNs { get; set; }
+        [JsonIgnore] public int? ProductionYear { get; set; }
         [JsonIgnore] public string Rating { get; set; }
     }
 }

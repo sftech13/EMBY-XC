@@ -1,81 +1,270 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using System.Linq;
-using System.Xml.Linq;
+using System.IO;
+using System.Text;
+using System.Xml;
 using Emby.Xtream.Plugin.Client.Models;
 
 namespace Emby.Xtream.Plugin.Client
 {
+    /// <summary>
+    /// Compact result of one forward-only XMLTV pass. Unlike XDocument, this only
+    /// retains fields that XC2EMBY actually uses after the HTTP response is closed.
+    /// </summary>
+    internal sealed class XmltvSnapshot
+    {
+        internal Dictionary<string, List<EpgProgram>> ProgramsByChannel { get; }
+            = new Dictionary<string, List<EpgProgram>>(StringComparer.OrdinalIgnoreCase);
+
+        internal Dictionary<string, List<string>> DisplayNamesByChannel { get; }
+            = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+
+        internal int ProgramCount { get; set; }
+    }
+
+    /// <summary>
+    /// Streaming XMLTV parser. It deliberately avoids XDocument because a large
+    /// provider feed expands to many times its wire size when represented as a DOM.
+    /// </summary>
     internal static class XmltvParser
     {
-        /// <summary>
-        /// Derives program data from an already-loaded XDocument instead of re-fetching the stream.
-        /// Called by LiveTvService after XDocument.Load() so both caches share one HTTP download.
-        /// </summary>
-        internal static Dictionary<string, List<EpgProgram>> ParseDocument(
-            XDocument doc,
+        internal static XmltvSnapshot Parse(
+            Stream xmlStream,
             long? filterStartUnix,
-            long? filterEndUnix)
+            long? filterEndUnix,
+            HashSet<string> includedChannelIds = null)
         {
-            var result = new Dictionary<string, List<EpgProgram>>(StringComparer.OrdinalIgnoreCase);
-
-            foreach (var prog in doc.Descendants("programme"))
+            var snapshot = new XmltvSnapshot();
+            var settings = new XmlReaderSettings
             {
-                var channelAttr = prog.Attribute("channel")?.Value;
-                if (string.IsNullOrEmpty(channelAttr)) continue;
+                IgnoreWhitespace = true,
+                IgnoreComments = true,
+                DtdProcessing = DtdProcessing.Ignore,
+                CloseInput = false,
+            };
 
-                var startAttr = prog.Attribute("start")?.Value;
-                var stopAttr = prog.Attribute("stop")?.Value;
-                if (string.IsNullOrEmpty(startAttr) || string.IsNullOrEmpty(stopAttr)) continue;
-
-                var startUnix = ParseXmltvTimestamp(startAttr);
-                var stopUnix = ParseXmltvTimestamp(stopAttr);
-                if (startUnix == 0 && stopUnix == 0) continue;
-
-                if (filterEndUnix.HasValue && startUnix >= filterEndUnix.Value) continue;
-                if (filterStartUnix.HasValue && stopUnix <= filterStartUnix.Value) continue;
-
-                var cats = prog.Elements("category")
-                    .Select(c => c.Value)
-                    .Where(c => !string.IsNullOrWhiteSpace(c))
-                    .ToList();
-
-                var onscreen = prog.Elements("episode-num")
-                    .FirstOrDefault(e => string.Equals(
-                        e.Attribute("system")?.Value, "onscreen", StringComparison.OrdinalIgnoreCase));
-
-                var ratingEl = prog.Element("rating");
-
-                var program = new EpgProgram
+            using (var reader = XmlReader.Create(xmlStream, settings))
+            {
+                while (reader.Read())
                 {
-                    ChannelId         = channelAttr,
-                    StartTimestamp    = startUnix,
-                    StopTimestamp     = stopUnix,
-                    IsPlainText       = true,
-                    Title             = prog.Element("title")?.Value,
-                    Description       = prog.Element("desc")?.Value,
-                    SubTitle          = prog.Element("sub-title")?.Value,
-                    IsLive            = prog.Element("live") != null,
-                    IsNew             = prog.Element("new") != null,
-                    IsPreviouslyShown = prog.Element("previously-shown") != null,
-                    IsPremiere        = prog.Element("premiere") != null,
-                    Categories        = cats.Count > 0 ? cats : null,
-                    ImageUrl          = prog.Element("icon")?.Attribute("src")?.Value,
-                    EpisodeNumOnscreen = onscreen?.Value,
-                    Rating            = ratingEl?.Element("value")?.Value?.Trim(),
-                };
+                    if (reader.NodeType != XmlNodeType.Element)
+                        continue;
 
-                List<EpgProgram> list;
-                if (!result.TryGetValue(channelAttr, out list))
-                {
-                    list = new List<EpgProgram>();
-                    result[channelAttr] = list;
+                    if (string.Equals(reader.Name, "channel", StringComparison.OrdinalIgnoreCase))
+                    {
+                        ParseChannel(reader, snapshot);
+                    }
+                    else if (string.Equals(reader.Name, "programme", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var program = ParseProgramme(reader, filterStartUnix, filterEndUnix, includedChannelIds);
+                        if (program == null)
+                            continue;
+
+                        if (!snapshot.ProgramsByChannel.TryGetValue(program.ChannelId, out var list))
+                        {
+                            list = new List<EpgProgram>();
+                            snapshot.ProgramsByChannel[program.ChannelId] = list;
+                        }
+
+                        list.Add(program);
+                        snapshot.ProgramCount++;
+                    }
                 }
-                list.Add(program);
             }
 
-            return result;
+            return snapshot;
+        }
+
+        private static void ParseChannel(XmlReader reader, XmltvSnapshot snapshot)
+        {
+            var id = reader.GetAttribute("id");
+            if (string.IsNullOrEmpty(id))
+                return;
+
+            if (!snapshot.DisplayNamesByChannel.TryGetValue(id, out var names))
+            {
+                names = new List<string>();
+                snapshot.DisplayNamesByChannel[id] = names;
+            }
+
+            if (reader.IsEmptyElement)
+                return;
+
+            var depth = reader.Depth;
+            while (reader.Read())
+            {
+                if (reader.NodeType == XmlNodeType.EndElement && reader.Depth == depth)
+                    break;
+
+                if (reader.NodeType == XmlNodeType.Element
+                    && string.Equals(reader.Name, "display-name", StringComparison.OrdinalIgnoreCase)
+                    && !reader.IsEmptyElement)
+                {
+                    var name = ReadText(reader);
+                    if (!string.IsNullOrWhiteSpace(name))
+                        names.Add(name);
+                }
+            }
+        }
+
+        private static EpgProgram ParseProgramme(
+            XmlReader reader,
+            long? filterStartUnix,
+            long? filterEndUnix,
+            HashSet<string> includedChannelIds)
+        {
+            var startAttr = reader.GetAttribute("start");
+            var stopAttr = reader.GetAttribute("stop");
+            var channelAttr = reader.GetAttribute("channel");
+
+            if (string.IsNullOrEmpty(startAttr)
+                || string.IsNullOrEmpty(stopAttr)
+                || string.IsNullOrEmpty(channelAttr)
+                || (includedChannelIds != null && !includedChannelIds.Contains(channelAttr)))
+            {
+                return null;
+            }
+
+            var startUnix = ParseXmltvTimestamp(startAttr);
+            var stopUnix = ParseXmltvTimestamp(stopAttr);
+            if (startUnix == 0 && stopUnix == 0)
+                return null;
+
+            if (filterEndUnix.HasValue && startUnix >= filterEndUnix.Value)
+                return null;
+            if (filterStartUnix.HasValue && stopUnix <= filterStartUnix.Value)
+                return null;
+
+            var program = new EpgProgram
+            {
+                ChannelId = channelAttr,
+                StartTimestamp = startUnix,
+                StopTimestamp = stopUnix,
+                IsPlainText = true,
+            };
+
+            if (reader.IsEmptyElement)
+                return program;
+
+            var depth = reader.Depth;
+            while (reader.Read())
+            {
+                if (reader.NodeType == XmlNodeType.EndElement && reader.Depth == depth)
+                    break;
+                if (reader.NodeType != XmlNodeType.Element)
+                    continue;
+
+                var name = reader.Name;
+                if (string.Equals(name, "title", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!reader.IsEmptyElement) program.Title = ReadText(reader);
+                }
+                else if (string.Equals(name, "desc", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!reader.IsEmptyElement) program.Description = ReadText(reader);
+                }
+                else if (string.Equals(name, "sub-title", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!reader.IsEmptyElement) program.SubTitle = ReadText(reader);
+                }
+                else if (string.Equals(name, "category", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!reader.IsEmptyElement)
+                    {
+                        var category = ReadText(reader);
+                        if (!string.IsNullOrWhiteSpace(category))
+                        {
+                            if (program.Categories == null) program.Categories = new List<string>();
+                            program.Categories.Add(category);
+                        }
+                    }
+                }
+                else if (string.Equals(name, "icon", StringComparison.OrdinalIgnoreCase))
+                {
+                    program.ImageUrl = reader.GetAttribute("src");
+                }
+                else if (string.Equals(name, "episode-num", StringComparison.OrdinalIgnoreCase))
+                {
+                    var system = reader.GetAttribute("system");
+                    if (!reader.IsEmptyElement)
+                    {
+                        var value = ReadText(reader);
+                        if (string.Equals(system, "xmltv_ns", StringComparison.OrdinalIgnoreCase))
+                            program.EpisodeNumXmltvNs = value;
+                        else if (string.Equals(system, "onscreen", StringComparison.OrdinalIgnoreCase))
+                            program.EpisodeNumOnscreen = value;
+                    }
+                }
+                else if (string.Equals(name, "date", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!reader.IsEmptyElement)
+                    {
+                        var value = ReadText(reader);
+                        if (!string.IsNullOrEmpty(value) && value.Length >= 4
+                            && int.TryParse(value.Substring(0, 4), NumberStyles.None, CultureInfo.InvariantCulture, out var year))
+                        {
+                            program.ProductionYear = year;
+                        }
+                    }
+                }
+                else if (string.Equals(name, "live", StringComparison.OrdinalIgnoreCase))
+                {
+                    program.IsLive = true;
+                }
+                else if (string.Equals(name, "new", StringComparison.OrdinalIgnoreCase))
+                {
+                    program.IsNew = true;
+                }
+                else if (string.Equals(name, "previously-shown", StringComparison.OrdinalIgnoreCase))
+                {
+                    program.IsPreviouslyShown = true;
+                }
+                else if (string.Equals(name, "premiere", StringComparison.OrdinalIgnoreCase))
+                {
+                    program.IsPremiere = true;
+                }
+                else if (string.Equals(name, "rating", StringComparison.OrdinalIgnoreCase))
+                {
+                    ParseRating(reader, program);
+                }
+            }
+
+            return program;
+        }
+
+        private static void ParseRating(XmlReader reader, EpgProgram program)
+        {
+            if (reader.IsEmptyElement)
+                return;
+
+            var depth = reader.Depth;
+            while (reader.Read())
+            {
+                if (reader.NodeType == XmlNodeType.EndElement && reader.Depth == depth)
+                    break;
+                if (reader.NodeType == XmlNodeType.Element
+                    && string.Equals(reader.Name, "value", StringComparison.OrdinalIgnoreCase)
+                    && !reader.IsEmptyElement)
+                {
+                    var value = ReadText(reader);
+                    if (!string.IsNullOrWhiteSpace(value) && string.IsNullOrEmpty(program.Rating))
+                        program.Rating = value.Trim();
+                }
+            }
+        }
+
+        private static string ReadText(XmlReader reader)
+        {
+            var sb = new StringBuilder();
+            while (reader.Read())
+            {
+                if (reader.NodeType == XmlNodeType.EndElement)
+                    break;
+                if (reader.NodeType == XmlNodeType.Text || reader.NodeType == XmlNodeType.CDATA)
+                    sb.Append(reader.Value);
+            }
+            return sb.ToString();
         }
 
         /// <summary>
@@ -97,7 +286,6 @@ namespace Emby.Xtream.Plugin.Client
             }
             else if (value.Length > 14)
             {
-                // Handle "20260513120000+0100" — timezone immediately follows digits, no space.
                 var tzIdx = value.IndexOf('+', 14);
                 if (tzIdx < 0) tzIdx = value.IndexOf('-', 14);
                 if (tzIdx > 0)
@@ -120,21 +308,19 @@ namespace Emby.Xtream.Plugin.Client
             if (datePart.Length < 14)
                 return 0;
 
-            int year, month, day, hour, minute, second;
-            if (!int.TryParse(datePart.Substring(0, 4), NumberStyles.None, CultureInfo.InvariantCulture, out year)) return 0;
-            if (!int.TryParse(datePart.Substring(4, 2), NumberStyles.None, CultureInfo.InvariantCulture, out month)) return 0;
-            if (!int.TryParse(datePart.Substring(6, 2), NumberStyles.None, CultureInfo.InvariantCulture, out day)) return 0;
-            if (!int.TryParse(datePart.Substring(8, 2), NumberStyles.None, CultureInfo.InvariantCulture, out hour)) return 0;
-            if (!int.TryParse(datePart.Substring(10, 2), NumberStyles.None, CultureInfo.InvariantCulture, out minute)) return 0;
-            if (!int.TryParse(datePart.Substring(12, 2), NumberStyles.None, CultureInfo.InvariantCulture, out second)) return 0;
+            if (!int.TryParse(datePart.Substring(0, 4), NumberStyles.None, CultureInfo.InvariantCulture, out var year)) return 0;
+            if (!int.TryParse(datePart.Substring(4, 2), NumberStyles.None, CultureInfo.InvariantCulture, out var month)) return 0;
+            if (!int.TryParse(datePart.Substring(6, 2), NumberStyles.None, CultureInfo.InvariantCulture, out var day)) return 0;
+            if (!int.TryParse(datePart.Substring(8, 2), NumberStyles.None, CultureInfo.InvariantCulture, out var hour)) return 0;
+            if (!int.TryParse(datePart.Substring(10, 2), NumberStyles.None, CultureInfo.InvariantCulture, out var minute)) return 0;
+            if (!int.TryParse(datePart.Substring(12, 2), NumberStyles.None, CultureInfo.InvariantCulture, out var second)) return 0;
 
-            int offsetMinutes = 0;
+            var offsetMinutes = 0;
             if (!string.IsNullOrEmpty(tzPart) && tzPart.Length >= 5)
             {
-                int sign = tzPart[0] == '-' ? -1 : 1;
-                int tzHour, tzMin;
-                if (int.TryParse(tzPart.Substring(1, 2), NumberStyles.None, CultureInfo.InvariantCulture, out tzHour)
-                    && int.TryParse(tzPart.Substring(3, 2), NumberStyles.None, CultureInfo.InvariantCulture, out tzMin))
+                var sign = tzPart[0] == '-' ? -1 : 1;
+                if (int.TryParse(tzPart.Substring(1, 2), NumberStyles.None, CultureInfo.InvariantCulture, out var tzHour)
+                    && int.TryParse(tzPart.Substring(3, 2), NumberStyles.None, CultureInfo.InvariantCulture, out var tzMin))
                 {
                     offsetMinutes = sign * (tzHour * 60 + tzMin);
                 }

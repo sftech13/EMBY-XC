@@ -45,7 +45,7 @@
 
 ## Features Overview
 
-> Current release: **v1.1.105** — see [CHANGELOG.md](CHANGELOG.md) for full version history.
+> Current release: **v1.1.125** — see [CHANGELOG.md](CHANGELOG.md) for full version history.
 
 ### Live TV
 - Registers as a native Emby tuner host — channels appear in Live TV just like any other tuner
@@ -59,7 +59,7 @@
 ### Guide Data (EPG)
 - Registered as a native Emby `IListingsProvider` — guide data flows through Emby's standard Live TV pipeline
 - Three guide modes: **Xtream server** XMLTV, **custom XMLTV URL**, or **disabled**
-- Full XMLTV document cached in memory with configurable TTL
+- Forward-only XMLTV parsing with a compact selected-channel/configured-window cache and configurable TTL
 - Full XMLTV field passthrough: sub-title, categories, production year, content rating, icon/poster, live/new/repeat/premiere flags, and season/episode numbers (xmltv_ns or onscreen format)
 - Each program gets a unique `ShowId` scoped to its channel, preventing Emby from showing irrelevant "Other Showings" across unrelated channels
 
@@ -251,7 +251,7 @@ Two modes control how movies are organized on disk. See [Folder Modes](#folder-m
 
 #### Category Selection
 
-Click **Refresh Categories** to load available VOD categories. Select which categories to sync. An empty selection syncs all categories.
+Click **Refresh Categories** to load available VOD categories. Select which categories to sync. An empty selection syncs all categories for Movies and Documentary Movies.
 
 Use the search box to filter by name. **Select All** / **Deselect All** buttons are available.
 
@@ -287,6 +287,8 @@ Identical layout to the Movies tab, but stores its own VOD category selection, f
 
 Identical layout to the Movies tab with these additions:
 
+Select at least one series category before syncing. An empty TV Shows category selection is treated as a configuration error and the sync is safely skipped, preventing an accidental full-catalog request.
+
 #### Series-Specific Metadata Options
 
 | Option | Description |
@@ -307,6 +309,8 @@ Identical layout to the Movies tab with these additions:
 ### Docu Series Tab
 
 Identical layout to the TV Shows tab, but stores its own series category selection, folder mappings, sync timestamp, episode hash cache, and output root. Use this for documentary series categories that should land in a dedicated docu-series library.
+
+Docu Series also requires at least one selected category. An empty selection safely skips the sync.
 
 ---
 
@@ -634,7 +638,7 @@ Generated build files are kept out of the source tree:
 | MSBuild intermediate files | `artifacts/obj/` |
 | Release publish output | `artifacts/publish/` |
 
-GitHub Actions builds releases when a version tag is pushed:
+GitHub Actions compile-checks pushes to `main` and pull requests. A separate workflow builds releases when a version tag is pushed:
 
 ```bash
 git tag v1.1.0-beta.1
@@ -713,7 +717,7 @@ Complete list of all configuration fields.
 |---|---|---|---|
 | `SyncSeries` | bool | `false` | Enable series sync |
 | `SeriesRootFolderName` | string | `"TV Shows"` | Root folder name under `StrmLibraryPath` |
-| `SelectedSeriesCategoryIds` | int[] | `[]` | Series categories to sync (empty = all) |
+| `SelectedSeriesCategoryIds` | int[] | `[]` | Series categories to sync (empty = sync safely skipped) |
 | `SeriesFolderMode` | string | `"single"` | `"single"` or `"custom"` (`"multiple"` accepted for legacy configs) |
 | `SeriesFolderMappings` | string | `""` | Custom mappings |
 | `EnableSeriesIdFolderNaming` | bool | `false` | Add `[tvdbid=...]` or `[tmdbid=...]` to series folders |
@@ -726,7 +730,7 @@ Complete list of all configuration fields.
 |---|---|---|---|
 | `SyncDocuSeries` | bool | `false` | Enable documentary series sync |
 | `DocuSeriesRootFolderName` | string | `"Docu Series"` | Root folder name under `StrmLibraryPath` |
-| `SelectedDocuSeriesCategoryIds` | int[] | `[]` | Series categories to sync as docu series |
+| `SelectedDocuSeriesCategoryIds` | int[] | `[]` | Series categories to sync as docu series (empty = sync safely skipped) |
 | `DocuSeriesFolderMode` | string | `"single"` | `"single"` or `"custom"` (`"multiple"` accepted for legacy configs) |
 | `DocuSeriesFolderMappings` | string | `""` | Custom mappings |
 

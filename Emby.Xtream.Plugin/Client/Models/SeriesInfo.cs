@@ -5,6 +5,7 @@ namespace Emby.Xtream.Plugin.Client.Models
     public class SeriesInfo
     {
         [JsonPropertyName("series_id")]
+        [JsonConverter(typeof(FlexibleInt32Converter))]
         public int SeriesId { get; set; }
 
         [JsonPropertyName("name")]
@@ -40,9 +41,11 @@ namespace Emby.Xtream.Plugin.Client.Models
         public string CategoryName { get; set; } = string.Empty;
 
         [JsonPropertyName("last_modified")]
+        [JsonConverter(typeof(StringOrNumberConverter))]
         public string LastModified { get; set; } = string.Empty;
 
         [JsonPropertyName("tmdb")]
+        [JsonConverter(typeof(StringOrNumberConverter))]
         public string TmdbId { get; set; } = string.Empty;
     }
 }
