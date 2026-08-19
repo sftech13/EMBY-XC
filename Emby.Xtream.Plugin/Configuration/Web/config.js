@@ -1707,13 +1707,30 @@ function (BaseView, loading) {
         var view = instance.view;
         var checkboxes = view.querySelectorAll('.categoryCheckbox');
         var ids = [];
+        var visibleIds = {};
         for (var i = 0; i < checkboxes.length; i++) {
+            var id = parseInt(checkboxes[i].getAttribute('data-category-id'), 10);
+            if (isNaN(id)) continue;
+            visibleIds[id] = true;
             if (checkboxes[i].checked) {
-                ids.push(parseInt(checkboxes[i].getAttribute('data-category-id'), 10));
+                ids.push(id);
             }
         }
         if (checkboxes.length === 0) {
             return instance.selectedCategoryIds;
+        }
+
+        // The provider can temporarily remove a Live TV category and restore it hours
+        // or days later with the same ID. It has no checkbox while absent, so preserve
+        // its previous selected state instead of silently dropping it on Save. Visible
+        // unchecked categories are deliberately not preserved, which keeps intentional
+        // exclusions (for example a backup category) disabled.
+        var rememberedIds = instance.selectedCategoryIds || [];
+        for (var j = 0; j < rememberedIds.length; j++) {
+            var rememberedId = parseInt(rememberedIds[j], 10);
+            if (!isNaN(rememberedId) && !visibleIds[rememberedId] && ids.indexOf(rememberedId) === -1) {
+                ids.push(rememberedId);
+            }
         }
         return ids;
     }

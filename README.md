@@ -45,7 +45,7 @@
 
 ## Features Overview
 
-> Current release: **v1.1.125** — see [CHANGELOG.md](CHANGELOG.md) for full version history.
+> Current release: **v1.1.126** — see [CHANGELOG.md](CHANGELOG.md) for full version history.
 
 ### Live TV
 - Registers as a native Emby tuner host — channels appear in Live TV just like any other tuner
@@ -227,6 +227,8 @@ When disabled, all playback routes through Emby's ffmpeg pipeline.
 #### Category Filtering
 
 Click **Refresh Categories** to fetch the current category list from your provider. Check the categories you want to include in Live TV. Leave all unchecked to include everything.
+
+Selected categories that temporarily disappear from the provider remain remembered and are automatically checked again when the same category ID returns. A category that is visible and deliberately unchecked remains excluded, so backup groups can stay disabled.
 
 - **Include Adult Channels** — includes channels your provider has flagged as adult content
 - **Include Group-Title in M3U** — adds the `group-title="Category Name"` tag to M3U entries, useful for external M3U clients

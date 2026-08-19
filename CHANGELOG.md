@@ -4,6 +4,11 @@ All notable changes to XC2EMBY are listed here, newest first.
 
 ---
 
+## v1.1.126
+- Fixed local and other duplicate Live TV channels losing guide data after the streaming XMLTV parser was introduced. The selected-channel filter now retains programmes for provider-generated numeric duplicate IDs such as `CBSKCBS.us2`, and duplicate mapping no longer prefers an empty suffixed listing over a populated base listing.
+- Guide refreshes now retain and serve the last known-good XMLTV snapshot when the provider is temporarily unavailable, reject successful-but-empty feeds, retry failures after five minutes instead of the full cache TTL, and fail closed when no snapshot exists so Emby cannot erase valid guide rows after a transient 503.
+- Live TV category selections are now retained when a provider temporarily removes a category from its list. Saving while it is absent no longer drops its selected ID, so it is automatically included when it returns; categories deliberately left unchecked remain excluded.
+
 ## v1.1.125
 - Reworked proxied Live TV into one upstream connection with bounded per-viewer fan-out buffers, so viewers of the same channel share one provider slot without a slow or disconnected client blocking the others. Added upstream-stall reconnect handling and close/handoff race protection.
 - Replaced the retained XMLTV `XDocument`, XML node index, and duplicate parsed cache with one forward-only streaming snapshot. Only selected channels and the configured guide window are kept; a real 116,974-program feed now parses with about 197 MB peak memory in an isolated test.

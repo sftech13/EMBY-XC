@@ -224,7 +224,11 @@ namespace Emby.Xtream.Plugin.Service
                     }
 
                     var listingsId = XmltvIdExists(resolvedListingsId, xmltvIds)
-                        ? ResolveDuplicateListingsId(resolvedListingsId, xmltvIds, listingsIdUseCounts)
+                        ? ResolveDuplicateListingsId(
+                            resolvedListingsId,
+                            xmltvIds,
+                            xmltvProgramCounts,
+                            listingsIdUseCounts)
                         : null;
 
                     if (!string.IsNullOrEmpty(listingsId) &&
@@ -345,6 +349,7 @@ namespace Emby.Xtream.Plugin.Service
         private static string ResolveDuplicateListingsId(
             string listingsId,
             HashSet<string> xmltvIds,
+            Dictionary<string, int> xmltvProgramCounts,
             Dictionary<string, int> listingsIdUseCounts)
         {
             if (string.IsNullOrEmpty(listingsId) || listingsIdUseCounts == null)
@@ -361,7 +366,20 @@ namespace Emby.Xtream.Plugin.Service
                 return listingsId;
 
             var nextId = listingsId + (useCount + 1).ToString(CultureInfo.InvariantCulture);
-            return xmltvIds.Contains(nextId) ? nextId : listingsId;
+            if (!xmltvIds.Contains(nextId))
+                return listingsId;
+
+            // When programme counts are ready, never move a duplicate stream from a
+            // populated base listing to a suffixed XMLTV definition with no guide rows.
+            // Sharing the populated base guide is more accurate than showing No Data.
+            if (xmltvProgramCounts != null && xmltvProgramCounts.Count > 0 &&
+                (!xmltvProgramCounts.TryGetValue(nextId, out var nextProgramCount) ||
+                 nextProgramCount <= 0))
+            {
+                return listingsId;
+            }
+
+            return nextId;
         }
 
         private async Task<List<Client.Models.LiveStreamInfo>> FetchChannelsWithFallbackAsync(

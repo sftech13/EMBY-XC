@@ -121,7 +121,7 @@ namespace Emby.Xtream.Plugin.Client
             if (string.IsNullOrEmpty(startAttr)
                 || string.IsNullOrEmpty(stopAttr)
                 || string.IsNullOrEmpty(channelAttr)
-                || (includedChannelIds != null && !includedChannelIds.Contains(channelAttr)))
+                || !IsIncludedChannel(channelAttr, includedChannelIds))
             {
                 return null;
             }
@@ -231,6 +231,23 @@ namespace Emby.Xtream.Plugin.Client
             }
 
             return program;
+        }
+
+        private static bool IsIncludedChannel(
+            string channelId,
+            HashSet<string> includedChannelIds)
+        {
+            if (includedChannelIds == null || includedChannelIds.Contains(channelId))
+                return true;
+
+            // Providers commonly expose multiple XMLTV definitions for one JSON
+            // epg_channel_id by appending a numeric duplicate suffix, for example
+            // CBSKCBS.us2. XtreamTunerHost can assign that suffixed ID to a duplicate
+            // stream, so retain its programmes whenever the selected base ID is present.
+            var baseId = channelId.TrimEnd('0', '1', '2', '3', '4', '5', '6', '7', '8', '9');
+            return baseId.Length > 0 &&
+                   !string.Equals(baseId, channelId, StringComparison.Ordinal) &&
+                   includedChannelIds.Contains(baseId);
         }
 
         private static void ParseRating(XmlReader reader, EpgProgram program)

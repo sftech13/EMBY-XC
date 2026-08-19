@@ -30,6 +30,11 @@ namespace Emby.Xtream.Plugin.Service
         private readonly SemaphoreSlim _xmltvLock = new SemaphoreSlim(1, 1);
         private readonly object _perChannelEpgLock = new object();
 
+        // A failed bulk fetch should be retried soon, but not once per concurrent
+        // GetChannels/GetPrograms request. This is intentionally independent of the
+        // normal cache TTL, which can be much longer.
+        private static readonly TimeSpan XmltvFailureRetryDelay = TimeSpan.FromMinutes(5);
+
         private Dictionary<int, (List<EpgProgram> Programs, DateTime CacheTime)> _perChannelEpgCache
             = new Dictionary<int, (List<EpgProgram>, DateTime)>();
 
@@ -174,13 +179,17 @@ namespace Emby.Xtream.Plugin.Service
             {
                 _perChannelEpgCache = new Dictionary<int, (List<EpgProgram>, DateTime)>();
             }
-            _xmltvSnapshot = null;
+            // Keep the last known-good XMLTV snapshot while forcing a refresh. If the
+            // provider is temporarily unavailable, Emby can continue using the stale
+            // (but still useful) guide instead of reconciling against an empty lineup.
             Interlocked.Exchange(ref _xmltvCacheTimeTicks, DateTime.MinValue.Ticks);
             _xmltvFailed = false;
             Interlocked.Exchange(ref _xmltvFailTimeTicks, DateTime.MinValue.Ticks);
-            _epgChannelIdByStreamId = new Dictionary<int, string>();
             XtreamListingsProvider.Instance?.InvalidateCache();
-            _logger.Info("Live TV cache invalidated");
+            _logger.Info(
+                _xmltvSnapshot == null
+                    ? "Live TV cache invalidated; no previous XMLTV snapshot is available"
+                    : "Live TV cache invalidated; retaining last known-good XMLTV snapshot until refresh succeeds");
         }
 
         /// <summary>
@@ -501,9 +510,11 @@ namespace Emby.Xtream.Plugin.Service
                 if (programs != null) return programs;
             }
 
-            // 3. If XMLTV cache is stale, try fetching it — but throttle retries after a failure
-            //    to once per cache TTL window (prevents hammering a down server).
-            var xmltvRetryAllowed = !_xmltvFailed || (DateTime.UtcNow - new DateTime(Interlocked.Read(ref _xmltvFailTimeTicks), DateTimeKind.Utc)) >= cacheTtl;
+            // 3. If XMLTV cache is stale, try fetching it — but briefly throttle retries
+            //    after a failure so concurrent callers do not hammer a down server.
+            var xmltvRetryAllowed = !_xmltvFailed
+                || (DateTime.UtcNow - new DateTime(Interlocked.Read(ref _xmltvFailTimeTicks), DateTimeKind.Utc))
+                    >= XmltvFailureRetryDelay;
             if (!xmltvCacheFresh && xmltvRetryAllowed)
             {
                 var xmltvOk = await TryFetchXmltvEpgAsync(cancellationToken).ConfigureAwait(false);
@@ -513,6 +524,12 @@ namespace Emby.Xtream.Plugin.Service
                     if (programs != null) return programs;
                 }
             }
+
+            // A failed refresh must not discard guide rows that were loaded by the
+            // previous successful bulk fetch.
+            var stalePrograms = PopulateFromXmltvCache(streamId);
+            if (stalePrograms != null)
+                return stalePrograms;
 
             // 4. Fall back to per-channel JSON (get_simple_data_table) — Xtream server only.
             //    Custom URL mode does not fall back: if the user's URL failed, return empty so
@@ -578,6 +595,15 @@ namespace Emby.Xtream.Plugin.Service
                 if (_xmltvSnapshot != null && DateTime.UtcNow - new DateTime(Interlocked.Read(ref _xmltvCacheTimeTicks), DateTimeKind.Utc) < cacheTtl)
                     return true;
 
+                // Re-check after taking the lock. Several Emby guide calls can reach
+                // this method together; without this guard they each retry the same
+                // failed endpoint in sequence.
+                var lastFailureUtc = new DateTime(
+                    Interlocked.Read(ref _xmltvFailTimeTicks),
+                    DateTimeKind.Utc);
+                if (_xmltvFailed && DateTime.UtcNow - lastFailureUtc < XmltvFailureRetryDelay)
+                    return false;
+
                 string url;
                 if (config.EpgSource == EpgSourceMode.CustomUrl && !string.IsNullOrWhiteSpace(config.CustomEpgUrl))
                 {
@@ -627,6 +653,12 @@ namespace Emby.Xtream.Plugin.Service
                             includedEpgIds);
                     }
 
+                    if (loadedSnapshot.DisplayNamesByChannel.Count == 0 || loadedSnapshot.ProgramCount == 0)
+                    {
+                        throw new InvalidOperationException(
+                            "XMLTV response contained no usable channels or programmes");
+                    }
+
                     var actualXmltvIds = new HashSet<string>(
                         loadedSnapshot.DisplayNamesByChannel.Keys,
                         StringComparer.OrdinalIgnoreCase);
@@ -653,9 +685,16 @@ namespace Emby.Xtream.Plugin.Service
                     _xmltvFailed = true;
                     Interlocked.Exchange(ref _xmltvFailTimeTicks, DateTime.UtcNow.Ticks);
                     var isCustom = config.EpgSource == EpgSourceMode.CustomUrl;
-                    _logger.Warn(isCustom
-                        ? "Custom EPG URL fetch failed — no fallback: {0}"
-                        : "XMLTV EPG fetch failed, will fall back to per-channel JSON: {0}", ex.Message);
+                    var hasStaleSnapshot = _xmltvSnapshot != null;
+                    _logger.Warn(
+                        isCustom
+                            ? (hasStaleSnapshot
+                                ? "Custom EPG URL fetch failed; serving last known-good guide: {0}"
+                                : "Custom EPG URL fetch failed; refusing to return an empty guide: {0}")
+                            : (hasStaleSnapshot
+                                ? "XMLTV EPG fetch failed; serving last known-good guide: {0}"
+                                : "XMLTV EPG fetch failed; no prior snapshot is available: {0}"),
+                        ex.Message);
                     return false;
                 }
             }
@@ -675,19 +714,30 @@ namespace Emby.Xtream.Plugin.Service
             if (config.EpgSource == EpgSourceMode.Disabled)
                 return null;
 
-            var cacheTtl = TimeSpan.FromMinutes(config.CacheDurationMinutes);
             var fresh = _xmltvSnapshot != null
-                && DateTime.UtcNow - new DateTime(Interlocked.Read(ref _xmltvCacheTimeTicks), DateTimeKind.Utc) < cacheTtl;
+                && DateTime.UtcNow - new DateTime(Interlocked.Read(ref _xmltvCacheTimeTicks), DateTimeKind.Utc)
+                    < TimeSpan.FromMinutes(config.CacheDurationMinutes);
 
             if (!fresh)
             {
                 var retryAllowed = !_xmltvFailed
-                    || (DateTime.UtcNow - new DateTime(Interlocked.Read(ref _xmltvFailTimeTicks), DateTimeKind.Utc)) >= cacheTtl;
+                    || (DateTime.UtcNow - new DateTime(Interlocked.Read(ref _xmltvFailTimeTicks), DateTimeKind.Utc))
+                        >= XmltvFailureRetryDelay;
                 if (retryAllowed)
                     await TryFetchXmltvEpgAsync(cancellationToken).ConfigureAwait(false);
             }
 
-            return _xmltvSnapshot;
+            var snapshot = _xmltvSnapshot;
+            if (snapshot == null && _xmltvFailed)
+            {
+                // Returning an empty channel/program list tells Emby that the guide is
+                // legitimately empty and can erase previously imported rows. A failed
+                // refresh must instead fail closed so Emby retains its existing guide.
+                throw new InvalidOperationException(
+                    "The XMLTV guide could not be refreshed and no last known-good snapshot is available.");
+            }
+
+            return snapshot;
         }
 
         private async Task<EpgListings> FetchEpgForChannelAsync(int streamId, CancellationToken cancellationToken)
