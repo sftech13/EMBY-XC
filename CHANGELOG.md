@@ -4,6 +4,9 @@ All notable changes to XC2EMBY are listed here, newest first.
 
 ---
 
+## v1.1.127
+- Reissued the completed v1.1.126 guide reliability, duplicate XMLTV mapping, and temporary-category selection fixes under a new version so servers running an earlier locally built `1.1.126` assembly can reliably detect and install the final public build.
+
 ## v1.1.126
 - Fixed local and other duplicate Live TV channels losing guide data after the streaming XMLTV parser was introduced. The selected-channel filter now retains programmes for provider-generated numeric duplicate IDs such as `CBSKCBS.us2`, and duplicate mapping no longer prefers an empty suffixed listing over a populated base listing.
 - Guide refreshes now retain and serve the last known-good XMLTV snapshot when the provider is temporarily unavailable, reject successful-but-empty feeds, retry failures after five minutes instead of the full cache TTL, and fail closed when no snapshot exists so Emby cannot erase valid guide rows after a transient 503.
