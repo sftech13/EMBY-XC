@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>Emby.Xtream.Plugin.Tests</AssemblyName>
+    <RootNamespace>Emby.Xtream.Plugin.Tests</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Emby.Xtream.Plugin\Emby.Xtream.Plugin.csproj" />
+  </ItemGroup>
+</Project>

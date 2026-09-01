@@ -181,6 +181,22 @@ namespace Emby.Xtream.Plugin.Service
             public string SeriesDirectory { get; set; }
         }
 
+        private sealed class PlaybackValidationCandidate
+        {
+            public string FullPath { get; set; }
+            public string RelativePath { get; set; }
+            public string PlaybackUrl { get; set; }
+            public int EpisodeId { get; set; }
+            public string Source { get; set; }
+        }
+
+        private sealed class PersistentCatalogObservation
+        {
+            public string Fingerprint { get; set; } = string.Empty;
+            public int ConsecutiveCompleteRuns { get; set; }
+            public DateTime LastObservedUtc { get; set; }
+        }
+
         private static readonly STJ.JsonSerializerOptions JsonOptions = new STJ.JsonSerializerOptions
         {
             NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString,
@@ -204,6 +220,7 @@ namespace Emby.Xtream.Plugin.Service
             TimeSpan.FromSeconds(5),
             TimeSpan.FromSeconds(10),
         };
+        private const int MaxEpisodePlaybackValidationsPerSync = 200;
 
         // Increment when naming logic changes so existing installs force a full re-sync on next run.
         internal const int CurrentStrmNamingVersion = 1;
@@ -316,7 +333,8 @@ namespace Emby.Xtream.Plugin.Service
             string strmLibraryPath,
             string subFolder,
             string seriesName,
-            HashSet<string> validPaths)
+            HashSet<string> validPaths,
+            ConcurrentBag<string> detailFailurePaths = null)
         {
             var parent = Path.Combine(strmLibraryPath, subFolder);
             if (!Directory.Exists(parent)) return 0;
@@ -336,6 +354,7 @@ namespace Emby.Xtream.Plugin.Service
                         if (validPaths.Add(strmPath))
                             protectedCount++;
                     }
+                    detailFailurePaths?.Add(strmPath);
                 }
             }
             return protectedCount;
@@ -427,6 +446,66 @@ namespace Emby.Xtream.Plugin.Service
                     observation.ConsecutiveCompleteRuns);
                 return observation.ConsecutiveCompleteRuns;
             }
+        }
+
+        private int ObserveCompleteSeriesCatalog(
+            PluginConfiguration config,
+            IEnumerable<int> seriesIds,
+            bool isDocuSeries)
+        {
+            var ordered = seriesIds
+                .Distinct()
+                .OrderBy(id => id)
+                .Select(id => id.ToString(CultureInfo.InvariantCulture))
+                .ToArray();
+            string fingerprint;
+            using (var sha = SHA256.Create())
+            {
+                fingerprint = Convert.ToBase64String(
+                    sha.ComputeHash(Encoding.UTF8.GetBytes(string.Join("\n", ordered))));
+            }
+
+            // DocuSeries uses a temporary series-shaped configuration whose generic
+            // Series* fields are copied back to the DocuSeries* fields by its task/API.
+            var json = config.SeriesCatalogObservationJson;
+            PersistentCatalogObservation observation = null;
+            if (!string.IsNullOrWhiteSpace(json))
+            {
+                try
+                {
+                    observation = STJ.JsonSerializer.Deserialize<PersistentCatalogObservation>(json, JsonOptions);
+                }
+                catch
+                {
+                    observation = null;
+                }
+            }
+
+            if (observation == null ||
+                !string.Equals(observation.Fingerprint, fingerprint, StringComparison.Ordinal))
+            {
+                observation = new PersistentCatalogObservation
+                {
+                    Fingerprint = fingerprint,
+                    ConsecutiveCompleteRuns = 1,
+                    LastObservedUtc = DateTime.UtcNow,
+                };
+            }
+            else
+            {
+                observation.ConsecutiveCompleteRuns++;
+                observation.LastObservedUtc = DateTime.UtcNow;
+            }
+
+            var serialized = STJ.JsonSerializer.Serialize(observation, JsonOptions);
+            config.SeriesCatalogObservationJson = serialized;
+
+            _logger.Info(
+                "[catalog endpoint] Complete {0} catalog snapshot: {1} records, {2} consecutive identical run(s)",
+                isDocuSeries ? "DocuSeries" : "TV Shows",
+                ordered.Length,
+                observation.ConsecutiveCompleteRuns);
+            return observation.ConsecutiveCompleteRuns;
         }
 
         internal static string NormalizeStreamUrl(string value)
@@ -1015,6 +1094,10 @@ namespace Emby.Xtream.Plugin.Service
             config.LastDocuSeriesSyncTimestamp = 0;
             config.SeriesEpisodeHashesJson = string.Empty;
             config.DocuSeriesEpisodeHashesJson = string.Empty;
+            config.SeriesPlaybackValidationJson = string.Empty;
+            config.DocuSeriesPlaybackValidationJson = string.Empty;
+            config.SeriesCatalogObservationJson = string.Empty;
+            config.DocuSeriesCatalogObservationJson = string.Empty;
             saveConfig?.Invoke();
             return true;
         }
@@ -1759,7 +1842,8 @@ namespace Emby.Xtream.Plugin.Service
 
                 var writtenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var locallyFilteredPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                var intendedEpisodeKeys = new ConcurrentBag<string>();
+                var detailFailurePaths = new ConcurrentBag<string>();
+                var playbackValidationRunId = Guid.NewGuid().ToString("N");
                 var semaphore = new SemaphoreSlim(config.SyncParallelism);
                 int filterDeletedEpisodes = 0;
 
@@ -1835,9 +1919,10 @@ namespace Emby.Xtream.Plugin.Service
                                     config.StrmLibraryPath,
                                     subFolder,
                                     seriesName,
-                                    writtenPaths);
+                                    writtenPaths,
+                                    detailFailurePaths);
                                 _logger.Warn(
-                                    "Series '{0}' (id={1}) is listed by the provider but its detail endpoint returned 404; " +
+                                    "[series-detail endpoint] Series '{0}' (id={1}) is listed by the provider but get_series_info returned 404; " +
                                     "protected {2} existing episode file(s) and skipped this stale catalog entry",
                                     series.Name,
                                     series.SeriesId,
@@ -1854,9 +1939,10 @@ namespace Emby.Xtream.Plugin.Service
                                     config.StrmLibraryPath,
                                     subFolder,
                                     seriesName,
-                                    writtenPaths);
+                                    writtenPaths,
+                                    detailFailurePaths);
                                 _logger.Warn(
-                                    "Series '{0}' (id={1}) could not be validated: provider returned {2}; protected {3} existing episode file(s)",
+                                    "[series-detail endpoint] Series '{0}' (id={1}) metadata could not be loaded: provider returned {2}; protected {3} existing episode file(s)",
                                     series.Name,
                                     series.SeriesId,
                                     msg,
@@ -1869,9 +1955,10 @@ namespace Emby.Xtream.Plugin.Service
                                     config.StrmLibraryPath,
                                     subFolder,
                                     seriesName,
-                                    writtenPaths);
+                                    writtenPaths,
+                                    detailFailurePaths);
                                 _logger.Error(
-                                    "Failed to fetch detail for series '{0}' (id={1}): [{2}] {3}; protected {4} existing episode file(s)",
+                                    "[series-detail endpoint] Failed to fetch metadata for series '{0}' (id={1}): [{2}] {3}; protected {4} existing episode file(s)",
                                     series.Name,
                                     series.SeriesId,
                                     ex.GetType().Name,
@@ -1902,9 +1989,10 @@ namespace Emby.Xtream.Plugin.Service
                                 config.StrmLibraryPath,
                                 subFolder,
                                 seriesName,
-                                writtenPaths);
+                                writtenPaths,
+                                detailFailurePaths);
                             _logger.Warn(
-                                "Series '{0}' (id={1}) returned no episode detail; protected {2} existing episode file(s) and skipped this empty provider record",
+                                "[series-detail endpoint] Series '{0}' (id={1}) returned empty episode metadata; protected {2} existing episode file(s) and skipped this empty detail response",
                                 series.Name,
                                 series.SeriesId,
                                 protectedCount);
@@ -2028,9 +2116,6 @@ namespace Emby.Xtream.Plugin.Service
                                 var ext = !string.IsNullOrEmpty(episode.ContainerExtension)
                                     ? episode.ContainerExtension
                                     : "mp4";
-                                intendedEpisodeKeys.Add(
-                                    episode.Id.ToString(CultureInfo.InvariantCulture) + "." + ext);
-
                                 int pathOwnerId;
                                 if (pathOwnership.EpisodeOwners.TryGetValue(strmPath, out pathOwnerId) &&
                                     pathOwnerId != series.SeriesId)
@@ -2200,21 +2285,52 @@ namespace Emby.Xtream.Plugin.Service
                 cancellationToken.ThrowIfCancellationRequested();
                 var showsRoot = Path.Combine(config.StrmLibraryPath, GetSeriesRootFolderName(config));
                 var stableCatalogRuns = cleanupSafe
-                    ? ObserveCompleteCatalog(showsRoot, intendedEpisodeKeys)
+                    ? ObserveCompleteSeriesCatalog(
+                        config,
+                        allSeries.Select(series => series.SeriesId),
+                        isDocuSeries)
                     : 0;
                 if (config.CleanupOrphans && cleanupSafe)
                 {
                     sp.Phase = "Cleaning up orphaned files";
-                    var orphans = CollectOrphans(
+                    var catalogOrphans = CollectOrphans(
                         showsRoot,
                         writtenPaths,
                         config.OrphanSafetyThreshold,
                         stableCatalogRuns,
                         locallyFilteredPaths);
+
+                    // Catalog absence and series-detail failure only create pending
+                    // candidates. The actual episode URL is the sole dead/alive signal.
+                    var confirmedDead = await ValidateStaleEpisodePathsAsync(
+                        config,
+                        showsRoot,
+                        detailFailurePaths,
+                        catalogOrphans,
+                        writtenPaths,
+                        stableCatalogRuns,
+                        playbackValidationRunId,
+                        cancellationToken).ConfigureAwait(false);
+                    lock (writtenPaths)
+                    {
+                        foreach (var path in confirmedDead)
+                            writtenPaths.Remove(path);
+                    }
+
+                    // Re-run the unchanged orphan threshold after detail-failure paths
+                    // have individually qualified. Only repeated 404/410 results pass.
+                    var orphans = CollectOrphans(
+                            showsRoot,
+                            writtenPaths,
+                            config.OrphanSafetyThreshold,
+                            stableCatalogRuns,
+                            locallyFilteredPaths)
+                        .Where(path => confirmedDead.Contains(path))
+                        .ToList();
                     if (config.EnableOrphanPreview && orphans.Count > 0)
                     {
                         StagePendingOrphans(config, orphans);
-                        _logger.Info("{0} orphaned file(s) staged for review", orphans.Count);
+                        _logger.Info("{0} playback-confirmed orphaned episode file(s) staged for review", orphans.Count);
                     }
                     else
                     {
@@ -3376,7 +3492,7 @@ namespace Emby.Xtream.Plugin.Service
                     config.BaseUrl, Uri.EscapeDataString(config.Username ?? string.Empty), Uri.EscapeDataString(config.Password ?? string.Empty));
 
                 var json = await GetProviderStringWithRetryAsync(
-                    url, "series catalog", cancellationToken).ConfigureAwait(false);
+                    url, "[catalog endpoint] series catalog", cancellationToken).ConfigureAwait(false);
                 allSeries = XtreamResponseParser.DeserializeSeriesList(json, JsonOptions);
             }
             else
@@ -3394,7 +3510,7 @@ namespace Emby.Xtream.Plugin.Service
 
                         var json = await GetProviderStringWithRetryAsync(
                             url,
-                            "series category " + catId.ToString(CultureInfo.InvariantCulture),
+                            "[catalog endpoint] series category " + catId.ToString(CultureInfo.InvariantCulture),
                             cancellationToken).ConfigureAwait(false);
                         var series = XtreamResponseParser.DeserializeSeriesList(json, JsonOptions);
 
@@ -3442,7 +3558,7 @@ namespace Emby.Xtream.Plugin.Service
 
             var json = await GetProviderStringWithRetryAsync(
                 url,
-                "series detail " + seriesId.ToString(CultureInfo.InvariantCulture),
+                "[series-detail endpoint] series " + seriesId.ToString(CultureInfo.InvariantCulture),
                 cancellationToken).ConfigureAwait(false);
             // Some providers return [] or false/null when a series has no detail.
             // Treat anything that isn't a JSON object as empty rather than throwing.
@@ -3450,6 +3566,296 @@ namespace Emby.Xtream.Plugin.Service
             if (trimmed.Length == 0 || trimmed[0] != '{')
                 return null;
             return STJ.JsonSerializer.Deserialize<SeriesDetailInfo>(json, JsonOptions);
+        }
+
+        private async Task<HashSet<string>> ValidateStaleEpisodePathsAsync(
+            PluginConfiguration config,
+            string contentRoot,
+            IEnumerable<string> detailFailurePaths,
+            IEnumerable<string> catalogOrphanPaths,
+            HashSet<string> writtenPaths,
+            int consecutiveCompleteCatalogRuns,
+            string syncRunId,
+            CancellationToken cancellationToken)
+        {
+            Dictionary<string, EpisodePlaybackValidationState> states;
+            try
+            {
+                states = string.IsNullOrWhiteSpace(config.SeriesPlaybackValidationJson)
+                    ? new Dictionary<string, EpisodePlaybackValidationState>(StringComparer.OrdinalIgnoreCase)
+                    : STJ.JsonSerializer.Deserialize<Dictionary<string, EpisodePlaybackValidationState>>(
+                        config.SeriesPlaybackValidationJson,
+                        JsonOptions) ?? new Dictionary<string, EpisodePlaybackValidationState>(StringComparer.OrdinalIgnoreCase);
+                states = new Dictionary<string, EpisodePlaybackValidationState>(states, StringComparer.OrdinalIgnoreCase);
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn("[playback validation] Could not read saved episode state; starting clean: {0}", ex.Message);
+                states = new Dictionary<string, EpisodePlaybackValidationState>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            var now = DateTime.UtcNow;
+            var detailSet = new HashSet<string>(
+                detailFailurePaths ?? Enumerable.Empty<string>(),
+                StringComparer.OrdinalIgnoreCase);
+            var catalogSet = new HashSet<string>(
+                catalogOrphanPaths ?? Enumerable.Empty<string>(),
+                StringComparer.OrdinalIgnoreCase);
+
+            // A catalog-present episode breaks both pending-orphan and definitive
+            // playback-failure sequences, unless its series detail is currently stale.
+            foreach (var entry in states.ToList())
+            {
+                var fullPath = Path.Combine(contentRoot, entry.Key);
+                if (!File.Exists(fullPath))
+                {
+                    states.Remove(entry.Key);
+                    continue;
+                }
+
+                if (writtenPaths.Contains(fullPath) && !detailSet.Contains(fullPath))
+                {
+                    entry.Value.ConsecutiveCatalogAbsences = 0;
+                    entry.Value.FirstCatalogAbsentUtc = null;
+                    entry.Value.LastCatalogAbsentUtc = null;
+                    entry.Value.LastCatalogRunId = syncRunId;
+                    entry.Value.LastResult = "CatalogPresent";
+                    entry.Value.LastStatusCode = null;
+                    entry.Value.ConsecutiveDefinitiveFailures = 0;
+                    entry.Value.FirstDefinitiveFailureUtc = null;
+                    entry.Value.LastDefinitiveFailureUtc = null;
+                }
+            }
+
+            var candidates = new Dictionary<string, PlaybackValidationCandidate>(StringComparer.OrdinalIgnoreCase);
+            foreach (var fullPath in detailSet)
+            {
+                var candidate = CreatePlaybackValidationCandidate(contentRoot, fullPath, "series-detail endpoint");
+                candidates[candidate.RelativePath] = candidate;
+                GetOrCreateValidationState(states, candidate, now);
+            }
+
+            foreach (var fullPath in catalogSet)
+            {
+                var candidate = CreatePlaybackValidationCandidate(contentRoot, fullPath, "catalog endpoint");
+                EpisodePlaybackValidationState state;
+                if (states.TryGetValue(candidate.RelativePath, out state))
+                {
+                    if (!string.Equals(state.LastCatalogRunId, syncRunId, StringComparison.Ordinal))
+                    {
+                        state.ConsecutiveCatalogAbsences++;
+                        state.FirstCatalogAbsentUtc = state.FirstCatalogAbsentUtc ?? now;
+                        state.LastCatalogAbsentUtc = now;
+                        state.LastCatalogRunId = syncRunId;
+                    }
+
+                    if (consecutiveCompleteCatalogRuns >= 2 && state.ConsecutiveCatalogAbsences >= 2)
+                        candidates[candidate.RelativePath] = candidate;
+                }
+                else if (consecutiveCompleteCatalogRuns >= 2)
+                {
+                    // The identical catalog fingerprint proves this path was absent
+                    // from both complete snapshots. Delay allocating persistent state
+                    // until the path reaches the bounded validation batch.
+                    candidates[candidate.RelativePath] = candidate;
+                }
+            }
+
+            var orderedCandidates = candidates.Values
+                .OrderBy(candidate =>
+                {
+                    EpisodePlaybackValidationState state;
+                    return states.TryGetValue(candidate.RelativePath, out state)
+                        ? state.LastCheckedUtc
+                        : default(DateTime);
+                })
+                .ThenBy(candidate => candidate.RelativePath, StringComparer.OrdinalIgnoreCase)
+                .Take(MaxEpisodePlaybackValidationsPerSync)
+                .ToList();
+
+            var deferredCount = candidates.Count - orderedCandidates.Count;
+            if (deferredCount > 0)
+            {
+                _logger.Warn(
+                    "[playback validation] Deferred {0} pending episode check(s) to later syncs; capped at {1} per run to protect provider connections",
+                    deferredCount,
+                    MaxEpisodePlaybackValidationsPerSync);
+            }
+
+            // Materialize state before parallel HTTP work; Dictionary writes are
+            // intentionally kept on this single thread.
+            foreach (var candidate in orderedCandidates)
+            {
+                var state = GetOrCreateValidationState(states, candidate, now);
+                if (string.Equals(candidate.Source, "catalog endpoint", StringComparison.Ordinal) &&
+                    !string.Equals(state.LastCatalogRunId, syncRunId, StringComparison.Ordinal))
+                {
+                    // New states can infer two absences from the persistent pair of
+                    // identical complete catalog snapshots that made them eligible.
+                    state.ConsecutiveCatalogAbsences = Math.Max(
+                        2,
+                        state.ConsecutiveCatalogAbsences + 1);
+                    state.FirstCatalogAbsentUtc = state.FirstCatalogAbsentUtc ?? now;
+                    state.LastCatalogAbsentUtc = now;
+                    state.LastCatalogRunId = syncRunId;
+                }
+            }
+
+            var confirmedDead = new ConcurrentBag<string>();
+            var alive = 0;
+            var firstDefinitive = 0;
+            var inconclusive = 0;
+            var parallelism = Math.Max(
+                1,
+                Math.Min(2, Math.Min(
+                    Math.Max(1, config.SyncParallelism),
+                    Math.Max(1, config.TunerCount))));
+            var gate = new SemaphoreSlim(parallelism, parallelism);
+            var validator = new EpisodePlaybackValidator(_httpClient);
+            var tasks = orderedCandidates.Select(async candidate =>
+            {
+                await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    var state = states[candidate.RelativePath];
+                    var result = await validator.ValidateAsync(
+                        candidate.PlaybackUrl,
+                        cancellationToken).ConfigureAwait(false);
+                    var deleteAllowed = EpisodePlaybackValidator.ApplyResult(
+                        state,
+                        result,
+                        syncRunId,
+                        DateTime.UtcNow);
+
+                    if (result.Kind == EpisodePlaybackResultKind.Alive)
+                    {
+                        Interlocked.Increment(ref alive);
+                        _logger.Debug(
+                            "[playback URL] Episode {0} queued by {1} is alive ({2}, {3}, {4} bytes); preserving '{5}'",
+                            candidate.EpisodeId,
+                            candidate.Source,
+                            result.StatusCode,
+                            result.ContentType,
+                            result.BytesRead,
+                            candidate.RelativePath);
+                    }
+                    else if (result.IsDefinitiveDead && deleteAllowed)
+                    {
+                        confirmedDead.Add(candidate.FullPath);
+                        _logger.Warn(
+                            "[playback URL] Episode {0} queued by {1} returned the same definitive HTTP {2} on {3} separate sync runs; '{4}' is eligible for orphan safeguards",
+                            candidate.EpisodeId,
+                            candidate.Source,
+                            result.StatusCode,
+                            state.ConsecutiveDefinitiveFailures,
+                            candidate.RelativePath);
+                    }
+                    else if (result.IsDefinitiveDead)
+                    {
+                        Interlocked.Increment(ref firstDefinitive);
+                        _logger.Warn(
+                            "[playback URL] Episode {0} queued by {1} returned definitive HTTP {2} once; preserving '{3}' until a separate sync repeats the same result",
+                            candidate.EpisodeId,
+                            candidate.Source,
+                            result.StatusCode,
+                            candidate.RelativePath);
+                    }
+                    else
+                    {
+                        Interlocked.Increment(ref inconclusive);
+                        _logger.Warn(
+                            "[playback URL] Episode {0} queued by {1} was inconclusive ({2}); preserving '{3}'",
+                            candidate.EpisodeId,
+                            candidate.Source,
+                            result.Detail,
+                            candidate.RelativePath);
+                    }
+                }
+                finally
+                {
+                    gate.Release();
+                }
+            });
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+
+            config.SeriesPlaybackValidationJson = STJ.JsonSerializer.Serialize(states, JsonOptions);
+            _logger.Info(
+                "[playback validation] Checked {0} episode URL(s) at parallelism {1}: {2} alive, {3} first definitive failure(s), {4} inconclusive, {5} eligible after repeated 404/410",
+                orderedCandidates.Count,
+                parallelism,
+                Volatile.Read(ref alive),
+                Volatile.Read(ref firstDefinitive),
+                Volatile.Read(ref inconclusive),
+                confirmedDead.Count);
+            return new HashSet<string>(confirmedDead, StringComparer.OrdinalIgnoreCase);
+        }
+
+        private static EpisodePlaybackValidationState GetOrCreateValidationState(
+            Dictionary<string, EpisodePlaybackValidationState> states,
+            PlaybackValidationCandidate candidate,
+            DateTime now)
+        {
+            EpisodePlaybackValidationState state;
+            if (!states.TryGetValue(candidate.RelativePath, out state))
+            {
+                state = new EpisodePlaybackValidationState
+                {
+                    EpisodeId = candidate.EpisodeId,
+                    RelativePath = candidate.RelativePath,
+                    FirstSeenUtc = now,
+                };
+                states[candidate.RelativePath] = state;
+            }
+            else
+            {
+                state.EpisodeId = candidate.EpisodeId;
+                state.RelativePath = candidate.RelativePath;
+            }
+            return state;
+        }
+
+        private static PlaybackValidationCandidate CreatePlaybackValidationCandidate(
+            string contentRoot,
+            string fullPath,
+            string source)
+        {
+            var relativePath = GetRelativePath(contentRoot, fullPath);
+            var playbackUrl = string.Empty;
+            var episodeId = 0;
+            try
+            {
+                playbackUrl = File.Exists(fullPath) ? File.ReadAllText(fullPath).Trim() : string.Empty;
+                StreamUrlParts parts;
+                if (TryParseStreamUrl(playbackUrl, out parts) &&
+                    string.Equals(parts.Kind, "series", StringComparison.OrdinalIgnoreCase))
+                {
+                    int.TryParse(parts.StreamId, NumberStyles.None, CultureInfo.InvariantCulture, out episodeId);
+                }
+            }
+            catch
+            {
+                playbackUrl = string.Empty;
+            }
+
+            return new PlaybackValidationCandidate
+            {
+                FullPath = fullPath,
+                RelativePath = relativePath,
+                PlaybackUrl = playbackUrl,
+                EpisodeId = episodeId,
+                Source = source,
+            };
+        }
+
+        private static string GetRelativePath(string rootPath, string fullPath)
+        {
+            var root = Path.GetFullPath(rootPath)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var full = Path.GetFullPath(fullPath);
+            var prefix = root + Path.DirectorySeparatorChar;
+            return full.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                ? full.Substring(prefix.Length)
+                : full;
         }
 
         // Collects orphaned STRM paths under rootPath respecting the safety threshold.
@@ -3732,16 +4138,27 @@ namespace Emby.Xtream.Plugin.Service
             var root = (config.StrmLibraryPath ?? string.Empty)
                 .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
             var removed = 0;
+            var retained = new List<string>();
+            var removedPaths = new List<string>();
             foreach (var rel in paths)
             {
                 var full = string.IsNullOrEmpty(root)
                     ? rel
                     : Path.Combine(root, rel.TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
                 if (!File.Exists(full)) { continue; }
+                if (IsSeriesPendingPath(config, rel) && !HasRepeatedDefinitivePlaybackFailure(config, rel))
+                {
+                    retained.Add(rel);
+                    _logger.Warn(
+                        "[playback validation] Staged series episode '{0}' was preserved because it lacks two matching definitive 404/410 playback results",
+                        rel);
+                    continue;
+                }
                 try
                 {
                     File.Delete(full);
                     removed++;
+                    removedPaths.Add(rel);
                     DeleteMatchingNfo(full);
 
                     // Staged paths are relative to the common STRM root. Stop
@@ -3765,12 +4182,66 @@ namespace Emby.Xtream.Plugin.Service
                     _logger.Debug("Failed to commit orphan deletion '{0}': {1}", full, ex.Message);
                 }
             }
-            config.PendingOrphansJson = string.Empty;
+            config.PendingOrphansJson = retained.Count == 0
+                ? string.Empty
+                : STJ.JsonSerializer.Serialize(retained, JsonOptions);
             Plugin.Instance.SaveConfiguration();
-            _logger.Info("Committed deletion of {0} staged orphan(s)", removed);
+            _logger.Info(
+                "Committed deletion of {0} staged orphan(s); retained {1} series episode(s) pending definitive playback validation",
+                removed,
+                retained.Count);
             if (removed > 0)
-                PatchHistoryWithOrphanDeletes(config, paths);
+                PatchHistoryWithOrphanDeletes(config, removedPaths);
             return removed;
+        }
+
+        private static bool IsSeriesPendingPath(PluginConfiguration config, string relativePath)
+        {
+            var normalized = (relativePath ?? string.Empty).TrimStart('/', '\\');
+            var seriesRoot = (GetSeriesRootFolderName(config) ?? string.Empty).Trim('/', '\\');
+            var docuRoot = (GetDocuSeriesRootFolderName(config) ?? string.Empty).Trim('/', '\\');
+            return StartsWithRoot(normalized, seriesRoot) || StartsWithRoot(normalized, docuRoot);
+        }
+
+        private static bool HasRepeatedDefinitivePlaybackFailure(
+            PluginConfiguration config,
+            string relativePath)
+        {
+            var normalized = (relativePath ?? string.Empty).TrimStart('/', '\\');
+            var seriesRoot = (GetSeriesRootFolderName(config) ?? string.Empty).Trim('/', '\\');
+            var docuRoot = (GetDocuSeriesRootFolderName(config) ?? string.Empty).Trim('/', '\\');
+            var isDocu = StartsWithRoot(normalized, docuRoot);
+            var contentRoot = isDocu ? docuRoot : seriesRoot;
+            var statePath = normalized.Substring(contentRoot.Length).TrimStart('/', '\\');
+            var json = isDocu
+                ? config.DocuSeriesPlaybackValidationJson
+                : config.SeriesPlaybackValidationJson;
+            if (string.IsNullOrWhiteSpace(json)) return false;
+
+            try
+            {
+                var states = STJ.JsonSerializer.Deserialize<Dictionary<string, EpisodePlaybackValidationState>>(
+                    json,
+                    JsonOptions);
+                EpisodePlaybackValidationState state;
+                return states != null &&
+                    states.TryGetValue(statePath, out state) &&
+                    state.ConsecutiveDefinitiveFailures >= 2 &&
+                    (string.Equals(state.LastResult, EpisodePlaybackResultKind.Definitive404.ToString(), StringComparison.Ordinal) ||
+                     string.Equals(state.LastResult, EpisodePlaybackResultKind.Definitive410.ToString(), StringComparison.Ordinal));
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool StartsWithRoot(string relativePath, string rootName)
+        {
+            if (string.IsNullOrEmpty(rootName)) return false;
+            if (string.Equals(relativePath, rootName, StringComparison.OrdinalIgnoreCase)) return true;
+            return relativePath.StartsWith(rootName + "/", StringComparison.OrdinalIgnoreCase) ||
+                   relativePath.StartsWith(rootName + "\\", StringComparison.OrdinalIgnoreCase);
         }
 
         private void PatchHistoryWithOrphanDeletes(PluginConfiguration config, List<string> deletedPaths)

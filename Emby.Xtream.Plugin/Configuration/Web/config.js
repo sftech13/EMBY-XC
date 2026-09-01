@@ -626,6 +626,7 @@ function (BaseView, loading) {
             view.querySelector('.txtCustomEpgUrl').value = config.CustomEpgUrl || '';
             view.querySelector('.txtCacheDurationMinutes').value = config.CacheDurationMinutes || 360;
             view.querySelector('.txtEpgDaysToFetch').value = config.EpgDaysToFetch || 2;
+            view.querySelector('.txtEpgTimeShiftHours').value = clampEpgTimeShiftHours(config.EpgTimeShiftHours);
 
             instance.selectedCategoryIds = config.SelectedLiveCategoryIds || [];
 
@@ -770,6 +771,7 @@ function (BaseView, loading) {
             config.CustomEpgUrl = view.querySelector('.txtCustomEpgUrl').value.trim();
             config.CacheDurationMinutes = parseInt(view.querySelector('.txtCacheDurationMinutes').value, 10) || 360;
             config.EpgDaysToFetch = parseInt(view.querySelector('.txtEpgDaysToFetch').value, 10) || 2;
+            config.EpgTimeShiftHours = clampEpgTimeShiftHours(view.querySelector('.txtEpgTimeShiftHours').value);
 
             var selectedLiveCategoryIds = getSelectedCategoryIds(instance);
             config.SelectedLiveCategoryIds = selectedLiveCategoryIds;
@@ -877,6 +879,13 @@ function (BaseView, loading) {
         return isNaN(n) ? 0 : n;
     }
 
+    function clampEpgTimeShiftHours(val) {
+        var hours = parseFloat(val);
+        if (!isFinite(hours)) return 0;
+        hours = Math.max(-12, Math.min(12, hours));
+        return Math.round(hours * 2) / 2;
+    }
+
     function captureLiveRefreshSettings(config) {
         return {
             enabled: config.EnableLiveTv !== false,
@@ -888,7 +897,8 @@ function (BaseView, loading) {
             epgSource: normalizeEpgSource(config.EpgSource),
             customEpgUrl: config.CustomEpgUrl || '',
             cacheDurationMinutes: config.CacheDurationMinutes || 360,
-            epgDaysToFetch: config.EpgDaysToFetch || 2
+            epgDaysToFetch: config.EpgDaysToFetch || 2,
+            epgTimeShiftHours: clampEpgTimeShiftHours(config.EpgTimeShiftHours)
         };
     }
 
@@ -915,7 +925,8 @@ function (BaseView, loading) {
             || before.epgSource !== after.epgSource
             || before.customEpgUrl !== after.customEpgUrl
             || before.cacheDurationMinutes !== after.cacheDurationMinutes
-            || before.epgDaysToFetch !== after.epgDaysToFetch;
+            || before.epgDaysToFetch !== after.epgDaysToFetch
+            || before.epgTimeShiftHours !== after.epgTimeShiftHours;
     }
 
     function sameIdArray(left, right) {

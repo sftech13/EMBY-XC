@@ -33,7 +33,7 @@ fi
 
 echo ""
 echo "=== Running Tests ==="
-dotnet test "$SCRIPT_DIR/../Emby.Xtream.Plugin.Tests/" --no-restore -v minimal
+dotnet run --project "$SCRIPT_DIR/../Emby.Xtream.Plugin.Tests/" --no-restore -c Release
 
 echo ""
 echo "=== Building Emby.Xtream.Plugin ==="

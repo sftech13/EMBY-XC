@@ -28,6 +28,7 @@ namespace Emby.Xtream.Plugin
         public string CustomEpgUrl { get; set; } = string.Empty;
         public int CacheDurationMinutes { get; set; } = 360;
         public int EpgDaysToFetch { get; set; } = 2;
+        public double EpgTimeShiftHours { get; set; }
 
         // Category filtering
         public int[] SelectedLiveCategoryIds { get; set; } = new int[0];
@@ -138,6 +139,20 @@ namespace Emby.Xtream.Plugin
         /// </summary>
         public string SeriesEpisodeHashesJson { get; set; } = string.Empty;
         public string DocuSeriesEpisodeHashesJson { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Privacy-safe per-episode playback validation state. Playback URLs and
+        /// credentials are never persisted; TV and documentary series are isolated.
+        /// </summary>
+        public string SeriesPlaybackValidationJson { get; set; } = string.Empty;
+        public string DocuSeriesPlaybackValidationJson { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Persistent fingerprints for complete series catalog snapshots. These
+        /// make the multiple-snapshot orphan guard survive an Emby restart.
+        /// </summary>
+        public string SeriesCatalogObservationJson { get; set; } = string.Empty;
+        public string DocuSeriesCatalogObservationJson { get; set; } = string.Empty;
     }
 
     public enum EpgSourceMode

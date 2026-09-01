@@ -305,6 +305,7 @@ namespace Emby.Xtream.Plugin
             target.CustomEpgUrl = source.CustomEpgUrl;
             target.CacheDurationMinutes = source.CacheDurationMinutes > 0 ? source.CacheDurationMinutes : 360;
             target.EpgDaysToFetch = source.EpgDaysToFetch;
+            target.EpgTimeShiftHours = source.EpgTimeShiftHours;
             target.SelectedLiveCategoryIds = source.SelectedLiveCategoryIds ?? new int[0];
             target.IncludeAdultChannels = source.IncludeAdultChannels;
             target.IncludeGroupTitleInM3U = source.IncludeGroupTitleInM3U;
@@ -366,6 +367,10 @@ namespace Emby.Xtream.Plugin
             target.SyncHistoryJson = source.SyncHistoryJson;
             target.SeriesEpisodeHashesJson = source.SeriesEpisodeHashesJson;
             target.DocuSeriesEpisodeHashesJson = source.DocuSeriesEpisodeHashesJson;
+            target.SeriesPlaybackValidationJson = source.SeriesPlaybackValidationJson;
+            target.DocuSeriesPlaybackValidationJson = source.DocuSeriesPlaybackValidationJson;
+            target.SeriesCatalogObservationJson = source.SeriesCatalogObservationJson;
+            target.DocuSeriesCatalogObservationJson = source.DocuSeriesCatalogObservationJson;
         }
     }
 }

@@ -870,6 +870,9 @@ namespace Emby.Xtream.Plugin.Api
                     {
                         config.LastDocuSeriesSyncTimestamp = docuConfig.LastSeriesSyncTimestamp;
                         config.DocuSeriesEpisodeHashesJson = docuConfig.SeriesEpisodeHashesJson;
+                        config.DocuSeriesPlaybackValidationJson = docuConfig.SeriesPlaybackValidationJson;
+                        config.DocuSeriesCatalogObservationJson = docuConfig.SeriesCatalogObservationJson;
+                        config.PendingOrphansJson = docuConfig.PendingOrphansJson;
                         config.StrmNamingVersion = docuConfig.StrmNamingVersion;
                         Plugin.Instance.SaveConfiguration();
                     },
@@ -877,6 +880,9 @@ namespace Emby.Xtream.Plugin.Api
 
                 config.LastDocuSeriesSyncTimestamp = docuConfig.LastSeriesSyncTimestamp;
                 config.DocuSeriesEpisodeHashesJson = docuConfig.SeriesEpisodeHashesJson;
+                config.DocuSeriesPlaybackValidationJson = docuConfig.SeriesPlaybackValidationJson;
+                config.DocuSeriesCatalogObservationJson = docuConfig.SeriesCatalogObservationJson;
+                config.PendingOrphansJson = docuConfig.PendingOrphansJson;
                 config.StrmNamingVersion = docuConfig.StrmNamingVersion;
                 Plugin.Instance.SaveConfiguration();
 
@@ -1473,6 +1479,8 @@ namespace Emby.Xtream.Plugin.Api
             config.SeriesFolderMappings = source.DocuSeriesFolderMappings;
             config.LastSeriesSyncTimestamp = source.LastDocuSeriesSyncTimestamp;
             config.SeriesEpisodeHashesJson = source.DocuSeriesEpisodeHashesJson;
+            config.SeriesPlaybackValidationJson = source.DocuSeriesPlaybackValidationJson;
+            config.SeriesCatalogObservationJson = source.DocuSeriesCatalogObservationJson;
             return config;
         }
 
@@ -1484,6 +1492,7 @@ namespace Emby.Xtream.Plugin.Api
                 Username = source.Username,
                 Password = source.Password,
                 HttpUserAgent = source.HttpUserAgent,
+                TunerCount = source.TunerCount,
                 StrmLibraryPath = source.StrmLibraryPath,
                 EnableContentNameCleaning = source.EnableContentNameCleaning,
                 ContentRemoveTerms = source.ContentRemoveTerms,
@@ -1501,6 +1510,10 @@ namespace Emby.Xtream.Plugin.Api
                 SyncParallelism = source.SyncParallelism,
                 CleanupOrphans = source.CleanupOrphans,
                 OrphanSafetyThreshold = source.OrphanSafetyThreshold,
+                EnableOrphanPreview = source.EnableOrphanPreview,
+                PendingOrphansJson = source.PendingOrphansJson,
+                SeriesPlaybackValidationJson = source.SeriesPlaybackValidationJson,
+                SeriesCatalogObservationJson = source.SeriesCatalogObservationJson,
                 StrmNamingVersion = source.StrmNamingVersion,
             };
         }

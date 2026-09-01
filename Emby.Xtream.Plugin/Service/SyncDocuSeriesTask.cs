@@ -68,6 +68,9 @@ namespace Emby.Xtream.Plugin.Service
                 {
                     config.LastDocuSeriesSyncTimestamp = docConfig.LastSeriesSyncTimestamp;
                     config.DocuSeriesEpisodeHashesJson = docConfig.SeriesEpisodeHashesJson;
+                    config.DocuSeriesPlaybackValidationJson = docConfig.SeriesPlaybackValidationJson;
+                    config.DocuSeriesCatalogObservationJson = docConfig.SeriesCatalogObservationJson;
+                    config.PendingOrphansJson = docConfig.PendingOrphansJson;
                     config.StrmNamingVersion = docConfig.StrmNamingVersion;
                     Plugin.Instance.SaveConfiguration();
                 },
@@ -76,6 +79,9 @@ namespace Emby.Xtream.Plugin.Service
 
             config.LastDocuSeriesSyncTimestamp = docConfig.LastSeriesSyncTimestamp;
             config.DocuSeriesEpisodeHashesJson = docConfig.SeriesEpisodeHashesJson;
+            config.DocuSeriesPlaybackValidationJson = docConfig.SeriesPlaybackValidationJson;
+            config.DocuSeriesCatalogObservationJson = docConfig.SeriesCatalogObservationJson;
+            config.PendingOrphansJson = docConfig.PendingOrphansJson;
             config.StrmNamingVersion = docConfig.StrmNamingVersion;
             Plugin.Instance.SaveConfiguration();
             progress.Report(100);
@@ -89,6 +95,7 @@ namespace Emby.Xtream.Plugin.Service
                 Username = source.Username,
                 Password = source.Password,
                 HttpUserAgent = source.HttpUserAgent,
+                TunerCount = source.TunerCount,
                 StrmLibraryPath = source.StrmLibraryPath,
                 SyncSeries = source.SyncDocuSeries,
                 SeriesRootFolderName = source.DocuSeriesRootFolderName,
@@ -113,6 +120,8 @@ namespace Emby.Xtream.Plugin.Service
                 PendingOrphansJson = source.PendingOrphansJson,
                 LastSeriesSyncTimestamp = source.LastDocuSeriesSyncTimestamp,
                 SeriesEpisodeHashesJson = source.DocuSeriesEpisodeHashesJson,
+                SeriesPlaybackValidationJson = source.DocuSeriesPlaybackValidationJson,
+                SeriesCatalogObservationJson = source.DocuSeriesCatalogObservationJson,
                 StrmNamingVersion = source.StrmNamingVersion,
             };
         }

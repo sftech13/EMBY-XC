@@ -21,3 +21,6 @@ jobs:
 
       - name: Build plugin
         run: dotnet build Emby.Xtream.Plugin/Emby.Xtream.Plugin.csproj -c Release
+
+      - name: Run playback-validation tests
+        run: dotnet run --project Emby.Xtream.Plugin.Tests/Emby.Xtream.Plugin.Tests.csproj -c Release

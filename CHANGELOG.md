@@ -4,6 +4,14 @@ All notable changes to XC2EMBY are listed here, newest first.
 
 ---
 
+## v1.1.128
+- Added an **EPG Time Shift** control under Live TV → EPG / Guide Data. Programme start/end times can be moved from −12 to +12 hours in 30-minute steps; guide source windows are adjusted inversely so boundary programmes are retained, and saving automatically refreshes guide data.
+- Fixed high-bitrate 4K Live TV viewers being disconnected when Android temporarily paused its response writer during startup. A sole viewer now applies natural TCP backpressure to the upstream stream instead of being dropped, while shared streams retain slow-viewer isolation with a larger bounded 64 MiB transient queue per viewer.
+- Series-detail failures are now explicitly separated from episode playback health. A 404, empty response, authentication/rate-limit/server error, timeout, or TLS failure from `get_series_info` protects existing STRMs instead of treating their media URLs as dead.
+- Stale series episodes and catalog orphans are validated individually with a 1 KB HTTP Range GET at low, connection-limit-aware parallelism. HTTP 200/206 media data preserves the episode; only the same definitive playback HTTP 404 or 410 on two separate sync runs can make that one STRM eligible for deletion.
+- Playback validation follows up to five provider or proxy redirects and reapplies the Range header on every hop, so redirected HTTP 200/206 media responses are correctly recognized as alive.
+- Added persistent per-episode validation and complete-catalog observation state, restart-safe pending-orphan handling, endpoint-specific diagnostics, preview-commit protection, and offline regression tests for empty series detail with working HTTP 206 episode streams.
+
 ## v1.1.127
 - Reissued the completed v1.1.126 guide reliability, duplicate XMLTV mapping, and temporary-category selection fixes under a new version so servers running an earlier locally built `1.1.126` assembly can reliably detect and install the final public build.
 

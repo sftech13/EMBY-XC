@@ -354,11 +354,14 @@ namespace Emby.Xtream.Plugin.Service
             if (config.EpgSource != EpgSourceMode.Disabled)
             {
                 var epgData = await FetchEpgDataAsync(channels, config, cancellationToken).ConfigureAwait(false);
+                var shiftHours = XtreamListingsProvider.ClampEpgTimeShiftHours(config.EpgTimeShiftHours);
 
                 foreach (var program in epgData.OrderBy(p => p.StartTimestamp))
                 {
-                    var startStr = FormatXmltvTime(program.StartTimestamp);
-                    var stopStr = FormatXmltvTime(program.StopTimestamp);
+                    var startStr = FormatXmltvTime(
+                        XtreamListingsProvider.ShiftEpgTimestamp(program.StartTimestamp, shiftHours).ToUnixTimeSeconds());
+                    var stopStr = FormatXmltvTime(
+                        XtreamListingsProvider.ShiftEpgTimestamp(program.StopTimestamp, shiftHours).ToUnixTimeSeconds());
                     var channelId = !string.IsNullOrEmpty(program.ChannelId)
                         ? program.ChannelId
                         : program.EpgId;
@@ -414,6 +417,9 @@ namespace Emby.Xtream.Plugin.Service
 
             var now = DateTimeOffset.UtcNow;
             var endTime = now.AddDays(config.EpgDaysToFetch);
+            var shiftHours = XtreamListingsProvider.ClampEpgTimeShiftHours(config.EpgTimeShiftHours);
+            var sourceWindowStart = XtreamListingsProvider.GetEpgSourceBoundary(now, shiftHours);
+            var sourceWindowEnd = XtreamListingsProvider.GetEpgSourceBoundary(endTime, shiftHours);
 
             List<Task<List<EpgProgram>>> taskList;
             var semaphore = new SemaphoreSlim(5);
@@ -449,8 +455,8 @@ namespace Emby.Xtream.Plugin.Service
                             }
                         }
 
-                        var nowUnix = now.ToUnixTimeSeconds();
-                        var endUnix = endTime.ToUnixTimeSeconds();
+                        var nowUnix = sourceWindowStart.ToUnixTimeSeconds();
+                        var endUnix = sourceWindowEnd.ToUnixTimeSeconds();
                         return epgListings.Listings
                             .Where(p => p.StopTimestamp > nowUnix && p.StartTimestamp < endUnix)
                             .ToList();
@@ -640,7 +646,11 @@ namespace Emby.Xtream.Plugin.Service
                     }
 
                     var now = DateTimeOffset.UtcNow;
-                    var filterEndUnix = now.AddDays(config.EpgDaysToFetch).ToUnixTimeSeconds();
+                    var shiftHours = XtreamListingsProvider.ClampEpgTimeShiftHours(config.EpgTimeShiftHours);
+                    var sourceWindowStart = XtreamListingsProvider.GetEpgSourceBoundary(now, shiftHours);
+                    var sourceWindowEnd = XtreamListingsProvider.GetEpgSourceBoundary(
+                        now.AddDays(config.EpgDaysToFetch),
+                        shiftHours);
 
                     XmltvSnapshot loadedSnapshot;
                     var epgHttpClient = Plugin.CreateHttpClient(180);
@@ -648,8 +658,8 @@ namespace Emby.Xtream.Plugin.Service
                     {
                         loadedSnapshot = XmltvParser.Parse(
                             stream,
-                            now.ToUnixTimeSeconds(),
-                            filterEndUnix,
+                            sourceWindowStart.ToUnixTimeSeconds(),
+                            sourceWindowEnd.ToUnixTimeSeconds(),
                             includedEpgIds);
                     }
 

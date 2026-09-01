@@ -51,6 +51,8 @@ namespace Emby.Xtream.Plugin.Service
                 return new List<ProgramInfo>();
 
             var programs = new List<ProgramInfo>();
+            var shiftHours = ClampEpgTimeShiftHours(
+                Plugin.InstanceOrNull?.Configuration?.EpgTimeShiftHours ?? 0);
 
             if (!snapshot.ProgramsByChannel.TryGetValue(channelId, out var channelProgs))
                 channelProgs = new List<EpgProgram>();
@@ -60,8 +62,8 @@ namespace Emby.Xtream.Plugin.Service
                 if (prog.StartTimestamp == 0 || prog.StopTimestamp == 0)
                     continue;
 
-                var start = DateTimeOffset.FromUnixTimeSeconds(prog.StartTimestamp);
-                var stop = DateTimeOffset.FromUnixTimeSeconds(prog.StopTimestamp);
+                var start = ShiftEpgTimestamp(prog.StartTimestamp, shiftHours);
+                var stop = ShiftEpgTimestamp(prog.StopTimestamp, shiftHours);
 
                 if (stop <= startDateUtc || start >= endDateUtc)
                     continue;
@@ -142,6 +144,25 @@ namespace Emby.Xtream.Plugin.Service
             }
 
             return programs;
+        }
+
+        internal static double ClampEpgTimeShiftHours(double hours)
+        {
+            if (double.IsNaN(hours) || double.IsInfinity(hours)) return 0;
+            return Math.Max(-12, Math.Min(12, hours));
+        }
+
+        internal static DateTimeOffset ShiftEpgTimestamp(long unixTimestamp, double hours)
+        {
+            return DateTimeOffset.FromUnixTimeSeconds(unixTimestamp)
+                .AddHours(ClampEpgTimeShiftHours(hours));
+        }
+
+        internal static DateTimeOffset GetEpgSourceBoundary(
+            DateTimeOffset displayedBoundary,
+            double hours)
+        {
+            return displayedBoundary.AddHours(-ClampEpgTimeShiftHours(hours));
         }
 
         private static readonly Regex OnscreenEpRx =

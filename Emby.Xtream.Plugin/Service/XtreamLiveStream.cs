@@ -16,11 +16,11 @@ namespace Emby.Xtream.Plugin.Service
 {
     internal class XtreamLiveStream : ILiveStream, IDisposable
     {
-        // Keep chunks below the large-object-heap threshold. A 16 MiB queue gives each
-        // viewer several seconds of protection from a bursty MPEG-TS source while keeping
-        // memory strictly bounded (80 MiB for five simultaneous viewers of one channel).
+        // Keep chunks below the large-object-heap threshold. Shared viewers get a bounded
+        // 64 MiB queue for transient startup/probing pauses (up to 320 MiB for five viewers).
+        // A sole viewer uses upstream backpressure instead of being disconnected at this cap.
         private const int ReadBufferSize = 64 * 1024;
-        private const int MaxSubscriberBufferBytes = 16 * 1024 * 1024;
+        private const int MaxSubscriberBufferBytes = 64 * 1024 * 1024;
         private const int MaxReconnectAttempts = 3;
 
         private static readonly TimeSpan NoSubscriberGracePeriod = TimeSpan.FromSeconds(2);
@@ -242,8 +242,14 @@ namespace Emby.Xtream.Plugin.Service
 
                                     chunk.Count = bytesRead;
                                     reconnectAttempts = 0;
-                                    Broadcast(chunk);
-                                    chunk.Release();
+                                    try
+                                    {
+                                        await BroadcastAsync(chunk, cancellationToken).ConfigureAwait(false);
+                                    }
+                                    finally
+                                    {
+                                        chunk.Release();
+                                    }
                                 }
                             }
                         }
@@ -311,13 +317,31 @@ namespace Emby.Xtream.Plugin.Service
                 return _subscribers.Count;
         }
 
-        private void Broadcast(SharedChunk chunk)
+        private async Task BroadcastAsync(SharedChunk chunk, CancellationToken cancellationToken)
         {
             FanoutSubscriber[] subscribers;
             lock (_fanoutLock)
             {
                 subscribers = new FanoutSubscriber[_subscribers.Count];
                 _subscribers.Values.CopyTo(subscribers, 0);
+            }
+
+            // With one viewer there is nobody else to protect from backpressure. Let
+            // TCP naturally slow the upstream producer when Emby/Android pauses its
+            // response writer during startup instead of terminating healthy playback.
+            if (subscribers.Length == 1)
+            {
+                var queued = await subscribers[0].EnqueueWithBackpressureAsync(
+                    chunk,
+                    () => GetSubscriberCount() == 1,
+                    cancellationToken).ConfigureAwait(false);
+                if (!queued)
+                {
+                    // The topology changed while backpressured. Re-evaluate using
+                    // shared-viewer isolation so a newly joined viewer is not stalled.
+                    await BroadcastAsync(chunk, cancellationToken).ConfigureAwait(false);
+                }
+                return;
             }
 
             foreach (var subscriber in subscribers)
@@ -487,7 +511,7 @@ namespace Emby.Xtream.Plugin.Service
                 subscriber.Complete(disposedError, true);
         }
 
-        private sealed class SharedChunk
+        internal sealed class SharedChunk
         {
             private int _referenceCount = 1;
 
@@ -511,15 +535,17 @@ namespace Emby.Xtream.Plugin.Service
             }
         }
 
-        private sealed class FanoutSubscriber
+        internal sealed class FanoutSubscriber
         {
             private readonly object _sync = new object();
             private readonly Queue<SharedChunk> _queue = new Queue<SharedChunk>();
             private readonly SemaphoreSlim _signal = new SemaphoreSlim(0);
+            private readonly SemaphoreSlim _spaceAvailable = new SemaphoreSlim(0, 1);
             private readonly int _maxBufferBytes;
 
             private int _queuedBytes;
             private bool _completed;
+            private bool _producerWaitingForSpace;
             private Exception _completionError;
 
             public FanoutSubscriber(long id, int maxBufferBytes)
@@ -554,6 +580,54 @@ namespace Emby.Xtream.Plugin.Service
                 }
             }
 
+            public async Task<bool> EnqueueWithBackpressureAsync(
+                SharedChunk chunk,
+                Func<bool> continueBackpressure,
+                CancellationToken cancellationToken)
+            {
+                while (true)
+                {
+                    lock (_sync)
+                    {
+                        if (_completed)
+                            return false;
+
+                        if (_queuedBytes + chunk.Count <= _maxBufferBytes)
+                        {
+                            _producerWaitingForSpace = false;
+                            chunk.AddReference();
+                            _queue.Enqueue(chunk);
+                            _queuedBytes += chunk.Count;
+                            _signal.Release();
+                            return true;
+                        }
+
+                        _producerWaitingForSpace = true;
+                    }
+
+                    if (continueBackpressure != null && !continueBackpressure())
+                    {
+                        lock (_sync)
+                            _producerWaitingForSpace = false;
+                        return false;
+                    }
+
+                    try
+                    {
+                        // Periodically re-check subscriber topology. A second viewer
+                        // must not inherit indefinite backpressure from a stalled first.
+                        await _spaceAvailable.WaitAsync(
+                            TimeSpan.FromMilliseconds(250),
+                            cancellationToken).ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        lock (_sync)
+                            _producerWaitingForSpace = false;
+                    }
+                }
+            }
+
             public async Task<SharedChunk> DequeueAsync(CancellationToken cancellationToken)
             {
                 while (true)
@@ -567,6 +641,7 @@ namespace Emby.Xtream.Plugin.Service
                         {
                             var chunk = _queue.Dequeue();
                             _queuedBytes -= chunk.Count;
+                            SignalProducerSpaceLocked();
                             return chunk;
                         }
 
@@ -598,7 +673,23 @@ namespace Emby.Xtream.Plugin.Service
                     _completionError = error;
                     if (discardBufferedData)
                         ReleaseQueuedChunksLocked();
+                    SignalProducerSpaceLocked();
                     _signal.Release();
+                }
+            }
+
+            private void SignalProducerSpaceLocked()
+            {
+                if (!_producerWaitingForSpace)
+                    return;
+
+                try
+                {
+                    _spaceAvailable.Release();
+                }
+                catch (SemaphoreFullException)
+                {
+                    // A dequeue already signaled the single upstream producer.
                 }
             }
 
