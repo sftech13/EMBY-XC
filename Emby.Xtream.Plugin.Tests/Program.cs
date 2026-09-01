@@ -29,6 +29,9 @@ namespace Emby.Xtream.Plugin.Tests
                 ("second live viewer exits single-viewer backpressure", SecondViewerEndsSingleViewerBackpressureAsync),
                 ("shared live viewer remains bounded when its queue fills", SharedViewerBufferRemainsBoundedAsync),
                 ("EPG time shift moves timestamps and clamps to twelve hours", EpgTimeShiftIsAppliedAndClampedAsync),
+                ("Live TV probe supplies bitrate and fractional frame rate", LiveTvProbeSuppliesPlaybackMetadataAsync),
+                ("Live TV probe estimates missing MPEG-TS bitrate from packets", LiveTvProbeEstimatesPacketBitRateAsync),
+                ("fresh Live TV probe cache avoids repeated background probes", LiveTvProbeCacheRefreshIsThrottledAsync),
             };
 
             foreach (var test in tests)
@@ -292,6 +295,81 @@ namespace Emby.Xtream.Plugin.Tests
                 "negative EPG shift must clamp at -12 hours");
             Assert(XtreamListingsProvider.ClampEpgTimeShiftHours(double.NaN) == 0,
                 "invalid EPG shift must fail safely to zero");
+            return Task.CompletedTask;
+        }
+
+        private static Task LiveTvProbeSuppliesPlaybackMetadataAsync()
+        {
+            const string json = @"{
+              ""streams"": [
+                {""codec_type"":""video"",""codec_name"":""hevc"",""width"":3840,""height"":2160,
+                 ""avg_frame_rate"":""60000/1001"",""r_frame_rate"":""60000/1001"",""bit_rate"":""48000000""},
+                {""codec_type"":""audio"",""codec_name"":""ac3"",""channels"":6,""bit_rate"":""448000"",
+                 ""tags"":{""language"":""eng""}}
+              ],
+              ""format"":{""bit_rate"":""48448000""}
+            }";
+
+            var info = StreamProbeService.ParseOutput(json);
+            Assert(info != null, "probe JSON must produce cached metadata");
+            Assert(info.VideoBitRate == 48_000_000, "declared video bitrate must be preserved");
+            Assert(info.AudioBitRate == 448_000, "declared audio bitrate must be preserved");
+            Assert(info.ContainerBitRate == 48_448_000, "container bitrate must be preserved");
+            Assert(Math.Abs(info.AverageFrameRate - 59.94006f) < 0.001f,
+                "60000/1001 must be parsed as 59.94 fps");
+
+            var streams = XtreamTunerHost.BuildMediaStreamsFromCache(info);
+            var video = streams.Single(stream => stream.Type == MediaBrowser.Model.Entities.MediaStreamType.Video);
+            var audio = streams.Single(stream => stream.Type == MediaBrowser.Model.Entities.MediaStreamType.Audio);
+            Assert(video.BitRate == 48_000_000, "Emby video stream must receive probe bitrate");
+            Assert(video.AverageFrameRate.HasValue && Math.Abs(video.AverageFrameRate.Value - 59.94006f) < 0.001f,
+                "Emby video stream must receive average frame rate");
+            Assert(audio.BitRate == 448_000, "Emby audio stream must receive probe bitrate");
+            return Task.CompletedTask;
+        }
+
+        private static Task LiveTvProbeEstimatesPacketBitRateAsync()
+        {
+            // 18.75 MB observed across the fixed three-second sample = 50 Mbps.
+            const string json = @"{
+              ""streams"": [
+                {""codec_type"":""video"",""codec_name"":""hevc"",""width"":3840,""height"":2160,
+                 ""avg_frame_rate"":""60/1""},
+                {""codec_type"":""audio"",""codec_name"":""ac3"",""channels"":6}
+              ],
+              ""format"":{},
+              ""packets"":[{""size"":""6000000""},{""size"":""6000000""},{""size"":""6750000""}]
+            }";
+
+            var info = StreamProbeService.ParseOutput(json);
+            Assert(info.ContainerBitRate == 50_000_000,
+                "packet sample must supply missing live MPEG-TS container bitrate");
+            Assert(info.VideoBitRate == 50_000_000,
+                "missing video bitrate must conservatively inherit observed source rate");
+            return Task.CompletedTask;
+        }
+
+        private static Task LiveTvProbeCacheRefreshIsThrottledAsync()
+        {
+            var now = new DateTimeOffset(2026, 9, 1, 12, 0, 0, TimeSpan.Zero);
+            var fresh = new StreamCodecInfo
+            {
+                ProbeVersion = StreamProbeService.CurrentProbeVersion,
+                CachedAt = now.AddHours(-1).ToUnixTimeSeconds(),
+            };
+            var old = new StreamCodecInfo
+            {
+                ProbeVersion = StreamProbeService.CurrentProbeVersion,
+                CachedAt = now.AddDays(-2).ToUnixTimeSeconds(),
+            };
+            var legacy = new StreamCodecInfo { CachedAt = now.AddMinutes(-1).ToUnixTimeSeconds() };
+
+            Assert(!StreamProbeService.NeedsBackgroundRefresh(fresh, now),
+                "a fresh cache entry must not start another provider probe");
+            Assert(StreamProbeService.NeedsBackgroundRefresh(old, now),
+                "an actively used older entry should refresh asynchronously");
+            Assert(StreamProbeService.NeedsBackgroundRefresh(legacy, now),
+                "a fresh legacy codec-only entry must be enriched once in the background");
             return Task.CompletedTask;
         }
 

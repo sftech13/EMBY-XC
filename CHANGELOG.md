@@ -4,6 +4,9 @@ All notable changes to XC2EMBY are listed here, newest first.
 
 ---
 
+## v1.1.129
+- Expanded the non-blocking Live TV codec probe cache to persist observed source bitrate and frame rate. Cached metadata is still returned immediately for fast tuning, active channels refresh at most once per day in the background, and Emby now receives the video/audio bitrate and frame-rate fields needed to avoid oversized 200 Mbps 4K transcodes when the source rate is lower.
+
 ## v1.1.128
 - Added an **EPG Time Shift** control under Live TV → EPG / Guide Data. Programme start/end times can be moved from −12 to +12 hours in 30-minute steps; guide source windows are adjusted inversely so boundary programmes are retained, and saving automatically refreshes guide data.
 - Fixed high-bitrate 4K Live TV viewers being disconnected when Android temporarily paused its response writer during startup. A sole viewer now applies natural TCP backpressure to the upstream stream instead of being dropped, while shared streams retain slow-viewer isolation with a larger bounded 64 MiB transient queue per viewer.

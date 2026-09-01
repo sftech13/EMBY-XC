@@ -779,7 +779,7 @@ namespace Emby.Xtream.Plugin.Service
             return mediaSource;
         }
 
-        private static List<MediaStream> BuildMediaStreamsFromCache(StreamCodecInfo info)
+        internal static List<MediaStream> BuildMediaStreamsFromCache(StreamCodecInfo info)
         {
             var streams = new List<MediaStream>();
             if (!string.IsNullOrEmpty(info.VideoCodec))
@@ -795,6 +795,9 @@ namespace Emby.Xtream.Plugin.Service
                 };
                 if (info.VideoWidth  > 0) vs.Width  = info.VideoWidth;
                 if (info.VideoHeight > 0) vs.Height = info.VideoHeight;
+                if (info.VideoBitRate > 0) vs.BitRate = info.VideoBitRate;
+                if (info.AverageFrameRate > 0) vs.AverageFrameRate = info.AverageFrameRate;
+                if (info.RealFrameRate > 0) vs.RealFrameRate = info.RealFrameRate;
                 if (!string.IsNullOrEmpty(info.ColorTransfer)) vs.ColorTransfer = info.ColorTransfer;
                 // DisplayTitle is what the OSD info panel concatenates directly into HTML —
                 // if it is null the JS produces the literal string "undefined" on screen.
@@ -813,6 +816,7 @@ namespace Emby.Xtream.Plugin.Service
                     Language  = lang,
                 };
                 if (info.AudioChannels > 0) as_.Channels = info.AudioChannels;
+                if (info.AudioBitRate > 0) as_.BitRate = info.AudioBitRate;
                 as_.DisplayTitle = BuildAudioDisplayTitle(info.AudioCodec, info.AudioChannels);
                 streams.Add(as_);
             }

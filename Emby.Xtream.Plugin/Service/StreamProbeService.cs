@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Threading.Tasks;
 using MediaBrowser.Model.Logging;
@@ -32,6 +33,14 @@ namespace Emby.Xtream.Plugin.Service
 
         // Cache entries older than this are treated as stale and re-probed on next tune.
         private static readonly TimeSpan CacheTtl = TimeSpan.FromDays(30);
+
+        // Keep fast startup by using a still-valid cache entry immediately, but refresh
+        // actively used channels in the background once per day. This catches provider
+        // codec/bitrate changes without blocking playback or probing on every tune.
+        private static readonly TimeSpan BackgroundRefreshInterval = TimeSpan.FromDays(1);
+
+        internal const int ProbeSampleSeconds = 3;
+        internal const int CurrentProbeVersion = 2;
 
         // ── Public API ────────────────────────────────────────────────────────
 
@@ -70,6 +79,14 @@ namespace Emby.Xtream.Plugin.Service
         /// </summary>
         public static void StartBackgroundProbe(int streamId, string url, ILogger logger)
         {
+            EnsureLoaded();
+            StreamCodecInfo existing;
+            if (_cache.TryGetValue(streamId, out existing) &&
+                !NeedsBackgroundRefresh(existing, DateTimeOffset.UtcNow))
+            {
+                return;
+            }
+
             if (!_inFlight.TryAdd(streamId, true)) return; // already in flight
 
             Task.Run(async () =>
@@ -79,11 +96,19 @@ namespace Emby.Xtream.Plugin.Service
                     var info = await ProbeAsync(url, logger).ConfigureAwait(false);
                     if (info != null)
                     {
+                        info.ProbeVersion = CurrentProbeVersion;
                         info.CachedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                         _cache[streamId] = info;
                         SaveToConfig();
-                        logger?.Info("[XtreamProbe] Cached codecs for stream {0}: video={1} range={2} audio={3}",
-                            streamId, info.VideoCodec ?? "?", GetVideoRange(info.ColorTransfer), info.AudioCodec ?? "?");
+                        logger?.Info(
+                            "[XtreamProbe] Cached media for stream {0}: video={1} {2}x{3} {4:0.##}fps bitrate={5} audio={6}",
+                            streamId,
+                            info.VideoCodec ?? "?",
+                            info.VideoWidth,
+                            info.VideoHeight,
+                            info.AverageFrameRate > 0 ? info.AverageFrameRate : info.RealFrameRate,
+                            FormatBitRate(info.ContainerBitRate > 0 ? info.ContainerBitRate : info.VideoBitRate),
+                            info.AudioCodec ?? "?");
                     }
                     else
                     {
@@ -166,11 +191,15 @@ namespace Emby.Xtream.Plugin.Service
                 return null;
             }
 
-            // Short analyzeduration/probesize so we get codec info quickly without
-            // buffering the whole stream; 2–3 s is usually enough for MPEG-TS.
+            // Sample only a few seconds. Packet sizes provide an observed container
+            // bitrate when MPEG-TS omits format/stream bit_rate, which is common for
+            // live IPTV. This remains a background operation and never delays tuning.
             var args = string.Format(
-                "-v quiet -print_format json -show_streams" +
-                " -analyzeduration 3000000 -probesize 2000000 -i \"{0}\"",
+                CultureInfo.InvariantCulture,
+                "-v quiet -print_format json -show_streams -show_format -show_packets" +
+                " -show_entries stream=codec_type,codec_name,width,height,color_transfer,channels,avg_frame_rate,r_frame_rate,bit_rate:stream_tags=language:format=bit_rate:packet=size" +
+                " -read_intervals %+{0} -analyzeduration 3000000 -probesize 2000000 -i \"{1}\"",
+                ProbeSampleSeconds,
                 url.Replace("\"", "\\\""));
 
             string output;
@@ -203,7 +232,7 @@ namespace Emby.Xtream.Plugin.Service
             return ParseOutput(output);
         }
 
-        private static StreamCodecInfo ParseOutput(string json)
+        internal static StreamCodecInfo ParseOutput(string json)
         {
             if (string.IsNullOrEmpty(json)) return null;
             try
@@ -215,6 +244,8 @@ namespace Emby.Xtream.Plugin.Service
 
                     string videoCodec = null, colorTransfer = null, audioCodec = null, audioLang = null;
                     int videoWidth = 0, videoHeight = 0, audioChannels = 0;
+                    int videoBitRate = 0, audioBitRate = 0, containerBitRate = 0;
+                    float averageFrameRate = 0, realFrameRate = 0;
 
                     foreach (var stream in streamsEl.EnumerateArray())
                     {
@@ -233,6 +264,12 @@ namespace Emby.Xtream.Plugin.Service
                                 videoHeight = el.TryGetInt32(out var h) ? h : 0;
                             if (stream.TryGetProperty("color_transfer", out el))
                                 colorTransfer = el.GetString();
+                            if (stream.TryGetProperty("avg_frame_rate", out el))
+                                averageFrameRate = ParseFrameRate(el);
+                            if (stream.TryGetProperty("r_frame_rate", out el))
+                                realFrameRate = ParseFrameRate(el);
+                            if (stream.TryGetProperty("bit_rate", out el))
+                                videoBitRate = ParsePositiveInt32(el);
                         }
                         else if (type == "audio" && audioCodec == null)
                         {
@@ -240,6 +277,8 @@ namespace Emby.Xtream.Plugin.Service
                                 audioCodec = el.GetString();
                             if (stream.TryGetProperty("channels", out el))
                                 audioChannels = el.TryGetInt32(out var ch) ? ch : 0;
+                            if (stream.TryGetProperty("bit_rate", out el))
+                                audioBitRate = ParsePositiveInt32(el);
                             // Language is nested under tags → language
                             STJ.JsonElement tagsEl;
                             if (stream.TryGetProperty("tags", out tagsEl))
@@ -251,6 +290,46 @@ namespace Emby.Xtream.Plugin.Service
                         }
                     }
 
+                    STJ.JsonElement formatEl;
+                    STJ.JsonElement bitRateEl;
+                    if (doc.RootElement.TryGetProperty("format", out formatEl) &&
+                        formatEl.TryGetProperty("bit_rate", out bitRateEl))
+                    {
+                        containerBitRate = ParsePositiveInt32(bitRateEl);
+                    }
+
+                    // Live MPEG-TS normally has no declared bitrate. Sum the packet
+                    // sizes from the fixed media-time sample to obtain a close observed
+                    // rate without downloading or retaining the video payload ourselves.
+                    long packetBytes = 0;
+                    STJ.JsonElement packetsEl;
+                    if (doc.RootElement.TryGetProperty("packets", out packetsEl) &&
+                        packetsEl.ValueKind == STJ.JsonValueKind.Array)
+                    {
+                        foreach (var packet in packetsEl.EnumerateArray())
+                        {
+                            STJ.JsonElement sizeEl;
+                            if (packet.TryGetProperty("size", out sizeEl))
+                                packetBytes += ParsePositiveInt64(sizeEl);
+                        }
+                    }
+
+                    if (containerBitRate <= 0 && packetBytes > 0)
+                    {
+                        var observed = packetBytes * 8L / ProbeSampleSeconds;
+                        if (observed >= 64_000 && observed <= 500_000_000)
+                            containerBitRate = (int)observed;
+                    }
+
+                    if (videoBitRate <= 0 && containerBitRate > 0)
+                    {
+                        // Emby needs a video bitrate to choose a sensible transcode
+                        // target. Using total minus known audio is conservative and is
+                        // much safer than allowing an unknown stream to inherit the
+                        // client's full (for example 200 Mbps) ceiling.
+                        videoBitRate = Math.Max(1, containerBitRate - Math.Max(0, audioBitRate));
+                    }
+
                     if (videoCodec == null && audioCodec == null) return null;
                     return new StreamCodecInfo
                     {
@@ -258,13 +337,69 @@ namespace Emby.Xtream.Plugin.Service
                         ColorTransfer = colorTransfer,
                         VideoWidth    = videoWidth,
                         VideoHeight   = videoHeight,
+                        VideoBitRate  = videoBitRate,
+                        ContainerBitRate = containerBitRate,
+                        AverageFrameRate = averageFrameRate,
+                        RealFrameRate = realFrameRate,
                         AudioCodec    = audioCodec,
                         AudioChannels = audioChannels,
+                        AudioBitRate  = audioBitRate,
                         AudioLanguage = audioLang,
                     };
                 }
             }
             catch { return null; }
+        }
+
+        internal static bool NeedsBackgroundRefresh(StreamCodecInfo info, DateTimeOffset now)
+        {
+            if (info == null || info.CachedAt <= 0 || info.ProbeVersion < CurrentProbeVersion)
+                return true;
+            var cachedAt = DateTimeOffset.FromUnixTimeSeconds(info.CachedAt);
+            return now - cachedAt >= BackgroundRefreshInterval;
+        }
+
+        private static int ParsePositiveInt32(STJ.JsonElement value)
+        {
+            var parsed = ParsePositiveInt64(value);
+            return parsed > int.MaxValue ? int.MaxValue : (int)parsed;
+        }
+
+        private static long ParsePositiveInt64(STJ.JsonElement value)
+        {
+            long parsed;
+            if (value.ValueKind == STJ.JsonValueKind.Number && value.TryGetInt64(out parsed))
+                return Math.Max(0, parsed);
+            if (value.ValueKind == STJ.JsonValueKind.String &&
+                long.TryParse(value.GetString(), NumberStyles.None, CultureInfo.InvariantCulture, out parsed))
+                return Math.Max(0, parsed);
+            return 0;
+        }
+
+        private static float ParseFrameRate(STJ.JsonElement value)
+        {
+            var text = value.ValueKind == STJ.JsonValueKind.String
+                ? value.GetString()
+                : value.GetRawText();
+            if (string.IsNullOrWhiteSpace(text) || text == "0/0") return 0;
+
+            var parts = text.Split('/');
+            double numerator;
+            double denominator = 1;
+            if (!double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out numerator))
+                return 0;
+            if (parts.Length > 1 &&
+                (!double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out denominator) || denominator == 0))
+                return 0;
+
+            var fps = numerator / denominator;
+            return fps > 0 && fps <= 1000 ? (float)fps : 0;
+        }
+
+        private static string FormatBitRate(int bitRate)
+        {
+            if (bitRate <= 0) return "?";
+            return (bitRate / 1_000_000d).ToString("0.##", CultureInfo.InvariantCulture) + "Mbps";
         }
 
         private static string GetVideoRange(string colorTransfer)
@@ -337,13 +472,21 @@ namespace Emby.Xtream.Plugin.Service
 
     internal class StreamCodecInfo
     {
+        /// <summary>Cache schema/probe generation used to refresh older entries once.</summary>
+        public int ProbeVersion { get; set; }
+
         public string VideoCodec  { get; set; }
         public string ColorTransfer { get; set; }
         public int    VideoWidth  { get; set; }
         public int    VideoHeight { get; set; }
+        public int    VideoBitRate { get; set; }
+        public int    ContainerBitRate { get; set; }
+        public float  AverageFrameRate { get; set; }
+        public float  RealFrameRate { get; set; }
 
         public string AudioCodec    { get; set; }
         public int    AudioChannels { get; set; }
+        public int    AudioBitRate   { get; set; }
         public string AudioLanguage { get; set; }
 
         /// <summary>Unix seconds (UTC) when this entry was probed.</summary>
