@@ -3711,7 +3711,7 @@ namespace Emby.Xtream.Plugin.Service
                     Math.Max(1, config.SyncParallelism),
                     Math.Max(1, config.TunerCount))));
             var gate = new SemaphoreSlim(parallelism, parallelism);
-            var validator = new EpisodePlaybackValidator(_httpClient);
+            var validator = new EpisodePlaybackValidator(_httpClient, config.HttpUserAgent);
             var tasks = orderedCandidates.Select(async candidate =>
             {
                 await gate.WaitAsync(cancellationToken).ConfigureAwait(false);

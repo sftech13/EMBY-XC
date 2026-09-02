@@ -4,6 +4,10 @@ All notable changes to XC2EMBY are listed here, newest first.
 
 ---
 
+## v1.1.130
+- Playback validation now identifies its 1 KB Range GET as a media request, using the configured HTTP user-agent or a VLC-compatible fallback when unset. This prevents providers that reject anonymous .NET requests with HTTP 405 from obscuring working episode streams; HTTP 200/206 media remains alive, while HTTP 405 remains safely inconclusive.
+- Fixed shared Live TV ending for a Windows/web remux shortly after an Android direct-play client stopped. New streams now count their original Emby consumer, so mixed direct/remux playback reaches two consumers and stopping either client leaves the shared upstream active for the other.
+
 ## v1.1.129
 - Expanded the non-blocking Live TV codec probe cache to persist observed source bitrate and frame rate. Cached metadata is still returned immediately for fast tuning, active channels refresh at most once per day in the background, and Emby now receives the video/audio bitrate and frame-rate fields needed to avoid oversized 200 Mbps 4K transcodes when the source rate is lower.
 

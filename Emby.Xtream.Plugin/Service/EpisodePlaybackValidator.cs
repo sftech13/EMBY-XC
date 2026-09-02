@@ -61,11 +61,16 @@ namespace Emby.Xtream.Plugin.Service
     {
         internal const int RangeBytes = 1024;
         internal const int MaxRedirects = 5;
+        internal const string DefaultMediaUserAgent = "VLC/3.0.20 LibVLC/3.0.20";
         private readonly HttpClient _httpClient;
+        private readonly string _userAgent;
 
-        public EpisodePlaybackValidator(HttpClient httpClient)
+        public EpisodePlaybackValidator(HttpClient httpClient, string userAgent = null)
         {
             _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+            _userAgent = string.IsNullOrWhiteSpace(userAgent)
+                ? DefaultMediaUserAgent
+                : userAgent.Trim();
         }
 
         public async Task<EpisodePlaybackResult> ValidateAsync(
@@ -94,6 +99,7 @@ namespace Emby.Xtream.Plugin.Service
                         // Reapply Range on every hop. Some Xtream frontends redirect
                         // through a local proxy and then to object storage.
                         request.Headers.Range = new RangeHeaderValue(0, RangeBytes - 1);
+                        request.Headers.TryAddWithoutValidation("User-Agent", _userAgent);
                         using (var response = await _httpClient.SendAsync(
                             request,
                             HttpCompletionOption.ResponseHeadersRead,
@@ -147,7 +153,7 @@ namespace Emby.Xtream.Plugin.Service
                             {
                                 return Inconclusive(
                                     status,
-                                    "playback endpoint returned non-definitive HTTP " +
+                                    "Range GET playback endpoint returned non-definitive HTTP " +
                                     status.ToString(CultureInfo.InvariantCulture),
                                     mediaType);
                             }
@@ -156,7 +162,7 @@ namespace Emby.Xtream.Plugin.Service
                             {
                                 return Inconclusive(
                                     status,
-                                    "playback endpoint returned HTTP " +
+                                    "Range GET playback endpoint returned HTTP " +
                                     status.ToString(CultureInfo.InvariantCulture) +
                                     " with non-media content type '" + mediaType + "'",
                                     mediaType);
@@ -185,7 +191,7 @@ namespace Emby.Xtream.Plugin.Service
                             {
                                 return Inconclusive(
                                     status,
-                                    "playback endpoint returned media headers but no data",
+                                    "Range GET playback endpoint returned media headers but no data",
                                     mediaType);
                             }
 
@@ -195,7 +201,7 @@ namespace Emby.Xtream.Plugin.Service
                                 StatusCode = status,
                                 ContentType = mediaType,
                                 BytesRead = bytesRead,
-                                Detail = "playback endpoint returned HTTP " +
+                                Detail = "Range GET playback endpoint returned HTTP " +
                                     status.ToString(CultureInfo.InvariantCulture) +
                                     " media data after " +
                                     redirectCount.ToString(CultureInfo.InvariantCulture) +

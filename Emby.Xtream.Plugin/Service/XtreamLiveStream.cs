@@ -48,6 +48,12 @@ namespace Emby.Xtream.Plugin.Service
             TunerHostId = tunerHostId;
             OriginalStreamId = mediaSource.Id;
             DateOpened = DateTimeOffset.UtcNow;
+            // Emby 4.8/4.9 increments ConsumerCount only when it reuses this
+            // ILiveStream for an additional client. The newly opened stream already
+            // represents its first consumer, matching Emby's built-in LiveStream.
+            // Starting at zero makes a direct client plus a remux client look like a
+            // single consumer, so stopping either one closes the other's upstream.
+            _consumerCount = 1;
         }
 
         // Emby 4.10 added AddConsumer(string)/RemoveConsumer(string) to ILiveStream and made

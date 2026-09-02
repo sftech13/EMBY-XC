@@ -20,6 +20,7 @@ namespace Emby.Xtream.Plugin.Tests
             {
                 ("empty series detail + HTTP 206 preserves every STRM", EmptyDetailAndWorkingEpisodesPreserveAllAsync),
                 ("HTTP 200 media is alive", Http200MediaIsAliveAsync),
+                ("HTTP 405 from Range GET is inconclusive", Http405RangeGetIsInconclusiveAsync),
                 ("redirect chain retains Range GET and resolves HTTP 206", RedirectChainResolvesMediaAsync),
                 ("same 404 on two separate runs qualifies one episode", TwoSeparate404RunsAreRequiredAsync),
                 ("definitive failure state survives restart serialization", FailureStateSurvivesSerializationAsync),
@@ -28,6 +29,7 @@ namespace Emby.Xtream.Plugin.Tests
                 ("single live viewer backpressures instead of being dropped", SingleViewerBackpressurePreservesSubscriberAsync),
                 ("second live viewer exits single-viewer backpressure", SecondViewerEndsSingleViewerBackpressureAsync),
                 ("shared live viewer remains bounded when its queue fills", SharedViewerBufferRemainsBoundedAsync),
+                ("mixed direct and remux consumers keep the shared stream alive", MixedLiveConsumersRemainCountedAsync),
                 ("EPG time shift moves timestamps and clamps to twelve hours", EpgTimeShiftIsAppliedAndClampedAsync),
                 ("Live TV probe supplies bitrate and fractional frame rate", LiveTvProbeSuppliesPlaybackMetadataAsync),
                 ("Live TV probe estimates missing MPEG-TS bitrate from packets", LiveTvProbeEstimatesPacketBitRateAsync),
@@ -85,8 +87,9 @@ namespace Emby.Xtream.Plugin.Tests
             Assert(handler.Requests.All(request =>
                 request.Method == HttpMethod.Get &&
                 request.Headers.Range?.Ranges.Single().From == 0 &&
-                request.Headers.Range?.Ranges.Single().To == EpisodePlaybackValidator.RangeBytes - 1),
-                "validation must use a 1 KB Range GET, never HEAD");
+                request.Headers.Range?.Ranges.Single().To == EpisodePlaybackValidator.RangeBytes - 1 &&
+                request.Headers.UserAgent.ToString() == EpisodePlaybackValidator.DefaultMediaUserAgent),
+                "validation must use a VLC-compatible 1 KB Range GET, never HEAD");
         }
 
         private static async Task Http200MediaIsAliveAsync()
@@ -97,6 +100,24 @@ namespace Emby.Xtream.Plugin.Tests
                 "https://provider.invalid/series/u/p/1.mkv",
                 CancellationToken.None).ConfigureAwait(false);
             Assert(result.Kind == EpisodePlaybackResultKind.Alive, "HTTP 200 media data must be alive");
+        }
+
+        private static async Task Http405RangeGetIsInconclusiveAsync()
+        {
+            var handler = new QueueHandler(new HttpResponseMessage(HttpStatusCode.MethodNotAllowed));
+            var validator = new EpisodePlaybackValidator(new HttpClient(handler));
+            var result = await validator.ValidateAsync(
+                "https://provider.invalid/series/u/p/1.mkv",
+                CancellationToken.None).ConfigureAwait(false);
+
+            Assert(result.Kind == EpisodePlaybackResultKind.Inconclusive,
+                "HTTP 405 must preserve the episode as inconclusive");
+            Assert(result.StatusCode == 405, "HTTP 405 must be recorded for diagnostics");
+            Assert(handler.Requests.Single().Method == HttpMethod.Get,
+                "HTTP 405 must have resulted from a GET, not a HEAD request");
+            Assert(handler.Requests.Single().Headers.Range?.Ranges.Single().From == 0 &&
+                handler.Requests.Single().Headers.Range?.Ranges.Single().To == EpisodePlaybackValidator.RangeBytes - 1,
+                "the HTTP 405 request must still be a bounded 1 KB Range GET");
         }
 
         private static async Task RedirectChainResolvesMediaAsync()
@@ -273,6 +294,40 @@ namespace Emby.Xtream.Plugin.Tests
             };
         }
 
+        private static Task MixedLiveConsumersRemainCountedAsync()
+        {
+            using (var httpClient = new HttpClient())
+            using (var stream = new XtreamLiveStream(
+                new MediaBrowser.Model.Dto.MediaSourceInfo { Id = "xtream_live_test" },
+                "test-tuner",
+                httpClient))
+            {
+                Assert(stream.ConsumerCount == 1,
+                    "a newly opened ILiveStream must count its original consumer");
+
+                // Emby 4.8/4.9 shares a remux by updating the property directly.
+                stream.ConsumerCount++;
+                Assert(stream.ConsumerCount == 2,
+                    "a direct client plus a remux client must count as two consumers");
+                stream.ConsumerCount--;
+                Assert(stream.ConsumerCount == 1,
+                    "stopping one mixed client must leave the other consumer active");
+
+                // Emby 4.10 uses the compatibility methods for the same lifecycle.
+                stream.AddConsumer("second-client");
+                Assert(stream.ConsumerCount == 2,
+                    "AddConsumer must retain the original consumer");
+                stream.RemoveConsumer("first-client");
+                Assert(stream.ConsumerCount == 1,
+                    "RemoveConsumer must not close the remaining shared consumer");
+                stream.RemoveConsumer("second-client");
+                Assert(stream.ConsumerCount == 0,
+                    "the final consumer removal must reach zero exactly once");
+            }
+
+            return Task.CompletedTask;
+        }
+
         private static Task EpgTimeShiftIsAppliedAndClampedAsync()
         {
             var source = new DateTimeOffset(2026, 9, 1, 12, 0, 0, TimeSpan.Zero);
@@ -407,6 +462,8 @@ namespace Emby.Xtream.Plugin.Tests
                     copy.Headers.Range = new RangeHeaderValue(
                         request.Headers.Range.Ranges.Single().From,
                         request.Headers.Range.Ranges.Single().To);
+                foreach (var userAgent in request.Headers.UserAgent)
+                    copy.Headers.UserAgent.Add(userAgent);
                 Requests.Add(copy);
                 return Task.FromResult(_responses.Dequeue());
             }
