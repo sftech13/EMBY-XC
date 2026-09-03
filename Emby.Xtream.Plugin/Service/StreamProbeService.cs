@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 using MediaBrowser.Model.Logging;
 using STJ = System.Text.Json;
@@ -21,9 +22,10 @@ namespace Emby.Xtream.Plugin.Service
         private static ConcurrentDictionary<int, StreamCodecInfo> _cache =
             new ConcurrentDictionary<int, StreamCodecInfo>();
 
-        // Tracks streams currently being probed so we don't fire duplicates.
-        private static readonly ConcurrentDictionary<int, bool> _inFlight =
-            new ConcurrentDictionary<int, bool>();
+        // Share the actual task, not just an in-flight flag, so a cold tune can wait
+        // briefly for the same probe already started by the channel details page.
+        private static readonly ConcurrentDictionary<int, Lazy<Task<StreamCodecInfo>>> _inFlight =
+            new ConcurrentDictionary<int, Lazy<Task<StreamCodecInfo>>>();
 
         private static volatile bool _loaded;
         private static readonly object _loadLock = new object();
@@ -41,6 +43,7 @@ namespace Emby.Xtream.Plugin.Service
 
         internal const int ProbeSampleSeconds = 3;
         internal const int CurrentProbeVersion = 2;
+        internal static readonly TimeSpan FirstTuneProbeWait = TimeSpan.FromSeconds(5);
 
         // ── Public API ────────────────────────────────────────────────────────
 
@@ -87,44 +90,134 @@ namespace Emby.Xtream.Plugin.Service
                 return;
             }
 
-            if (!_inFlight.TryAdd(streamId, true)) return; // already in flight
+            // ProbeAndCacheAsync catches probe failures, so this intentionally
+            // fire-and-forgets without creating an unobserved faulted task.
+            _ = GetOrStartProbeTask(streamId, url, logger);
+        }
 
-            Task.Run(async () =>
+        /// <summary>
+        /// Returns cached metadata immediately, or waits a short bounded interval for
+        /// the one shared probe task on a channel's first tune. The probe keeps running
+        /// in the background after a caller timeout so the next tune can use its result.
+        /// </summary>
+        public static async Task<StreamCodecInfo> GetOrProbeAsync(
+            int streamId,
+            string url,
+            ILogger logger,
+            CancellationToken cancellationToken)
+        {
+            var cached = GetCachedInfo(streamId);
+            if (cached != null && cached.ProbeVersion >= CurrentProbeVersion)
+                return cached;
+
+            logger?.Info(
+                "[XtreamProbe] No current media probe for stream {0}; waiting up to {1:0.#}s before first tune",
+                streamId,
+                FirstTuneProbeWait.TotalSeconds);
+
+            var probeTask = GetOrStartProbeTask(streamId, url, logger);
+            var result = await AwaitProbeAsync(
+                probeTask,
+                FirstTuneProbeWait,
+                cancellationToken).ConfigureAwait(false);
+            if (result == null && !probeTask.IsCompleted)
             {
-                try
+                logger?.Warn(
+                    "[XtreamProbe] First-tune wait expired for stream {0}; using fallback media metadata while the shared probe continues",
+                    streamId);
+            }
+
+            // Cover the narrow race where the probe populated the cache immediately
+            // after the bounded wait completed.
+            return result ?? GetCachedInfo(streamId) ?? cached;
+        }
+
+        internal static async Task<StreamCodecInfo> AwaitProbeAsync(
+            Task<StreamCodecInfo> probeTask,
+            TimeSpan timeout,
+            CancellationToken cancellationToken)
+        {
+            if (probeTask == null)
+                return null;
+
+            using (var delayCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+            {
+                var delayTask = Task.Delay(timeout, delayCancellation.Token);
+                var completed = await Task.WhenAny(probeTask, delayTask).ConfigureAwait(false);
+                if (completed == probeTask)
                 {
-                    var info = await ProbeAsync(url, logger).ConfigureAwait(false);
-                    if (info != null)
-                    {
-                        info.ProbeVersion = CurrentProbeVersion;
-                        info.CachedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                        _cache[streamId] = info;
-                        SaveToConfig();
-                        logger?.Info(
-                            "[XtreamProbe] Cached media for stream {0}: video={1} {2}x{3} {4:0.##}fps bitrate={5} audio={6}",
-                            streamId,
-                            info.VideoCodec ?? "?",
-                            info.VideoWidth,
-                            info.VideoHeight,
-                            info.AverageFrameRate > 0 ? info.AverageFrameRate : info.RealFrameRate,
-                            FormatBitRate(info.ContainerBitRate > 0 ? info.ContainerBitRate : info.VideoBitRate),
-                            info.AudioCodec ?? "?");
-                    }
-                    else
-                    {
-                        logger?.Debug("[XtreamProbe] No codec info returned for stream {0}", streamId);
-                    }
+                    delayCancellation.Cancel();
+                    return await probeTask.ConfigureAwait(false);
                 }
-                catch (Exception ex)
+
+                cancellationToken.ThrowIfCancellationRequested();
+                return null;
+            }
+        }
+
+        private static Task<StreamCodecInfo> GetOrStartProbeTask(
+            int streamId,
+            string url,
+            ILogger logger)
+        {
+            var lazy = _inFlight.GetOrAdd(
+                streamId,
+                _ => new Lazy<Task<StreamCodecInfo>>(
+                    () => Task.Run(() => ProbeAndCacheAsync(streamId, url, logger)),
+                    LazyThreadSafetyMode.ExecutionAndPublication));
+            return AwaitAndReleaseProbeAsync(streamId, lazy);
+        }
+
+        private static async Task<StreamCodecInfo> AwaitAndReleaseProbeAsync(
+            int streamId,
+            Lazy<Task<StreamCodecInfo>> lazy)
+        {
+            try
+            {
+                return await lazy.Value.ConfigureAwait(false);
+            }
+            finally
+            {
+                Lazy<Task<StreamCodecInfo>> current;
+                if (_inFlight.TryGetValue(streamId, out current) && ReferenceEquals(current, lazy))
+                    _inFlight.TryRemove(streamId, out current);
+            }
+        }
+
+        private static async Task<StreamCodecInfo> ProbeAndCacheAsync(
+            int streamId,
+            string url,
+            ILogger logger)
+        {
+            try
+            {
+                var info = await ProbeAsync(url, logger).ConfigureAwait(false);
+                if (info == null)
                 {
-                    logger?.Warn("[XtreamProbe] Probe failed for stream {0}: {1}", streamId, ex.Message);
+                    logger?.Debug("[XtreamProbe] No codec info returned for stream {0}", streamId);
+                    return null;
                 }
-                finally
-                {
-                    bool dummy;
-                    _inFlight.TryRemove(streamId, out dummy);
-                }
-            });
+
+                info.ProbeVersion = CurrentProbeVersion;
+                info.CachedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                _cache[streamId] = info;
+                SaveToConfig();
+                logger?.Info(
+                    "[XtreamProbe] Cached media for stream {0}: video={1} {2}x{3} {4:0.##}fps bitrate={5} audio={6}",
+                    streamId,
+                    info.VideoCodec ?? "?",
+                    info.VideoWidth,
+                    info.VideoHeight,
+                    info.AverageFrameRate > 0 ? info.AverageFrameRate : info.RealFrameRate,
+                    FormatBitRate(info.ContainerBitRate > 0 ? info.ContainerBitRate : info.VideoBitRate),
+                    info.AudioCodec ?? "?");
+                return info;
+            }
+            catch (Exception ex)
+            {
+                logger?.Warn("[XtreamProbe] Probe failed for stream {0}: {1}", streamId, ex.Message);
+                return null;
+            }
         }
 
         // ── Config persistence ────────────────────────────────────────────────

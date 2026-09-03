@@ -443,20 +443,33 @@ namespace Emby.Xtream.Plugin.Service
                 ?? new List<Client.Models.LiveStreamInfo>();
         }
 
-        protected override Task<List<MediaSourceInfo>> GetChannelStreamMediaSources(
+        protected override async Task<List<MediaSourceInfo>> GetChannelStreamMediaSources(
             TunerHostInfo tuner, MediaBrowser.Controller.Entities.BaseItem dbChannel,
             ChannelInfo tunerChannel, CancellationToken cancellationToken)
         {
             if (!TryResolveStreamId(tunerChannel, out int streamId))
             {
-                return Task.FromResult(new List<MediaSourceInfo>());
+                return new List<MediaSourceInfo>();
             }
 
             var config = Plugin.Instance.Configuration;
             var streamUrl = XtreamUrlBuilder.BuildStreamUrl(config, streamId);
-            var mediaSource = CreateMediaSourceInfo(streamId, streamUrl, config.HttpUserAgent);
+            // Emby selects direct-play/remux/transcode before opening ILiveStream. On a
+            // cold channel, returning the old H.264/AC3 placeholder immediately makes
+            // that first decision wrong for HEVC/EAC3 and leaves bitrate at the client's
+            // ceiling. Wait briefly for the shared probe; all cached tunes stay instant.
+            var probed = await StreamProbeService.GetOrProbeAsync(
+                streamId,
+                streamUrl,
+                Logger,
+                cancellationToken).ConfigureAwait(false);
+            var mediaSource = CreateMediaSourceInfo(
+                streamId,
+                streamUrl,
+                config.HttpUserAgent,
+                probed);
 
-            return Task.FromResult(new List<MediaSourceInfo> { mediaSource });
+            return new List<MediaSourceInfo> { mediaSource };
         }
 
         protected override Task<ILiveStream> GetChannelStream(
@@ -725,12 +738,16 @@ namespace Emby.Xtream.Plugin.Service
             return int.TryParse(id, NumberStyles.None, CultureInfo.InvariantCulture, out streamId);
         }
 
-        private MediaSourceInfo CreateMediaSourceInfo(int streamId, string streamUrl, string userAgent = null)
+        private MediaSourceInfo CreateMediaSourceInfo(
+            int streamId,
+            string streamUrl,
+            string userAgent = null,
+            StreamCodecInfo probedInfo = null)
         {
             var config   = Plugin.Instance.Configuration;
             var sourceId = "xtream_live_" + streamId.ToString(CultureInfo.InvariantCulture);
             var isTsOutput = string.Equals(config.LiveTvOutputFormat, "ts", StringComparison.OrdinalIgnoreCase);
-            var cached = StreamProbeService.GetCachedInfo(streamId);
+            var cached = probedInfo ?? StreamProbeService.GetCachedInfo(streamId);
             var streams = cached != null ? BuildMediaStreamsFromCache(cached) : BuildDefaultMediaStreams();
 
             // Direct play: the client connects straight to the IPTV URL — no ffmpeg pipeline,
@@ -773,7 +790,8 @@ namespace Emby.Xtream.Plugin.Service
                 };
             }
 
-            // Fire background ffprobe so first tune populates codec metadata for later tunes.
+            // Refresh stale metadata in the background. For a cold media-source request,
+            // GetChannelStreamMediaSources already performed the bounded first-tune wait.
             StreamProbeService.StartBackgroundProbe(streamId, streamUrl, Logger);
 
             return mediaSource;

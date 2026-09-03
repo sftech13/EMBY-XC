@@ -4,6 +4,10 @@ All notable changes to XC2EMBY are listed here, newest first.
 
 ---
 
+## v1.1.131
+- Fixed first-tune failures for uncached HEVC/EAC3 Live TV channels and oversized first-tune H.264 remux targets. The initial media-source request now waits up to five seconds for the single shared codec/bitrate probe, while cached tunes remain immediate and a slow probe continues safely in the background after the bounded wait.
+- Sanitized diagnostic exports now redact bracketed IPv6 URL hosts, unbracketed Emby source/client/remote IPv6 fields, and scoped link-local addresses while preserving timestamps and version numbers.
+
 ## v1.1.130
 - Playback validation now identifies its 1 KB Range GET as a media request, using the configured HTTP user-agent or a VLC-compatible fallback when unset. This prevents providers that reject anonymous .NET requests with HTTP 405 from obscuring working episode streams; HTTP 200/206 media remains alive, while HTTP 405 remains safely inconclusive.
 - Fixed shared Live TV ending for a Windows/web remux shortly after an Android direct-play client stopped. New streams now count their original Emby consumer, so mixed direct/remux playback reaches two consumers and stopping either client leaves the shared upstream active for the other.

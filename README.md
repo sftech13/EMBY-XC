@@ -427,7 +427,7 @@ Custom remove terms (one per line in the Movies/Series tab) are also applied.
 
 ## Codec Detection & OSD Display
 
-On the first tune of any channel, the plugin fires a background `ffprobe` process against the stream URL. This runs asynchronously and does not block playback.
+On the first tune of an uncached channel, the plugin starts one shared `ffprobe` process and waits up to five seconds for its result before returning media information to Emby. This lets Emby choose the correct playback path for HEVC/EAC3 and avoids using the client's maximum bitrate as an unknown H.264 remux target. If the bounded wait expires, playback continues with fallback metadata while the same probe finishes in the background.
 
 When the probe completes (up to 15 seconds), the result is cached:
 
@@ -435,11 +435,13 @@ When the probe completes (up to 15 seconds), the result is cached:
 |---|---|
 | Video codec | `h264`, `hevc` |
 | Video resolution | `1920 × 1080` |
+| Video frame rate | `59.94 fps` |
+| Observed source bitrate | `6.03 Mbps` |
 | Audio codec | `ac3`, `aac` |
 | Audio channels | `6` (5.1) |
 | Audio language | `eng` |
 
-On **subsequent tunes**, Emby uses the cached data directly and skips its own probe entirely. The player OSD displays:
+On **subsequent tunes**, Emby uses the cached data immediately and skips its own probe entirely. The player OSD displays:
 
 - **Video:** `H264 1080p`, `HEVC 4K`, `MPEG2 720p`, etc.
 - **Audio:** `AC3 5.1`, `AAC stereo`, `EAC3 7.1`, etc.

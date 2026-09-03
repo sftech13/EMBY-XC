@@ -1,6 +1,7 @@
 using System;
 using System.Buffers;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -34,6 +35,9 @@ namespace Emby.Xtream.Plugin.Tests
                 ("Live TV probe supplies bitrate and fractional frame rate", LiveTvProbeSuppliesPlaybackMetadataAsync),
                 ("Live TV probe estimates missing MPEG-TS bitrate from packets", LiveTvProbeEstimatesPacketBitRateAsync),
                 ("fresh Live TV probe cache avoids repeated background probes", LiveTvProbeCacheRefreshIsThrottledAsync),
+                ("cold Live TV tune receives completed probe metadata", ColdLiveTvTuneAwaitsProbeAsync),
+                ("cold Live TV probe wait remains bounded", ColdLiveTvProbeWaitIsBoundedAsync),
+                ("sanitized logs redact IPv6 addresses", SanitizedLogsRedactIpv6Async),
             };
 
             foreach (var test in tests)
@@ -425,6 +429,73 @@ namespace Emby.Xtream.Plugin.Tests
                 "an actively used older entry should refresh asynchronously");
             Assert(StreamProbeService.NeedsBackgroundRefresh(legacy, now),
                 "a fresh legacy codec-only entry must be enriched once in the background");
+            return Task.CompletedTask;
+        }
+
+        private static async Task ColdLiveTvTuneAwaitsProbeAsync()
+        {
+            var expected = new StreamCodecInfo
+            {
+                VideoCodec = "hevc",
+                AudioCodec = "eac3",
+                ContainerBitRate = 6_030_000,
+            };
+            var completion = new TaskCompletionSource<StreamCodecInfo>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(20).ConfigureAwait(false);
+                completion.TrySetResult(expected);
+            });
+
+            var actual = await StreamProbeService.AwaitProbeAsync(
+                completion.Task,
+                TimeSpan.FromSeconds(1),
+                CancellationToken.None).ConfigureAwait(false);
+
+            Assert(ReferenceEquals(actual, expected),
+                "the first media-source request must receive probe metadata completed within the wait");
+            Assert(actual.VideoCodec == "hevc" && actual.AudioCodec == "eac3",
+                "the first tune must see actual HEVC/EAC3 instead of fallback H.264/AC3");
+        }
+
+        private static async Task ColdLiveTvProbeWaitIsBoundedAsync()
+        {
+            var neverCompletes = new TaskCompletionSource<StreamCodecInfo>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var stopwatch = Stopwatch.StartNew();
+            var actual = await StreamProbeService.AwaitProbeAsync(
+                neverCompletes.Task,
+                TimeSpan.FromMilliseconds(50),
+                CancellationToken.None).ConfigureAwait(false);
+
+            Assert(actual == null, "a probe that exceeds the first-tune wait must fall back safely");
+            Assert(stopwatch.Elapsed < TimeSpan.FromSeconds(2),
+                "the first-tune probe wait must never become an unbounded playback delay");
+        }
+
+        private static Task SanitizedLogsRedactIpv6Async()
+        {
+            const string ipv6 = "2001:db8:85a3::8a2e:370:7334";
+            var line = "2026-09-02 20:38:10.790 Info XtreamTunerApi: http://[" + ipv6 +
+                "]:8096/emby/XC2EMBY/ValidateStrmPath. Source Ip: " + ipv6 +
+                ", Version=4.9.5.0";
+            var sanitized = LogSanitizer.SanitizeLine(line, string.Empty, string.Empty);
+
+            Assert(!sanitized.Contains(ipv6), "sanitized exports must not retain an IPv6 address");
+            Assert(sanitized.Contains("http://[<ip-redacted>]:8096"),
+                "bracketed IPv6 URL hosts must be redacted without damaging the port");
+            Assert(sanitized.Contains("Source Ip: <ip-redacted>"),
+                "unbracketed Emby Source Ip values must be redacted");
+            Assert(sanitized.Contains("Version=4.9.5.0"),
+                "IPv6 sanitization must not damage version or timestamp text");
+
+            var scoped = LogSanitizer.SanitizeLine(
+                "Source Ip: fe80::1234%eth0, request accepted",
+                string.Empty,
+                string.Empty);
+            Assert(!scoped.Contains("fe80::1234"),
+                "scoped link-local IPv6 addresses must also be redacted");
             return Task.CompletedTask;
         }
 
