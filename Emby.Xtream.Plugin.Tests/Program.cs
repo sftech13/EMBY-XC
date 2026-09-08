@@ -496,6 +496,19 @@ namespace Emby.Xtream.Plugin.Tests
                 string.Empty);
             Assert(!scoped.Contains("fe80::1234"),
                 "scoped link-local IPv6 addresses must also be redacted");
+
+            var responseLine = "2026-09-08 07:15:30.125 Info XtreamTunerApi: http/1.1 Response 200 to " +
+                ipv6 + ". Time: 1ms. POST http://[" + ipv6 + "]:8096/emby";
+            var responseSanitized = LogSanitizer.SanitizeLine(
+                responseLine,
+                string.Empty,
+                string.Empty);
+            Assert(!responseSanitized.Contains(ipv6),
+                "Emby response logs must not retain an unbracketed IPv6 client address");
+            Assert(responseSanitized.Contains("Response 200 to <ip-redacted>. Time: 1ms"),
+                "unbracketed Response status client addresses must be redacted in place");
+            Assert(responseSanitized.Contains("2026-09-08 07:15:30.125"),
+                "response IPv6 sanitization must preserve timestamps");
             return Task.CompletedTask;
         }
 

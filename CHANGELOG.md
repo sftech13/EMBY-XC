@@ -4,6 +4,9 @@ All notable changes to XC2EMBY are listed here, newest first.
 
 ---
 
+## v1.1.132
+- Extended diagnostic-log IPv6 sanitization to Emby's unbracketed `Response <status> to <address>` entries while preserving the response status, timing, and log timestamp.
+
 ## v1.1.131
 - Fixed first-tune failures for uncached HEVC/EAC3 Live TV channels and oversized first-tune H.264 remux targets. The initial media-source request now waits up to five seconds for the single shared codec/bitrate probe, while cached tunes remain immediate and a slow probe continues safely in the background after the bounded wait.
 - Sanitized diagnostic exports now redact bracketed IPv6 URL hosts, unbracketed Emby source/client/remote IPv6 fields, and scoped link-local addresses while preserving timestamps and version numbers.

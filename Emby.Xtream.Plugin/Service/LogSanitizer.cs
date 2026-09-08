@@ -18,6 +18,10 @@ namespace Emby.Xtream.Plugin.Service
             @"(?<prefix>\b(?:Source|Remote|Client)\s+Ip:\s*)(?<address>\[[^\]]+\]|[^,\s]+)",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+        private static readonly Regex LoggedResponseIpRegex = new Regex(
+            @"(?<prefix>\bResponse\s+\d{3}\s+to\s+)(?<address>[^\s\[\]]+?)(?<suffix>\.\s+Time:)",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
         private static readonly Regex VersionContextRegex = new Regex(
             @"(?:Version[= ]|version |→ |-> )\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}",
             RegexOptions.Compiled);
@@ -63,6 +67,7 @@ namespace Emby.Xtream.Plugin.Service
                 var vm = versionMatches[i];
                 s = s.Substring(0, vm.Index) + "\x1FVER" + i + "\x00" + s.Substring(vm.Index + vm.Length);
             }
+            s = LoggedResponseIpRegex.Replace(s, RedactLoggedResponseIp);
             s = BracketedIpv6Regex.Replace(s, RedactBracketedIpv6);
             s = LoggedSourceIpRegex.Replace(s, RedactLoggedSourceIp);
             s = IpRegex.Replace(s, "<ip-redacted>");
@@ -101,6 +106,15 @@ namespace Emby.Xtream.Plugin.Service
             IPAddress address;
             return TryParseIp(raw, out address)
                 ? match.Groups["prefix"].Value + "<ip-redacted>"
+                : match.Value;
+        }
+
+        private static string RedactLoggedResponseIp(Match match)
+        {
+            IPAddress address;
+            return TryParseIp(match.Groups["address"].Value, out address) &&
+                   address.AddressFamily == AddressFamily.InterNetworkV6
+                ? match.Groups["prefix"].Value + "<ip-redacted>" + match.Groups["suffix"].Value
                 : match.Value;
         }
 
