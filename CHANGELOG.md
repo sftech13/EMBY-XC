@@ -4,6 +4,9 @@ All notable changes to XC2EMBY are listed here, newest first.
 
 ---
 
+## v1.1.133
+- Fixed Live TV tuner slots leaking after upgrading to Emby 4.10. Emby's new consumer API registers the initial viewer explicitly, so XC2EMBY now starts 4.10 streams at zero consumers while retaining the legacy initial count required by Emby 4.8/4.9. Stopping the final viewer once again closes the stream instead of eventually reaching a false simultaneous-stream limit.
+
 ## v1.1.132
 - Extended diagnostic-log IPv6 sanitization to Emby's unbracketed `Response <status> to <address>` entries while preserving the response status, timing, and log timestamp.
 

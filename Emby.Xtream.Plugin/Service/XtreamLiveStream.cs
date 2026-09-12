@@ -40,6 +40,16 @@ namespace Emby.Xtream.Plugin.Service
         private volatile bool _disposed;
 
         public XtreamLiveStream(MediaSourceInfo mediaSource, string tunerHostId, HttpClient httpClient, ILogger logger = null)
+            : this(mediaSource, tunerHostId, httpClient, typeof(ILiveStream), logger)
+        {
+        }
+
+        internal XtreamLiveStream(
+            MediaSourceInfo mediaSource,
+            string tunerHostId,
+            HttpClient httpClient,
+            Type runtimeLiveStreamContract,
+            ILogger logger = null)
         {
             MediaSource = mediaSource;
             _httpClient = httpClient;
@@ -48,12 +58,20 @@ namespace Emby.Xtream.Plugin.Service
             TunerHostId = tunerHostId;
             OriginalStreamId = mediaSource.Id;
             DateOpened = DateTimeOffset.UtcNow;
-            // Emby 4.8/4.9 increments ConsumerCount only when it reuses this
-            // ILiveStream for an additional client. The newly opened stream already
-            // represents its first consumer, matching Emby's built-in LiveStream.
-            // Starting at zero makes a direct client plus a remux client look like a
-            // single consumer, so stopping either one closes the other's upstream.
-            _consumerCount = 1;
+            // Emby 4.10 registers even the first viewer through AddConsumer. Starting
+            // at one there double-counts that viewer, so its single RemoveConsumer
+            // leaves the stream permanently open and eventually exhausts TunerCount.
+            // Emby 4.8/4.9 has no AddConsumer interface method and expects the newly
+            // opened stream to report its first consumer immediately.
+            _consumerCount = GetInitialConsumerCount(runtimeLiveStreamContract);
+        }
+
+        internal static int GetInitialConsumerCount(Type liveStreamContract)
+        {
+            return liveStreamContract != null &&
+                   liveStreamContract.GetMethod("AddConsumer", new[] { typeof(string) }) != null
+                ? 0
+                : 1;
         }
 
         // Emby 4.10 added AddConsumer(string)/RemoveConsumer(string) to ILiveStream and made

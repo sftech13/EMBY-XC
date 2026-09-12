@@ -30,7 +30,8 @@ namespace Emby.Xtream.Plugin.Tests
                 ("single live viewer backpressures instead of being dropped", SingleViewerBackpressurePreservesSubscriberAsync),
                 ("second live viewer exits single-viewer backpressure", SecondViewerEndsSingleViewerBackpressureAsync),
                 ("shared live viewer remains bounded when its queue fills", SharedViewerBufferRemainsBoundedAsync),
-                ("mixed direct and remux consumers keep the shared stream alive", MixedLiveConsumersRemainCountedAsync),
+                ("legacy Emby mixed consumers keep the shared stream alive", LegacyMixedLiveConsumersRemainCountedAsync),
+                ("Emby 4.10 first consumer closes without leaking a tuner slot", ModernLiveConsumerClosesCleanlyAsync),
                 ("EPG time shift moves timestamps and clamps to twelve hours", EpgTimeShiftIsAppliedAndClampedAsync),
                 ("Live TV probe supplies bitrate and fractional frame rate", LiveTvProbeSuppliesPlaybackMetadataAsync),
                 ("Live TV probe estimates missing MPEG-TS bitrate from packets", LiveTvProbeEstimatesPacketBitRateAsync),
@@ -298,7 +299,7 @@ namespace Emby.Xtream.Plugin.Tests
             };
         }
 
-        private static Task MixedLiveConsumersRemainCountedAsync()
+        private static Task LegacyMixedLiveConsumersRemainCountedAsync()
         {
             using (var httpClient = new HttpClient())
             using (var stream = new XtreamLiveStream(
@@ -317,19 +318,43 @@ namespace Emby.Xtream.Plugin.Tests
                 Assert(stream.ConsumerCount == 1,
                     "stopping one mixed client must leave the other consumer active");
 
-                // Emby 4.10 uses the compatibility methods for the same lifecycle.
-                stream.AddConsumer("second-client");
-                Assert(stream.ConsumerCount == 2,
-                    "AddConsumer must retain the original consumer");
-                stream.RemoveConsumer("first-client");
-                Assert(stream.ConsumerCount == 1,
-                    "RemoveConsumer must not close the remaining shared consumer");
-                stream.RemoveConsumer("second-client");
-                Assert(stream.ConsumerCount == 0,
-                    "the final consumer removal must reach zero exactly once");
             }
 
             return Task.CompletedTask;
+        }
+
+        private static Task ModernLiveConsumerClosesCleanlyAsync()
+        {
+            using (var httpClient = new HttpClient())
+            using (var stream = new XtreamLiveStream(
+                new MediaBrowser.Model.Dto.MediaSourceInfo { Id = "xtream_live_modern_test" },
+                "test-tuner",
+                httpClient,
+                typeof(ModernLiveStreamContract)))
+            {
+                Assert(stream.ConsumerCount == 0,
+                    "Emby 4.10 streams must wait for the initial AddConsumer call");
+
+                stream.AddConsumer("first-client");
+                Assert(stream.ConsumerCount == 1,
+                    "the first Emby 4.10 consumer must be counted exactly once");
+                stream.AddConsumer("second-client");
+                Assert(stream.ConsumerCount == 2,
+                    "a shared second viewer must keep both consumers active");
+                stream.RemoveConsumer("first-client");
+                Assert(stream.ConsumerCount == 1,
+                    "removing one shared viewer must retain the other");
+                stream.RemoveConsumer("second-client");
+                Assert(stream.ConsumerCount == 0,
+                    "the final Emby 4.10 removal must release the tuner slot");
+            }
+
+            return Task.CompletedTask;
+        }
+
+        private interface ModernLiveStreamContract
+        {
+            void AddConsumer(string id);
         }
 
         private static Task EpgTimeShiftIsAppliedAndClampedAsync()
