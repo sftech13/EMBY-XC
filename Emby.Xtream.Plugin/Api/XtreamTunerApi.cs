@@ -731,6 +731,7 @@ namespace Emby.Xtream.Plugin.Api
                         config.LastDocumentarySyncTimestamp = docConfig.LastMovieSyncTimestamp;
                         config.StrmNamingVersion = docConfig.StrmNamingVersion;
                         config.MovieTmdbCacheJson = docConfig.MovieTmdbCacheJson;
+                        config.VodGenreCacheJson = docConfig.VodGenreCacheJson;
                         Plugin.Instance.SaveConfiguration();
                     },
                     isDocumentaries: true).ConfigureAwait(false);
@@ -738,6 +739,7 @@ namespace Emby.Xtream.Plugin.Api
                 config.LastDocumentarySyncTimestamp = docConfig.LastMovieSyncTimestamp;
                 config.StrmNamingVersion = docConfig.StrmNamingVersion;
                 config.MovieTmdbCacheJson = docConfig.MovieTmdbCacheJson;
+                config.VodGenreCacheJson = docConfig.VodGenreCacheJson;
                 Plugin.Instance.SaveConfiguration();
 
                 var progress = syncService.DocumentariesProgress;
@@ -1462,7 +1464,9 @@ namespace Emby.Xtream.Plugin.Api
             var config = BuildSharedSyncConfig(source);
             config.SyncMovies = source.SyncDocumentaries;
             config.MovieRootFolderName = source.DocumentaryRootFolderName;
-            config.SelectedVodCategoryIds = source.SelectedDocumentaryCategoryIds ?? new int[0];
+            config.SelectedVodCategoryIds = source.EnableGenreBasedLibraryRouting
+                ? source.SelectedVodCategoryIds ?? new int[0]
+                : source.SelectedDocumentaryCategoryIds ?? new int[0];
             config.MovieFolderMode = source.DocumentaryFolderMode;
             config.MovieFolderMappings = source.DocumentaryFolderMappings;
             config.LastMovieSyncTimestamp = source.LastDocumentarySyncTimestamp;
@@ -1474,7 +1478,9 @@ namespace Emby.Xtream.Plugin.Api
             var config = BuildSharedSyncConfig(source);
             config.SyncSeries = source.SyncDocuSeries;
             config.SeriesRootFolderName = source.DocuSeriesRootFolderName;
-            config.SelectedSeriesCategoryIds = source.SelectedDocuSeriesCategoryIds ?? new int[0];
+            config.SelectedSeriesCategoryIds = source.EnableGenreBasedLibraryRouting
+                ? source.SelectedSeriesCategoryIds ?? new int[0]
+                : source.SelectedDocuSeriesCategoryIds ?? new int[0];
             config.SeriesFolderMode = source.DocuSeriesFolderMode;
             config.SeriesFolderMappings = source.DocuSeriesFolderMappings;
             config.LastSeriesSyncTimestamp = source.LastDocuSeriesSyncTimestamp;
@@ -1499,6 +1505,8 @@ namespace Emby.Xtream.Plugin.Api
                 EnableTmdbFolderNaming = source.EnableTmdbFolderNaming,
                 EnableTmdbFallbackLookup = source.EnableTmdbFallbackLookup,
                 MovieTmdbCacheJson = source.MovieTmdbCacheJson,
+                EnableGenreBasedLibraryRouting = source.EnableGenreBasedLibraryRouting,
+                VodGenreCacheJson = source.VodGenreCacheJson,
                 EnableSeriesIdFolderNaming = source.EnableSeriesIdFolderNaming,
                 EnableSeriesMetadataLookup = source.EnableSeriesMetadataLookup,
                 TvdbFolderIdOverrides = source.TvdbFolderIdOverrides,

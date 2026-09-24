@@ -45,7 +45,7 @@
 
 ## Features Overview
 
-> Current release: **v1.1.127** — see [CHANGELOG.md](CHANGELOG.md) for full version history.
+> Current release: **v1.1.138** — see [CHANGELOG.md](CHANGELOG.md) for full version history.
 
 ### Live TV
 - Registers as a native Emby tuner host — channels appear in Live TV just like any other tuner
@@ -265,7 +265,7 @@ Use the search box to filter by name. **Select All** / **Deselect All** buttons 
 |---|---|
 | TMDB Folder Naming | Appends `[tmdbid=12345]` to movie folder names for Emby metadata matching |
 | TMDB Fallback Lookup | When a movie has no TMDB ID from the provider, queries Emby's TheMovieDb provider to find one (slower) |
-| Write NFO Files | Creates Kodi-compatible `.nfo` sidecars with title and metadata IDs |
+| Write NFO Files | Creates provider-backed Kodi-compatible movie NFOs; IDs are retained even when ID folder naming is off, and optional codec data is included when supplied |
 | Skip Local Media | Skips XC movies already present in your Emby library, matching by TMDB ID first and normalized title/year fallback |
 
 #### Content Name Cleaning
@@ -283,6 +283,8 @@ Optional cleaning applied to movie titles before they are used as folder and fil
 
 Identical layout to the Movies tab, but stores its own VOD category selection, folder mappings, sync timestamp, and output root. Use this for movie-style documentary categories that should land in a dedicated documentary library.
 
+When **Settings → Split Documentary Libraries by Genre** is enabled, the Documentary sync instead uses the Movies category selection. It queries and caches `get_vod_info` metadata and writes only genres containing `Documentary` here. Movies excludes those titles. If a detail request fails or has no genre, the title remains safely in Movies.
+
 ---
 
 ### TV Shows Tab
@@ -298,7 +300,7 @@ Select at least one series category before syncing. An empty TV Shows category s
 | Series ID Folder Naming | Appends `[tvdbid=12345]` or `[tmdbid=12345]` to series folder names |
 | TVDb Fallback Lookup | Queries Emby's TheTVDB provider to find TVDb IDs for series missing one |
 | TVDb ID Overrides | Manual per-series overrides in `SeriesName=12345` format, one per line. Takes priority over all automatic lookups. |
-| Write NFO Files | Creates a `tvshow.nfo` in each series folder with title and metadata IDs |
+| Write NFO Files | Creates show and episode NFOs with provider metadata plus optional codec stream details |
 
 **Folder naming priority (when Series ID Folder Naming is on):**
 1. Manual TVDb override (from the overrides text area)
@@ -313,6 +315,8 @@ Select at least one series category before syncing. An empty TV Shows category s
 Identical layout to the TV Shows tab, but stores its own series category selection, folder mappings, sync timestamp, episode hash cache, and output root. Use this for documentary series categories that should land in a dedicated docu-series library.
 
 Docu Series also requires at least one selected category. An empty selection safely skips the sync.
+
+When genre routing is enabled, Docu Series uses the TV Shows category selection and receives catalog genres containing `Documentary` or `Reality`. TV Shows excludes those records. A missing genre remains in TV Shows.
 
 ---
 
@@ -553,13 +557,20 @@ These take priority over all automatic lookups.
 
 ### NFO Sidecar Files
 
-When **Write NFO Files** is enabled, Kodi-compatible XML sidecars are created when a metadata ID is available. Existing NFO files are never overwritten, preserving manual edits.
+When **Write NFO Files** is enabled, XC2EMBY creates Kodi-compatible XML sidecars from the provider metadata. A metadata ID is helpful but no longer required: movies, shows, and episodes still receive descriptive NFOs when the provider omits an external ID.
+
+Missing NFOs are backfilled on the next applicable sync without rewriting an unchanged STRM. XC2EMBY compares generated content with an existing NFO and leaves its modification time untouched when the content is identical. These are plugin-managed files; a manual edit can be replaced if a later provider metadata change causes XC2EMBY to regenerate that sidecar.
+
+Provider video/audio fields are written as Kodi `streamdetails` when present. Both nested `video`/`audio` objects and common flattened codec fields are accepted. Codec data is optional and XC2EMBY does not probe every remote VOD stream merely to populate it.
 
 **Movie NFO (`<Movie Folder Name>.nfo`):**
 ```xml
 <movie>
   <title>The Dark Knight</title>
   <year>2008</year>
+  <premiered>2008-07-16</premiered>
+  <plot>...</plot>
+  <genre>Drama</genre>
   <uniqueid type="tmdb" default="true">155</uniqueid>
 </movie>
 ```
@@ -568,9 +579,13 @@ When **Write NFO Files** is enabled, Kodi-compatible XML sidecars are created wh
 ```xml
 <tvshow>
   <title>Breaking Bad</title>
+  <premiered>2008-01-20</premiered>
+  <plot>...</plot>
   <uniqueid type="tvdb" default="true">81189</uniqueid>
 </tvshow>
 ```
+
+Episode sidecars include title, season/episode number, air date, plot, runtime, rating, artwork, and any provider codec details. Missing codec fields omit only `streamdetails`; they do not suppress the NFO.
 
 ---
 
@@ -714,6 +729,8 @@ Complete list of all configuration fields.
 | `SelectedDocumentaryCategoryIds` | int[] | `[]` | VOD categories to sync as documentaries |
 | `DocumentaryFolderMode` | string | `"single"` | `"single"` or `"custom"` (`"multiple"` accepted for legacy configs) |
 | `DocumentaryFolderMappings` | string | `""` | Custom mappings |
+| `EnableGenreBasedLibraryRouting` | bool | `false` | Share the Movies/TV source selections and split Documentary/Reality content by provider genre |
+| `VodGenreCacheJson` | string | `""` | Persistent, title-validated VOD genre cache populated from `get_vod_info` |
 
 ### TV Shows
 

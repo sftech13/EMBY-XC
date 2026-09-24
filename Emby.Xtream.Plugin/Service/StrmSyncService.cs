@@ -13,6 +13,7 @@ using System.Threading.Tasks;
 using Emby.Xtream.Plugin.Client.Models;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Model.Logging;
+using IProviderManager = MediaBrowser.Controller.Providers.IProviderManager;
 using MetadataRefreshOptions = MediaBrowser.Controller.Providers.MetadataRefreshOptions;
 using STJ = System.Text.Json;
 
@@ -86,7 +87,65 @@ namespace Emby.Xtream.Plugin.Service
         public string StrmPath { get; set; }
         public string StreamUrl { get; set; }
         public string TmdbId { get; set; }
+        public VodDetailInfo Detail { get; set; }
         public bool IsLocallyFiltered { get; set; }
+    }
+
+    internal sealed class VodDetailInfo
+    {
+        public string Name { get; set; }
+        public string TmdbId { get; set; }
+        public string ImdbId { get; set; }
+        public string Genre { get; set; }
+        public string Plot { get; set; }
+        public string Cast { get; set; }
+        public string Director { get; set; }
+        public string ReleaseDate { get; set; }
+        public string Duration { get; set; }
+        public int? DurationSecs { get; set; }
+        public string Rating { get; set; }
+        public string ImageUrl { get; set; }
+        public string BackdropUrl { get; set; }
+        public string Trailer { get; set; }
+        public EpisodeMediaInfo MediaInfo { get; set; }
+    }
+
+    internal sealed class VodGenreCacheEntry
+    {
+        public string Name { get; set; }
+        public string Genre { get; set; }
+    }
+
+    internal sealed class RequestStartPacer
+    {
+        private readonly SemaphoreSlim _gate = new SemaphoreSlim(1, 1);
+        private readonly TimeSpan _minimumInterval;
+        private DateTime _nextStartUtc = DateTime.MinValue;
+
+        public RequestStartPacer(TimeSpan minimumInterval)
+        {
+            _minimumInterval = minimumInterval;
+        }
+
+        public async Task WaitAsync(CancellationToken cancellationToken)
+        {
+            TimeSpan delay;
+            await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                var now = DateTime.UtcNow;
+                var start = _nextStartUtc > now ? _nextStartUtc : now;
+                delay = start - now;
+                _nextStartUtc = start + _minimumInterval;
+            }
+            finally
+            {
+                _gate.Release();
+            }
+
+            if (delay > TimeSpan.Zero)
+                await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+        }
     }
 
     public class StrmSyncService
@@ -363,6 +422,8 @@ namespace Emby.Xtream.Plugin.Service
         private readonly ILogger _logger;
         private readonly TmdbLookupService _tmdbLookupService;
         private readonly HttpClient _httpClient;
+        private readonly RequestStartPacer _providerDetailRequestPacer =
+            new RequestStartPacer(TimeSpan.FromMilliseconds(250));
         private List<SyncHistoryEntry> _syncHistory;
         private readonly object _historyLock = new object();
         private readonly List<FailedSyncItem> _failedItems = new List<FailedSyncItem>();
@@ -384,6 +445,7 @@ namespace Emby.Xtream.Plugin.Service
         // period combines the complete sequence into one Emby library scan.
         private static readonly TimeSpan LibraryScanQuietPeriod = TimeSpan.FromMinutes(90);
         private static readonly TimeSpan ActiveSyncScanRetryDelay = TimeSpan.FromMinutes(15);
+        private static readonly TimeSpan ExternalNfoWriteQuietPeriod = TimeSpan.FromMinutes(15);
         private const double LargeOrphanRatio = 0.20;
 
         private sealed class CatalogObservation
@@ -622,6 +684,22 @@ namespace Emby.Xtream.Plugin.Service
             return StrmWriteResult.Added;
         }
 
+        private static bool IsExistingStrmUrlCurrent(string path, string intendedUrl)
+        {
+            if (!File.Exists(path)) return false;
+            try
+            {
+                return string.Equals(
+                    NormalizeStreamUrl(File.ReadAllText(path)),
+                    NormalizeStreamUrl(intendedUrl),
+                    StringComparison.Ordinal);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         private void LogStreamUrlChangeSummary(string contentType, StreamUrlChangeStats stats)
         {
             if (stats == null || Volatile.Read(ref stats.Total) == 0) return;
@@ -719,6 +797,17 @@ namespace Emby.Xtream.Plugin.Service
                         return;
                     }
 
+                    string refreshBlockReason;
+                    if (TryGetEmbyRefreshBlockReason(host, libraryManager, refreshPaths, out refreshBlockReason))
+                    {
+                        _logger.Info(
+                            "Targeted Emby refresh remains pending because {0}; checking again in {1} minutes",
+                            refreshBlockReason,
+                            (int)ActiveSyncScanRetryDelay.TotalMinutes);
+                        _libraryScanTimer.Change(ActiveSyncScanRetryDelay, Timeout.InfiniteTimeSpan);
+                        return;
+                    }
+
                     _pendingLibraryRefreshPaths.Clear();
                     _libraryScanPending = false;
                     _targetedLibraryRefreshRunning = true;
@@ -735,6 +824,130 @@ namespace Emby.Xtream.Plugin.Service
                     _libraryScanTimer.Change(ActiveSyncScanRetryDelay, Timeout.InfiniteTimeSpan);
                 }
             }
+        }
+
+        private bool TryGetEmbyRefreshBlockReason(
+            MediaBrowser.Common.IApplicationHost host,
+            MediaBrowser.Controller.Library.ILibraryManager libraryManager,
+            string[] refreshPaths,
+            out string reason)
+        {
+            reason = null;
+            var targetFolders = refreshPaths
+                .Select(path => libraryManager.FindByPath(path, true) as Folder)
+                .Where(folder => folder != null)
+                .ToArray();
+
+            try
+            {
+                var providerManager = host.Resolve<IProviderManager>();
+                if (providerManager != null)
+                {
+                    var targetIds = new HashSet<long>(targetFolders.Select(folder => folder.InternalId));
+                    var activeTargetIds = targetFolders
+                        .Where(folder => providerManager.GetRefreshProgress(folder.InternalId).HasValue)
+                        .Select(folder => folder.InternalId)
+                        .ToArray();
+                    var queuedTargetIds = new List<long>();
+
+                    foreach (var queued in providerManager.GetRefreshQueue() ?? new List<Tuple<long, MetadataRefreshOptions>>())
+                    {
+                        if (targetIds.Contains(queued.Item1))
+                        {
+                            queuedTargetIds.Add(queued.Item1);
+                            continue;
+                        }
+
+                        var queuedItem = libraryManager.GetItemById(queued.Item1);
+                        if (queuedItem != null && refreshPaths.Any(path => IsSameOrChildPath(path, queuedItem.Path)))
+                            queuedTargetIds.Add(queued.Item1);
+                    }
+
+                    if (ShouldDeferTargetedLibraryRefresh(
+                        libraryManager.IsScanRunning,
+                        targetIds,
+                        activeTargetIds,
+                        queuedTargetIds))
+                    {
+                        reason = activeTargetIds.Length > 0
+                            ? "Emby is already refreshing the same library root"
+                            : "Emby has a refresh queued for the same library root";
+                        return true;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                // Emby versions differ in how per-folder work is exposed. Recent
+                // NFO activity below remains a conservative fallback.
+                _logger.Debug("Could not inspect Emby's per-library refresh queue: {0}", ex.Message);
+            }
+
+            var cutoffUtc = DateTime.UtcNow.Subtract(ExternalNfoWriteQuietPeriod);
+            foreach (var path in refreshPaths)
+            {
+                string recentNfo;
+                if (TryFindRecentNfoWrite(path, cutoffUtc, out recentNfo))
+                {
+                    reason = string.Format(
+                        CultureInfo.InvariantCulture,
+                        "recent NFO activity was detected under {0}",
+                        Path.GetFileName(path));
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        internal static bool ShouldDeferTargetedLibraryRefresh(
+            bool globalScanRunning,
+            IEnumerable<long> targetFolderIds,
+            IEnumerable<long> activeTargetIds,
+            IEnumerable<long> queuedTargetIds)
+        {
+            if (globalScanRunning) return true;
+            var targets = new HashSet<long>(targetFolderIds ?? Enumerable.Empty<long>());
+            return (activeTargetIds ?? Enumerable.Empty<long>()).Any(targets.Contains) ||
+                   (queuedTargetIds ?? Enumerable.Empty<long>()).Any();
+        }
+
+        private static bool TryFindRecentNfoWrite(string rootPath, DateTime cutoffUtc, out string recentNfo)
+        {
+            recentNfo = null;
+            if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath)) return false;
+
+            try
+            {
+                foreach (var path in Directory.EnumerateFiles(rootPath, "*.nfo", SearchOption.AllDirectories))
+                {
+                    if (File.GetLastWriteTimeUtc(path) < cutoffUtc) continue;
+                    recentNfo = path;
+                    return true;
+                }
+            }
+            catch (IOException)
+            {
+                return false;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return false;
+            }
+
+            return false;
+        }
+
+        private static bool IsSameOrChildPath(string rootPath, string candidatePath)
+        {
+            if (string.IsNullOrWhiteSpace(rootPath) || string.IsNullOrWhiteSpace(candidatePath)) return false;
+            var root = Path.GetFullPath(rootPath)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var candidate = Path.GetFullPath(candidatePath)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (string.Equals(root, candidate, StringComparison.OrdinalIgnoreCase)) return true;
+            return candidate.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) ||
+                   candidate.StartsWith(root + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
         }
 
         private async Task RunTargetedLibraryRefreshAsync(
@@ -842,22 +1055,68 @@ namespace Emby.Xtream.Plugin.Service
             PluginConfiguration config)
         {
             var episodeHash = ComputeSeriesEpisodeHash(episodes);
+            var metadataHash = config?.EnableNfoFiles == true
+                ? ComputeSeriesNfoMetadataHash(episodes)
+                : string.Empty;
             var baseUrl = NormalizeStreamUrl(config?.BaseUrl ?? string.Empty);
             var username = config?.Username ?? string.Empty;
             var password = config?.Password ?? string.Empty;
             var value = string.Format(
                 CultureInfo.InvariantCulture,
-                "{0}:{1}|{2}:{3}|{4}:{5}|{6}:{7}",
+                "{0}:{1}|{2}:{3}|{4}:{5}|{6}:{7}|{8}:{9}",
                 episodeHash.Length, episodeHash,
                 baseUrl.Length, baseUrl,
                 username.Length, username,
-                password.Length, password);
+                password.Length, password,
+                metadataHash.Length, metadataHash);
 
             using (var sha = SHA256.Create())
             {
                 var bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(value));
                 return BitConverter.ToString(bytes).Replace("-", string.Empty).ToLowerInvariant();
             }
+        }
+
+        private static string ComputeSeriesNfoMetadataHash(
+            Dictionary<string, List<EpisodeInfo>> episodes)
+        {
+            var sb = new StringBuilder();
+            foreach (var seasonEntry in episodes.OrderBy(entry => entry.Key))
+            {
+                foreach (var episode in seasonEntry.Value
+                    .OrderBy(value => value.Season)
+                    .ThenBy(value => value.EpisodeNum))
+                {
+                    var info = episode.Info;
+                    AppendFingerprintValue(sb, episode.Id.ToString(CultureInfo.InvariantCulture));
+                    AppendFingerprintValue(sb, episode.Title);
+                    AppendFingerprintValue(sb, episode.Plot);
+                    AppendFingerprintValue(sb, episode.Duration);
+                    AppendFingerprintValue(sb, episode.Rating);
+                    AppendFingerprintValue(sb, info?.Plot);
+                    AppendFingerprintValue(sb, info?.ReleaseDate);
+                    AppendFingerprintValue(sb, info?.Duration);
+                    AppendFingerprintValue(sb, info?.DurationSecs?.ToString(CultureInfo.InvariantCulture));
+                    AppendFingerprintValue(sb, info?.Rating);
+                    AppendFingerprintValue(sb, info?.MovieImage);
+                    AppendFingerprintValue(sb, info?.Video?.CodecName);
+                    AppendFingerprintValue(sb, info?.Audio?.CodecName);
+                    AppendFingerprintValue(sb, info?.VideoCodec);
+                    AppendFingerprintValue(sb, info?.AudioCodec);
+                }
+            }
+
+            using (var sha = SHA256.Create())
+            {
+                var bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(sb.ToString()));
+                return BitConverter.ToString(bytes).Replace("-", string.Empty).ToLowerInvariant();
+            }
+        }
+
+        private static void AppendFingerprintValue(StringBuilder sb, string value)
+        {
+            value = value ?? string.Empty;
+            sb.Append(value.Length).Append(':').Append(value).Append('|');
         }
 
         /// <summary>
@@ -931,6 +1190,50 @@ namespace Emby.Xtream.Plugin.Service
                 return string.Empty;
 
             return STJ.JsonSerializer.Serialize(cache);
+        }
+
+        internal static ConcurrentDictionary<string, VodGenreCacheEntry> DeserializeVodGenreCache(string json)
+        {
+            if (string.IsNullOrWhiteSpace(json))
+                return new ConcurrentDictionary<string, VodGenreCacheEntry>(StringComparer.OrdinalIgnoreCase);
+
+            try
+            {
+                var values = STJ.JsonSerializer.Deserialize<Dictionary<string, VodGenreCacheEntry>>(json)
+                             ?? new Dictionary<string, VodGenreCacheEntry>();
+                return new ConcurrentDictionary<string, VodGenreCacheEntry>(values, StringComparer.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return new ConcurrentDictionary<string, VodGenreCacheEntry>(StringComparer.OrdinalIgnoreCase);
+            }
+        }
+
+        internal static string SerializeVodGenreCache(ConcurrentDictionary<string, VodGenreCacheEntry> cache)
+        {
+            if (cache == null || cache.IsEmpty)
+                return string.Empty;
+
+            return STJ.JsonSerializer.Serialize(cache);
+        }
+
+        internal static bool IsDocumentaryMovieGenre(string genre)
+        {
+            return !string.IsNullOrWhiteSpace(genre) &&
+                   genre.IndexOf("Documentary", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        internal static bool IsDocuSeriesGenre(string genre)
+        {
+            return !string.IsNullOrWhiteSpace(genre) &&
+                   (genre.IndexOf("Documentary", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    genre.IndexOf("Reality", StringComparison.OrdinalIgnoreCase) >= 0);
+        }
+
+        internal static bool ShouldIncludeVodForGenreRouting(string genre, bool isDocumentaries)
+        {
+            var isDocumentary = IsDocumentaryMovieGenre(genre);
+            return isDocumentaries ? isDocumentary : !isDocumentary;
         }
 
         internal static string GetMovieRootFolderName(PluginConfiguration config)
@@ -1149,6 +1452,25 @@ namespace Emby.Xtream.Plugin.Service
                 mp.Phase = "Fetching VOD streams";
                 var allStreams = await FetchVodStreamsAsync(config.SelectedVodCategoryIds, config, cancellationToken).ConfigureAwait(false);
 
+                var movieTmdbCache = DeserializeMovieTmdbCache(config.MovieTmdbCacheJson);
+                var vodGenreCache = DeserializeVodGenreCache(config.VodGenreCacheJson);
+                var fetchedVodDetails = new ConcurrentDictionary<int, VodDetailInfo>();
+                if (config.EnableGenreBasedLibraryRouting)
+                {
+                    mp.Phase = "Classifying VOD genres";
+                    allStreams = await FilterVodStreamsByGenreAsync(
+                        allStreams,
+                        isDocumentaries,
+                        config,
+                        movieTmdbCache,
+                        vodGenreCache,
+                        fetchedVodDetails,
+                        saveConfig,
+                        mp,
+                        taskProgress,
+                        cancellationToken).ConfigureAwait(false);
+                }
+
                 // Delta sync: split into new (not yet synced) and existing
                 var lastMovieTs = config.LastMovieSyncTimestamp;
                 var newStreams = lastMovieTs > 0
@@ -1186,8 +1508,9 @@ namespace Emby.Xtream.Plugin.Service
                     localFilter = LocalMediaFilter.Build(_logger, config.StrmLibraryPath);
                 }
 
-                var enrichMovieTmdbIds = config.EnableLocalMediaFilter || config.EnableTmdbFolderNaming;
-                var movieTmdbCache = DeserializeMovieTmdbCache(config.MovieTmdbCacheJson);
+                var enrichMovieTmdbIds = config.EnableLocalMediaFilter ||
+                                         config.EnableTmdbFolderNaming ||
+                                         config.EnableNfoFiles;
                 var movieTmdbCacheChanged = 0;
                 var movieTmdbCacheUnsavedAdds = 0;
                 var movieTmdbCacheSaveLock = new object();
@@ -1229,6 +1552,8 @@ namespace Emby.Xtream.Plugin.Service
                             return;
                         }
 
+                        VodDetailInfo vodDetail = null;
+                        fetchedVodDetails.TryGetValue(movie.StreamId, out vodDetail);
                         var providerTmdbId = IsValidTmdbId(movie.TmdbId) ? movie.TmdbId.Trim() : null;
                         string providerImdbId = null;
                         if (string.IsNullOrEmpty(providerTmdbId) && enrichMovieTmdbIds)
@@ -1241,9 +1566,14 @@ namespace Emby.Xtream.Plugin.Service
                             }
                             else
                             {
-                                var vodDetail = await FetchVodDetailAsync(movie.StreamId, config, cancellationToken).ConfigureAwait(false);
-                                providerTmdbId = vodDetail?[0];
-                                providerImdbId = vodDetail?[1];
+                                if (vodDetail == null)
+                                {
+                                    vodDetail = await FetchVodDetailAsync(movie.StreamId, config, cancellationToken).ConfigureAwait(false);
+                                    if (vodDetail != null)
+                                        fetchedVodDetails[movie.StreamId] = vodDetail;
+                                }
+                                providerTmdbId = vodDetail?.TmdbId;
+                                providerImdbId = vodDetail?.ImdbId;
                                 if (IsValidTmdbId(providerTmdbId))
                                 {
                                     movieTmdbCache[cacheKey] = providerTmdbId.Trim();
@@ -1329,6 +1659,43 @@ namespace Emby.Xtream.Plugin.Service
                             "{0}/movie/{1}/{2}/{3}.{4}",
                             config.BaseUrl, config.Username, config.Password, movie.StreamId, ext);
 
+                        var nfoPath = Path.Combine(movieDir, folderName + ".nfo");
+                        var needsNfoDetail = config.EnableNfoFiles &&
+                            (!File.Exists(nfoPath) ||
+                             !File.Exists(strmPath) ||
+                             !IsExistingStrmUrlCurrent(strmPath, streamUrl));
+                        if (needsNfoDetail && vodDetail == null)
+                        {
+                            vodDetail = await FetchVodDetailAsync(movie.StreamId, config, cancellationToken).ConfigureAwait(false);
+                            if (vodDetail != null)
+                            {
+                                fetchedVodDetails[movie.StreamId] = vodDetail;
+                                if (IsValidTmdbId(vodDetail.TmdbId))
+                                {
+                                    providerTmdbId = vodDetail.TmdbId.Trim();
+                                    movieTmdbCache[movie.StreamId.ToString(CultureInfo.InvariantCulture)] = providerTmdbId;
+                                    Interlocked.Exchange(ref movieTmdbCacheChanged, 1);
+                                }
+                                if (!string.IsNullOrWhiteSpace(vodDetail.ImdbId))
+                                    providerImdbId = vodDetail.ImdbId;
+                            }
+                        }
+
+                        if (vodDetail == null)
+                        {
+                            vodDetail = new VodDetailInfo
+                            {
+                                Name = cleanedName,
+                                TmdbId = providerTmdbId,
+                                ImdbId = providerImdbId,
+                            };
+                        }
+                        else
+                        {
+                            if (!IsValidTmdbId(vodDetail.TmdbId)) vodDetail.TmdbId = providerTmdbId;
+                            if (string.IsNullOrWhiteSpace(vodDetail.ImdbId)) vodDetail.ImdbId = providerImdbId;
+                        }
+
                         preparedMovies.Add(new MovieSyncCandidate
                         {
                             Movie = movie,
@@ -1337,7 +1704,8 @@ namespace Emby.Xtream.Plugin.Service
                             MovieDirectory = movieDir,
                             StrmPath = strmPath,
                             StreamUrl = streamUrl,
-                            TmdbId = tmdbId,
+                            TmdbId = providerTmdbId,
+                            Detail = vodDetail,
                             IsLocallyFiltered =
                                 localFilter != null &&
                                 localFilter.ContainsMovie(providerTmdbId, providerImdbId, cleanedName),
@@ -1508,11 +1876,12 @@ namespace Emby.Xtream.Plugin.Service
                             }
                         }
 
-                        if (config.EnableNfoFiles && strmResult != StrmWriteResult.Unchanged)
+                        var nfoPath = Path.Combine(
+                            owner.MovieDirectory,
+                            owner.FolderName + ".nfo");
+                        if (config.EnableNfoFiles &&
+                            (strmResult != StrmWriteResult.Unchanged || !File.Exists(nfoPath)))
                         {
-                            var nfoPath = Path.Combine(
-                                owner.MovieDirectory,
-                                owner.FolderName + ".nfo");
                             var yearMatch = YearInTitleRegex.Match(owner.CleanedName);
                             int? nfoYear = null;
                             if (yearMatch.Success)
@@ -1531,7 +1900,7 @@ namespace Emby.Xtream.Plugin.Service
                                 if (NfoWriter.WriteMovieNfo(
                                     nfoPath,
                                     owner.CleanedName,
-                                    owner.TmdbId,
+                                    owner.Detail ?? new VodDetailInfo { TmdbId = owner.TmdbId },
                                     nfoYear))
                                     Interlocked.Increment(ref mp.NfoChanged);
                             }
@@ -1785,12 +2154,28 @@ namespace Emby.Xtream.Plugin.Service
                 }
 
                 // Parse TVDb overrides once before the loop
-                var tvdbOverrides = config.EnableSeriesIdFolderNaming
+                var tvdbOverrides = (config.EnableSeriesIdFolderNaming || config.EnableNfoFiles)
                     ? ParseTvdbOverrides(config.TvdbFolderIdOverrides)
                     : null;
 
                 sp.Phase = "Fetching series list";
                 var allSeries = await FetchSeriesListAsync(config.SelectedSeriesCategoryIds, config, cancellationToken).ConfigureAwait(false);
+
+                if (config.EnableGenreBasedLibraryRouting)
+                {
+                    var sourceCount = allSeries.Count;
+                    var documentaryCount = allSeries.Count(series => IsDocuSeriesGenre(series.Genre));
+                    allSeries = allSeries
+                        .Where(series => IsDocuSeriesGenre(series.Genre) == isDocuSeries)
+                        .ToList();
+                    _logger.Info(
+                        "Genre routing selected {0}/{1} series for {2}; Documentary/Reality={3}, main TV={4}",
+                        allSeries.Count,
+                        sourceCount,
+                        isDocuSeries ? "DocuSeries" : "TV Shows",
+                        documentaryCount,
+                        sourceCount - documentaryCount);
+                }
 
                 // When metadata-ID folder naming is disabled, separate provider records can
                 // resolve to the same series folder. Resolve ownership before the parallel
@@ -2005,37 +2390,44 @@ namespace Emby.Xtream.Plugin.Service
 
                         // Build series folder name with metadata ID
                         var folderName = seriesName;
-                        var providerTmdbId = detail.Info != null ? detail.Info.TmdbId : null;
-                        if (config.EnableSeriesIdFolderNaming)
+                        var providerTmdbId = detail.Info != null
+                            ? FirstNonEmpty(detail.Info.TmdbId, detail.Info.TmdbIdAlt)
+                            : null;
+                        if (!IsValidTmdbId(providerTmdbId))
+                            providerTmdbId = FirstNonEmpty(series.TmdbId, series.TmdbIdAlt);
+                        int? autoTvdbId = null;
+                        int overrideTvdbId = 0;
+                        var hasTvdbOverride = tvdbOverrides != null &&
+                            tvdbOverrides.TryGetValue(seriesName, out overrideTvdbId);
+                        if (config.EnableSeriesMetadataLookup &&
+                            !hasTvdbOverride &&
+                            !IsValidTmdbId(providerTmdbId) &&
+                            (config.EnableSeriesIdFolderNaming || config.EnableNfoFiles))
                         {
-                            int? autoTvdbId = null;
-
-                            // Only do TVDb lookup if no override and no provider TMDB
-                            if (config.EnableSeriesMetadataLookup &&
-                                (tvdbOverrides == null || !tvdbOverrides.ContainsKey(seriesName)) &&
-                                !IsValidTmdbId(providerTmdbId))
+                            var yearMatch = YearInTitleRegex.Match(cleanedName);
+                            int? yearForLookup = null;
+                            if (yearMatch.Success)
                             {
-                                var yearMatch = YearInTitleRegex.Match(cleanedName);
-                                int? yearForLookup = null;
-                                if (yearMatch.Success)
-                                {
-                                    int y;
-                                    if (int.TryParse(yearMatch.Groups[1].Value, NumberStyles.None, CultureInfo.InvariantCulture, out y))
-                                    {
-                                        yearForLookup = y;
-                                    }
-                                }
-
-                                try
-                                {
-                                    autoTvdbId = await _tmdbLookupService.LookupSeriesTvdbIdAsync(cleanedName, yearForLookup, cancellationToken).ConfigureAwait(false);
-                                }
-                                catch (Exception ex)
-                                {
-                                    _logger.Debug("TVDb lookup error for '{0}': {1}", cleanedName, ex.Message);
-                                }
+                                int y;
+                                if (int.TryParse(yearMatch.Groups[1].Value, NumberStyles.None, CultureInfo.InvariantCulture, out y))
+                                    yearForLookup = y;
                             }
 
+                            try
+                            {
+                                autoTvdbId = await _tmdbLookupService.LookupSeriesTvdbIdAsync(
+                                    cleanedName,
+                                    yearForLookup,
+                                    cancellationToken).ConfigureAwait(false);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.Debug("TVDb lookup error for '{0}': {1}", cleanedName, ex.Message);
+                            }
+                        }
+
+                        if (config.EnableSeriesIdFolderNaming)
+                        {
                             folderName = BuildSeriesFolderName(seriesName, providerTmdbId, autoTvdbId, tvdbOverrides);
                         }
 
@@ -2061,7 +2453,6 @@ namespace Emby.Xtream.Plugin.Service
                             string.Equals(storedEpHash, currentEpHash, StringComparison.Ordinal);
                         if (canSmartSkip)
                             Interlocked.Increment(ref smartSkippedSeries);
-                        var seriesFilesChanged = false;
 
                         foreach (var seasonEntry in detail.Episodes)
                         {
@@ -2153,23 +2544,23 @@ namespace Emby.Xtream.Plugin.Service
                                 if (strmResult == StrmWriteResult.Added)
                                 {
                                     Interlocked.Increment(ref ep.Added);
-                                    seriesFilesChanged = true;
                                 }
                                 else if (strmResult == StrmWriteResult.Changed)
                                 {
                                     Interlocked.Increment(ref ep.Changed);
-                                    seriesFilesChanged = true;
                                 }
                                 else
                                     Interlocked.Increment(ref ep.Skipped);
 
-                                if (config.EnableNfoFiles && episode.Info != null &&
-                                    strmResult != StrmWriteResult.Unchanged)
+                                var nfoPath = Path.ChangeExtension(strmPath, ".nfo");
+                                if (config.EnableNfoFiles &&
+                                    (strmResult != StrmWriteResult.Unchanged ||
+                                     !canSmartSkip ||
+                                     !File.Exists(nfoPath)))
                                 {
-                                    var nfoPath = Path.ChangeExtension(strmPath, ".nfo");
                                     try
                                     {
-                                        if (NfoWriter.WriteEpisodeNfo(nfoPath, rawEpisodeTitle, seasonNum, episodeNum, episode.Info))
+                                        if (NfoWriter.WriteEpisodeNfo(nfoPath, rawEpisodeTitle, seasonNum, episodeNum, episode))
                                             Interlocked.Increment(ref ep.NfoChanged);
                                     }
                                     catch (Exception ex) { _logger.Warn("WriteEpisodeNfo failed for '{0}': {1}", nfoPath, ex.Message); }
@@ -2188,18 +2579,26 @@ namespace Emby.Xtream.Plugin.Service
                         var ownsSeriesFolder =
                             !pathOwnership.FolderOwners.TryGetValue(seriesDir, out folderOwnerId) ||
                             folderOwnerId == series.SeriesId;
-                        if (config.EnableNfoFiles && seriesFilesChanged && ownsSeriesFolder)
+                        var showNfoPath = Path.Combine(seriesDir, "tvshow.nfo");
+                        if (config.EnableNfoFiles && ownsSeriesFolder)
                         {
-                            var showNfoPath = Path.Combine(seriesDir, "tvshow.nfo");
                             var tvdbIdMatch = Regex.Match(folderName, @"\[tvdbid=(\d+)\]");
                             var tmdbIdMatch = Regex.Match(folderName, @"\[tmdbid=(\d+)\]");
                             var showTvdbId = tvdbIdMatch.Success ? tvdbIdMatch.Groups[1].Value : null;
                             var showTmdbId = tmdbIdMatch.Success ? tmdbIdMatch.Groups[1].Value : null;
-                            if (showTmdbId == null && detail?.Info?.TmdbId != null)
-                                showTmdbId = detail.Info.TmdbId.ToString();
+                            if (string.IsNullOrWhiteSpace(showTvdbId) && hasTvdbOverride)
+                                showTvdbId = overrideTvdbId.ToString(CultureInfo.InvariantCulture);
+                            if (string.IsNullOrWhiteSpace(showTvdbId) && autoTvdbId.HasValue)
+                                showTvdbId = autoTvdbId.Value.ToString(CultureInfo.InvariantCulture);
+                            if (string.IsNullOrWhiteSpace(showTmdbId)) showTmdbId = providerTmdbId;
                             try
                             {
-                                if (NfoWriter.WriteShowNfo(showNfoPath, seriesName, showTvdbId, showTmdbId))
+                                if (NfoWriter.WriteShowNfo(
+                                    showNfoPath,
+                                    seriesName,
+                                    detail?.Info ?? series,
+                                    showTvdbId,
+                                    showTmdbId))
                                     Interlocked.Increment(ref sp.NfoChanged);
                             }
                             catch (Exception ex) { _logger.Debug("Show NFO write failed for '{0}': {1}", seriesName, ex.Message); }
@@ -2560,10 +2959,10 @@ namespace Emby.Xtream.Plugin.Service
 
             lock (writtenPaths) { writtenPaths.Add(strmPath); }
 
-            if (config.EnableNfoFiles && !string.IsNullOrEmpty(item.TmdbId) &&
-                strmResult != StrmWriteResult.Unchanged)
+            var nfoPath = Path.Combine(movieDir, folderName + ".nfo");
+            if (config.EnableNfoFiles &&
+                (strmResult != StrmWriteResult.Unchanged || !File.Exists(nfoPath)))
             {
-                var nfoPath = Path.Combine(movieDir, folderName + ".nfo");
                 var yearMatch = YearInTitleRegex.Match(cleanedName);
                 int? nfoYear = null;
                 if (yearMatch.Success)
@@ -2574,7 +2973,11 @@ namespace Emby.Xtream.Plugin.Service
                 }
                 try
                 {
-                    if (NfoWriter.WriteMovieNfo(nfoPath, cleanedName, item.TmdbId, nfoYear))
+                    if (NfoWriter.WriteMovieNfo(
+                        nfoPath,
+                        cleanedName,
+                        new VodDetailInfo { Name = cleanedName, TmdbId = item.TmdbId },
+                        nfoYear))
                         Interlocked.Increment(ref _retryProgress.NfoChanged);
                 }
                 catch (Exception ex) { _logger.Debug("NFO write failed on retry for '{0}': {1}", item.Name, ex.Message); }
@@ -2633,13 +3036,13 @@ namespace Emby.Xtream.Plugin.Service
                     else
                         Interlocked.Increment(ref _retryProgress.Skipped);
 
-                    if (config.EnableNfoFiles && ep.Info != null &&
-                        strmResult != StrmWriteResult.Unchanged)
+                    var nfoPath = Path.ChangeExtension(epPath, ".nfo");
+                    if (config.EnableNfoFiles &&
+                        (strmResult != StrmWriteResult.Unchanged || !File.Exists(nfoPath)))
                     {
-                        var nfoPath = Path.ChangeExtension(epPath, ".nfo");
                         try
                         {
-                            if (NfoWriter.WriteEpisodeNfo(nfoPath, rawTitle, seasonNum, episodeNum, ep.Info))
+                            if (NfoWriter.WriteEpisodeNfo(nfoPath, rawTitle, seasonNum, episodeNum, ep))
                                 Interlocked.Increment(ref _retryProgress.NfoChanged);
                         }
                         catch { }
@@ -2969,12 +3372,147 @@ namespace Emby.Xtream.Plugin.Service
             return allStreams;
         }
 
-        // Returns [0]=tmdbId, [1]=imdbId; either element may be null.
-        private async Task<string[]> FetchVodDetailAsync(
+        private async Task<List<VodStreamInfo>> FilterVodStreamsByGenreAsync(
+            List<VodStreamInfo> streams,
+            bool isDocumentaries,
+            PluginConfiguration config,
+            ConcurrentDictionary<string, string> movieTmdbCache,
+            ConcurrentDictionary<string, VodGenreCacheEntry> genreCache,
+            ConcurrentDictionary<int, VodDetailInfo> fetchedDetails,
+            Action saveConfig,
+            SyncProgress progress,
+            IProgress<double> taskProgress,
+            CancellationToken cancellationToken)
+        {
+            var resolvedGenres = new ConcurrentDictionary<int, string>();
+            // SyncParallelism remains the concurrency ceiling. get_vod_info is also
+            // commonly subject to a request-rate limit, which is separate from concurrent
+            // connection count, so request starts are gently spaced across all workers.
+            var semaphore = new SemaphoreSlim(Math.Max(1, config.SyncParallelism));
+            var saveLock = new object();
+            var unsavedEntries = 0;
+            var cacheChanged = 0;
+            var lookupFailures = 0;
+
+            progress.Total = streams.Count;
+            progress.Completed = 0;
+            progress.Skipped = 0;
+            progress.Failed = 0;
+            ReportTaskProgress(progress, taskProgress);
+
+            var tasks = streams.Select(async stream =>
+            {
+                var cacheKey = stream.StreamId.ToString(CultureInfo.InvariantCulture);
+                VodGenreCacheEntry cached;
+                if (genreCache.TryGetValue(cacheKey, out cached) &&
+                    cached != null &&
+                    string.Equals(cached.Name ?? string.Empty, stream.Name ?? string.Empty, StringComparison.Ordinal) &&
+                    !string.IsNullOrWhiteSpace(cached.Genre))
+                {
+                    resolvedGenres[stream.StreamId] = cached.Genre;
+                    Interlocked.Increment(ref progress.Completed);
+                    ReportTaskProgress(progress, taskProgress);
+                    return;
+                }
+
+                await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var detail = await FetchVodDetailAsync(stream.StreamId, config, cancellationToken).ConfigureAwait(false);
+                    if (detail != null)
+                        fetchedDetails[stream.StreamId] = detail;
+                    if (detail == null || string.IsNullOrWhiteSpace(detail.Genre))
+                    {
+                        Interlocked.Increment(ref lookupFailures);
+                        return;
+                    }
+
+                    var genre = detail.Genre.Trim();
+                    resolvedGenres[stream.StreamId] = genre;
+                    genreCache[cacheKey] = new VodGenreCacheEntry
+                    {
+                        Name = stream.Name ?? string.Empty,
+                        Genre = genre,
+                    };
+                    if (IsValidTmdbId(detail.TmdbId))
+                        movieTmdbCache[cacheKey] = detail.TmdbId.Trim();
+
+                    Interlocked.Exchange(ref cacheChanged, 1);
+                    if (Interlocked.Increment(ref unsavedEntries) >= 500)
+                    {
+                        lock (saveLock)
+                        {
+                            if (Volatile.Read(ref unsavedEntries) >= 500)
+                            {
+                                config.VodGenreCacheJson = SerializeVodGenreCache(genreCache);
+                                config.MovieTmdbCacheJson = SerializeMovieTmdbCache(movieTmdbCache);
+                                saveConfig?.Invoke();
+                                Interlocked.Exchange(ref unsavedEntries, 0);
+                                _logger.Info("VOD genre cache checkpoint: {0} entries", genreCache.Count);
+                            }
+                        }
+                    }
+                }
+                finally
+                {
+                    semaphore.Release();
+                    Interlocked.Increment(ref progress.Completed);
+                    ReportTaskProgress(progress, taskProgress);
+                }
+            });
+
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+
+            if (Volatile.Read(ref cacheChanged) != 0)
+            {
+                lock (saveLock)
+                {
+                    config.VodGenreCacheJson = SerializeVodGenreCache(genreCache);
+                    config.MovieTmdbCacheJson = SerializeMovieTmdbCache(movieTmdbCache);
+                    saveConfig?.Invoke();
+                }
+            }
+
+            var filtered = streams.Where(stream =>
+            {
+                string genre;
+                resolvedGenres.TryGetValue(stream.StreamId, out genre);
+                return ShouldIncludeVodForGenreRouting(genre, isDocumentaries);
+            }).ToList();
+
+            var documentaryCount = streams.Count(stream =>
+            {
+                string genre;
+                return resolvedGenres.TryGetValue(stream.StreamId, out genre) &&
+                       IsDocumentaryMovieGenre(genre);
+            });
+            _logger.Info(
+                "Genre routing selected {0}/{1} VOD items for {2}; documentaries={3}, unknown genre={4}, cached genres={5}",
+                filtered.Count,
+                streams.Count,
+                isDocumentaries ? "Documentaries" : "Movies",
+                documentaryCount,
+                lookupFailures,
+                genreCache.Count);
+
+            // The next phase reports writes against the routed subset rather than the
+            // source catalog used by classification.
+            progress.Total = filtered.Count;
+            progress.Completed = 0;
+            progress.Skipped = 0;
+            progress.Failed = 0;
+            ReportTaskProgress(progress, taskProgress);
+
+            return filtered;
+        }
+
+        private async Task<VodDetailInfo> FetchVodDetailAsync(
             int streamId, PluginConfiguration config, CancellationToken cancellationToken)
         {
             try
             {
+                await _providerDetailRequestPacer.WaitAsync(cancellationToken).ConfigureAwait(false);
                 var url = string.Format(
                     CultureInfo.InvariantCulture,
                     "{0}/player_api.php?username={1}&password={2}&action=get_vod_info&vod_id={3}",
@@ -2989,8 +3527,7 @@ namespace Emby.Xtream.Plugin.Service
                     cancellationToken).ConfigureAwait(false);
                 cancellationToken.ThrowIfCancellationRequested();
 
-                string tmdbId = null;
-                string imdbId = null;
+                var detail = new VodDetailInfo();
 
                 using (var doc = STJ.JsonDocument.Parse(json))
                 {
@@ -3011,7 +3548,7 @@ namespace Emby.Xtream.Plugin.Service
                                 : imdbVal.ToString();
                             if (!string.IsNullOrWhiteSpace(raw) && raw.StartsWith("tt", StringComparison.OrdinalIgnoreCase))
                             {
-                                imdbId = raw.Trim();
+                                detail.ImdbId = raw.Trim();
                                 break;
                             }
                         }
@@ -3029,13 +3566,53 @@ namespace Emby.Xtream.Plugin.Service
 
                         if (IsValidTmdbId(id))
                         {
-                            tmdbId = id.Trim();
+                            detail.TmdbId = id.Trim();
                             break;
                         }
                     }
+
+                    STJ.JsonElement genreValue;
+                    if (info.TryGetProperty("genre", out genreValue))
+                    {
+                        if (genreValue.ValueKind == STJ.JsonValueKind.String)
+                        {
+                            detail.Genre = genreValue.GetString();
+                        }
+                        else if (genreValue.ValueKind == STJ.JsonValueKind.Array)
+                        {
+                            detail.Genre = string.Join(", ", genreValue.EnumerateArray()
+                                .Select(value => value.ValueKind == STJ.JsonValueKind.String
+                                    ? value.GetString()
+                                    : value.ToString())
+                                .Where(value => !string.IsNullOrWhiteSpace(value)));
+                        }
+                    }
+
+                    detail.Name = ReadJsonText(info, "name", "title");
+                    detail.Plot = ReadJsonText(info, "plot", "description");
+                    detail.Cast = ReadJsonText(info, "cast", "actors");
+                    detail.Director = ReadJsonText(info, "director");
+                    detail.ReleaseDate = ReadJsonText(info, "releasedate", "releaseDate", "release_date", "premiered");
+                    detail.Duration = ReadJsonText(info, "duration");
+                    detail.DurationSecs = ReadJsonNullableInt(info, "duration_secs", "duration_seconds");
+                    detail.Rating = ReadJsonText(info, "rating");
+                    detail.ImageUrl = ReadJsonText(info, "movie_image", "cover", "stream_icon");
+                    detail.BackdropUrl = ReadJsonFirstText(info, "backdrop_path", "backdrop");
+                    detail.Trailer = ReadJsonText(info, "youtube_trailer", "trailer");
+                    try
+                    {
+                        detail.MediaInfo = STJ.JsonSerializer.Deserialize<EpisodeMediaInfo>(
+                            info.GetRawText(),
+                            JsonOptions);
+                    }
+                    catch
+                    {
+                        // Descriptive metadata is still useful when a provider's
+                        // optional codec shape cannot be deserialized.
+                    }
                 }
 
-                return new[] { tmdbId, imdbId };
+                return detail;
             }
             catch (OperationCanceledException)
             {
@@ -3048,6 +3625,62 @@ namespace Emby.Xtream.Plugin.Service
 
             return null;
         }
+
+        private static string ReadJsonText(STJ.JsonElement element, params string[] names)
+        {
+            foreach (var name in names)
+            {
+                STJ.JsonElement value;
+                if (!element.TryGetProperty(name, out value) ||
+                    value.ValueKind == STJ.JsonValueKind.Null ||
+                    value.ValueKind == STJ.JsonValueKind.Undefined)
+                    continue;
+                var text = value.ValueKind == STJ.JsonValueKind.String
+                    ? value.GetString()
+                    : value.ToString();
+                if (!string.IsNullOrWhiteSpace(text)) return text.Trim();
+            }
+            return null;
+        }
+
+        private static string ReadJsonFirstText(STJ.JsonElement element, params string[] names)
+        {
+            foreach (var name in names)
+            {
+                STJ.JsonElement value;
+                if (!element.TryGetProperty(name, out value)) continue;
+                if (value.ValueKind == STJ.JsonValueKind.Array)
+                {
+                    foreach (var item in value.EnumerateArray())
+                    {
+                        var text = item.ValueKind == STJ.JsonValueKind.String
+                            ? item.GetString()
+                            : item.ToString();
+                        if (!string.IsNullOrWhiteSpace(text)) return text.Trim();
+                    }
+                }
+                else
+                {
+                    var text = value.ValueKind == STJ.JsonValueKind.String
+                        ? value.GetString()
+                        : value.ToString();
+                    if (!string.IsNullOrWhiteSpace(text)) return text.Trim();
+                }
+            }
+            return null;
+        }
+
+        private static int? ReadJsonNullableInt(STJ.JsonElement element, params string[] names)
+        {
+            var text = ReadJsonText(element, names);
+            int value;
+            return int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out value)
+                ? (int?)value
+                : null;
+        }
+
+        private static string FirstNonEmpty(params string[] values)
+            => values?.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
 
         // ── Populate Episode Media Streams ───────────────────────────────────────
 
@@ -3173,8 +3806,10 @@ namespace Emby.Xtream.Plugin.Service
                             {
                                 itemRepo.SaveMediaStreams(item.InternalId, streams, cancellationToken);
 
-                                if (ep.Info.Video?.Width > 0)  item.Width  = ep.Info.Video.Width.Value;
-                                if (ep.Info.Video?.Height > 0) item.Height = ep.Info.Video.Height.Value;
+                                var mediaWidth = ep.Info.Video?.Width ?? ep.Info.Width;
+                                var mediaHeight = ep.Info.Video?.Height ?? ep.Info.Height;
+                                if (mediaWidth > 0) item.Width = mediaWidth.Value;
+                                if (mediaHeight > 0) item.Height = mediaHeight.Value;
                                 if (!string.IsNullOrEmpty(ep.ContainerExtension))
                                     item.Container = ep.ContainerExtension;
                                 if (ep.Info.DurationSecs.HasValue && ep.Info.DurationSecs.Value > 0)
@@ -3219,17 +3854,30 @@ namespace Emby.Xtream.Plugin.Service
         {
             var streams = new List<MediaBrowser.Model.Entities.MediaStream>();
             int idx = 0;
+            var videoCodec = FirstNonEmpty(info?.Video?.CodecName, info?.VideoCodec, info?.VideoCodecName);
+            var audioCodec = FirstNonEmpty(info?.Audio?.CodecName, info?.AudioCodec, info?.AudioCodecName);
 
-            if (info.Video != null && !string.IsNullOrEmpty(info.Video.CodecName))
+            if (!string.IsNullOrEmpty(videoCodec))
             {
-                var fps = ParseFrameRateValue(info.Video.RFrameRate);
+                var fps = ParseFrameRateValue(FirstNonEmpty(
+                    info.Video?.RFrameRate,
+                    info.RFrameRate,
+                    info.FrameRate));
+                int? videoBitRate = info.Bitrate;
+                if (!string.IsNullOrWhiteSpace(info.Video?.BitRate))
+                {
+                    int parsed;
+                    if (int.TryParse(info.Video.BitRate, NumberStyles.Integer, CultureInfo.InvariantCulture, out parsed))
+                        videoBitRate = parsed;
+                }
                 streams.Add(new MediaBrowser.Model.Entities.MediaStream
                 {
                     Type         = MediaBrowser.Model.Entities.MediaStreamType.Video,
                     Index        = idx++,
-                    Codec        = info.Video.CodecName,
-                    Width        = info.Video.Width,
-                    Height       = info.Video.Height,
+                    Codec        = videoCodec,
+                    Width        = info.Video?.Width ?? info.Width,
+                    Height       = info.Video?.Height ?? info.Height,
+                    BitRate      = videoBitRate,
                     AverageFrameRate = fps > 0 ? (float?)fps : null,
                     RealFrameRate    = fps > 0 ? (float?)fps : null,
                     IsDefault    = true,
@@ -3238,24 +3886,26 @@ namespace Emby.Xtream.Plugin.Service
                 });
             }
 
-            if (info.Audio != null && !string.IsNullOrEmpty(info.Audio.CodecName))
+            if (!string.IsNullOrEmpty(audioCodec))
             {
                 string lang = null;
-                if (info.Audio.Tags != null) info.Audio.Tags.TryGetValue("language", out lang);
+                if (info.Audio?.Tags != null) info.Audio.Tags.TryGetValue("language", out lang);
 
                 int? sampleRate = null;
-                if (!string.IsNullOrEmpty(info.Audio.SampleRate))
+                var sampleRateText = FirstNonEmpty(info.Audio?.SampleRate, info.SampleRate);
+                if (!string.IsNullOrEmpty(sampleRateText))
                 {
                     int sr;
-                    if (int.TryParse(info.Audio.SampleRate, NumberStyles.None, CultureInfo.InvariantCulture, out sr))
+                    if (int.TryParse(sampleRateText, NumberStyles.None, CultureInfo.InvariantCulture, out sr))
                         sampleRate = sr;
                 }
 
                 int? bitRate = null;
-                if (!string.IsNullOrEmpty(info.Audio.BitRate))
+                var audioBitRateText = FirstNonEmpty(info.Audio?.BitRate, info.AudioBitRate);
+                if (!string.IsNullOrEmpty(audioBitRateText))
                 {
                     int br;
-                    if (int.TryParse(info.Audio.BitRate, NumberStyles.None, CultureInfo.InvariantCulture, out br))
+                    if (int.TryParse(audioBitRateText, NumberStyles.None, CultureInfo.InvariantCulture, out br))
                         bitRate = br;
                 }
 
@@ -3263,8 +3913,8 @@ namespace Emby.Xtream.Plugin.Service
                 {
                     Type       = MediaBrowser.Model.Entities.MediaStreamType.Audio,
                     Index      = idx++,
-                    Codec      = info.Audio.CodecName,
-                    Channels   = info.Audio.Channels,
+                    Codec      = audioCodec,
+                    Channels   = info.Audio?.Channels ?? info.Channels,
                     SampleRate = sampleRate,
                     BitRate    = bitRate,
                     Language   = lang,
@@ -3551,6 +4201,7 @@ namespace Emby.Xtream.Plugin.Service
         private async Task<SeriesDetailInfo> FetchSeriesDetailAsync(
             int seriesId, PluginConfiguration config, CancellationToken cancellationToken)
         {
+            await _providerDetailRequestPacer.WaitAsync(cancellationToken).ConfigureAwait(false);
             var url = string.Format(
                 CultureInfo.InvariantCulture,
                 "{0}/player_api.php?username={1}&password={2}&action=get_series_info&series_id={3}",

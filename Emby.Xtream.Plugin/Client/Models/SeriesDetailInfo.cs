@@ -51,6 +51,32 @@ namespace Emby.Xtream.Plugin.Client.Models
 
     public class EpisodeMediaInfo
     {
+        [JsonPropertyName("plot")]
+        public string Plot { get; set; } = string.Empty;
+
+        [JsonPropertyName("cast")]
+        public string Cast { get; set; } = string.Empty;
+
+        [JsonPropertyName("director")]
+        public string Director { get; set; } = string.Empty;
+
+        [JsonPropertyName("releaseDate")]
+        public string ReleaseDate { get; set; } = string.Empty;
+
+        [JsonPropertyName("duration")]
+        [JsonConverter(typeof(StringOrNumberConverter))]
+        public string Duration { get; set; } = string.Empty;
+
+        [JsonPropertyName("rating")]
+        [JsonConverter(typeof(StringOrNumberConverter))]
+        public string Rating { get; set; } = string.Empty;
+
+        [JsonPropertyName("movie_image")]
+        public string MovieImage { get; set; } = string.Empty;
+
+        [JsonPropertyName("youtube_trailer")]
+        public string YoutubeTrailer { get; set; } = string.Empty;
+
         [JsonPropertyName("duration_secs")]
         [JsonConverter(typeof(FlexibleNullableInt32Converter))]
         public int? DurationSecs { get; set; }
@@ -66,6 +92,53 @@ namespace Emby.Xtream.Plugin.Client.Models
         [JsonPropertyName("audio")]
         [JsonConverter(typeof(FlexibleObjectConverter<EpisodeAudioInfo>))]
         public EpisodeAudioInfo Audio { get; set; }
+
+        // Some Xtream implementations flatten probe data into the info object
+        // rather than returning nested video/audio objects. Keep these aliases
+        // optional so richer providers can populate generic NFO streamdetails
+        // without making codec data a requirement for metadata sidecars.
+        [JsonPropertyName("video_codec")]
+        public string VideoCodec { get; set; } = string.Empty;
+
+        [JsonPropertyName("video_codec_name")]
+        public string VideoCodecName { get; set; } = string.Empty;
+
+        [JsonPropertyName("audio_codec")]
+        public string AudioCodec { get; set; } = string.Empty;
+
+        [JsonPropertyName("audio_codec_name")]
+        public string AudioCodecName { get; set; } = string.Empty;
+
+        [JsonPropertyName("width")]
+        [JsonConverter(typeof(FlexibleNullableInt32Converter))]
+        public int? Width { get; set; }
+
+        [JsonPropertyName("height")]
+        [JsonConverter(typeof(FlexibleNullableInt32Converter))]
+        public int? Height { get; set; }
+
+        [JsonPropertyName("resolution")]
+        public string Resolution { get; set; } = string.Empty;
+
+        [JsonPropertyName("frame_rate")]
+        [JsonConverter(typeof(StringOrNumberConverter))]
+        public string FrameRate { get; set; } = string.Empty;
+
+        [JsonPropertyName("r_frame_rate")]
+        [JsonConverter(typeof(StringOrNumberConverter))]
+        public string RFrameRate { get; set; } = string.Empty;
+
+        [JsonPropertyName("channels")]
+        [JsonConverter(typeof(FlexibleNullableInt32Converter))]
+        public int? Channels { get; set; }
+
+        [JsonPropertyName("sample_rate")]
+        [JsonConverter(typeof(StringOrNumberConverter))]
+        public string SampleRate { get; set; } = string.Empty;
+
+        [JsonPropertyName("audio_bitrate")]
+        [JsonConverter(typeof(StringOrNumberConverter))]
+        public string AudioBitRate { get; set; } = string.Empty;
     }
 
     public class EpisodeVideoInfo
@@ -89,6 +162,10 @@ namespace Emby.Xtream.Plugin.Client.Models
 
         [JsonPropertyName("field_order")]
         public string FieldOrder { get; set; } = string.Empty;
+
+        [JsonPropertyName("bit_rate")]
+        [JsonConverter(typeof(StringOrNumberConverter))]
+        public string BitRate { get; set; } = string.Empty;
     }
 
     public class EpisodeAudioInfo

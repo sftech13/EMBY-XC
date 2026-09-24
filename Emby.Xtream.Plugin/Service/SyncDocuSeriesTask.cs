@@ -99,7 +99,9 @@ namespace Emby.Xtream.Plugin.Service
                 StrmLibraryPath = source.StrmLibraryPath,
                 SyncSeries = source.SyncDocuSeries,
                 SeriesRootFolderName = source.DocuSeriesRootFolderName,
-                SelectedSeriesCategoryIds = source.SelectedDocuSeriesCategoryIds ?? new int[0],
+                SelectedSeriesCategoryIds = source.EnableGenreBasedLibraryRouting
+                    ? source.SelectedSeriesCategoryIds ?? new int[0]
+                    : source.SelectedDocuSeriesCategoryIds ?? new int[0],
                 SeriesFolderMode = source.DocuSeriesFolderMode,
                 SeriesFolderMappings = source.DocuSeriesFolderMappings,
                 EnableContentNameCleaning = source.EnableContentNameCleaning,
@@ -109,6 +111,7 @@ namespace Emby.Xtream.Plugin.Service
                 EnableSeriesIdFolderNaming = source.EnableSeriesIdFolderNaming,
                 EnableSeriesMetadataLookup = source.EnableSeriesMetadataLookup,
                 TvdbFolderIdOverrides = source.TvdbFolderIdOverrides,
+                EnableGenreBasedLibraryRouting = source.EnableGenreBasedLibraryRouting,
                 EnableNfoFiles = source.EnableNfoFiles,
                 CachedSeriesCategories = source.CachedSeriesCategories,
                 SmartSkipExisting = source.SmartSkipExisting,

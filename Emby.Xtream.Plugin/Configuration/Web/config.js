@@ -92,6 +92,11 @@ function (BaseView, loading) {
         view.querySelector('.chkSyncDocumentaries').addEventListener('change', function () {
             updateDocumentaryVisibility(view);
         });
+        view.querySelector('.chkEnableGenreBasedLibraryRouting').addEventListener('change', function () {
+            crossDisableVodCategories(view);
+            crossDisableSeriesCategories(view);
+            updateGenreRoutingNotices(view);
+        });
 
         view.querySelector('.chkSyncSeries').addEventListener('change', function () {
             updateSeriesVisibility(view);
@@ -537,6 +542,9 @@ function (BaseView, loading) {
                 .replace(/Movies/g, 'Documentaries')
                 .replace(/Documentary Documentaries/g, 'Documentaries')
                 .replace(/documentary documentaries/g, 'documentaries');
+            docTarget.insertAdjacentHTML('afterbegin',
+                '<div class="documentaryGenreRoutingNotice fieldDescription" style="display:none; margin:0 0 1em; padding:0.8em 1em; border:1px solid var(--xt-accent); border-radius:6px;">' +
+                '<strong>Genre routing is active.</strong> Source categories come from the Movies tab. Documentary category selections below are ignored; output folder settings still apply.</div>');
         }
 
         var seriesSource = view.querySelector('.tabSeries');
@@ -575,6 +583,9 @@ function (BaseView, loading) {
                 .replace(/TV Shows/g, 'Docu Series')
                 .replace(/Docu Docu Series/g, 'Docu Series')
                 .replace(/docu docu series/g, 'docu series');
+            docuTarget.insertAdjacentHTML('afterbegin',
+                '<div class="docuSeriesGenreRoutingNotice fieldDescription" style="display:none; margin:0 0 1em; padding:0.8em 1em; border:1px solid var(--xt-accent); border-radius:6px;">' +
+                '<strong>Genre routing is active.</strong> Source categories come from the TV Shows tab. Docu Series category selections below are ignored; output folder settings still apply.</div>');
         }
     }
 
@@ -691,6 +702,7 @@ function (BaseView, loading) {
             validateStrmPath(view);
             refreshSubfolderHints(view);
             setChecked(view.querySelector('.chkSmartSkipExisting'), config.SmartSkipExisting !== false);
+            setChecked(view.querySelector('.chkEnableGenreBasedLibraryRouting'), !!config.EnableGenreBasedLibraryRouting);
             view.querySelector('.txtSyncParallelism').value = config.SyncParallelism || 3;
             setChecked(view.querySelector('.chkCleanupOrphans'), !!config.CleanupOrphans);
             view.querySelector('.txtOrphanSafetyThreshold').value = Math.round((config.OrphanSafetyThreshold || 0.20) * 100);
@@ -722,6 +734,7 @@ function (BaseView, loading) {
             updateDocumentaryVisibility(view);
             updateSeriesVisibility(view);
             updateDocuSeriesVisibility(view);
+            updateGenreRoutingNotices(view);
             updateFoldersVisibility(view, 'movie');
             updateFoldersVisibility(view, 'documentary');
             updateFoldersVisibility(view, 'series');
@@ -824,6 +837,7 @@ function (BaseView, loading) {
             config.SeriesRootFolderName = (view.querySelector('.txtSeriesRootFolderName').value || 'TV Shows').trim() || 'TV Shows';
             config.DocuSeriesRootFolderName = (view.querySelector('.txtDocuSeriesRootFolderName').value || 'Docu Series').trim() || 'Docu Series';
             config.SmartSkipExisting = view.querySelector('.chkSmartSkipExisting').checked;
+            config.EnableGenreBasedLibraryRouting = view.querySelector('.chkEnableGenreBasedLibraryRouting').checked;
             config.SyncParallelism = parseInt(view.querySelector('.txtSyncParallelism').value, 10) || 3;
             config.CleanupOrphans = view.querySelector('.chkCleanupOrphans').checked;
             config.OrphanSafetyThreshold = (parseInt(view.querySelector('.txtOrphanSafetyThreshold').value, 10) || 0) / 100;
@@ -1648,13 +1662,44 @@ function (BaseView, loading) {
     }
 
     function crossDisableVodCategories(view) {
+        if (view.querySelector('.chkEnableGenreBasedLibraryRouting').checked) {
+            clearCategoryDisables(view, 'vodCategoryCheckbox');
+            clearCategoryDisables(view, 'documentaryCategoryCheckbox');
+            return;
+        }
         crossDisableCategories(view, 'vodCategoryCheckbox', 'documentaryCategoryCheckbox');
         crossDisableCategories(view, 'documentaryCategoryCheckbox', 'vodCategoryCheckbox');
     }
 
     function crossDisableSeriesCategories(view) {
+        if (view.querySelector('.chkEnableGenreBasedLibraryRouting').checked) {
+            clearCategoryDisables(view, 'seriesCategoryCheckbox');
+            clearCategoryDisables(view, 'docuSeriesCategoryCheckbox');
+            return;
+        }
         crossDisableCategories(view, 'seriesCategoryCheckbox', 'docuSeriesCategoryCheckbox');
         crossDisableCategories(view, 'docuSeriesCategoryCheckbox', 'seriesCategoryCheckbox');
+    }
+
+    function clearCategoryDisables(view, checkboxClass) {
+        var boxes = view.querySelectorAll('.' + checkboxClass);
+        for (var i = 0; i < boxes.length; i++) {
+            boxes[i].disabled = false;
+            var label = boxes[i].parentNode;
+            if (label) {
+                label.style.opacity = '';
+                label.style.cursor = '';
+                label.title = '';
+            }
+        }
+    }
+
+    function updateGenreRoutingNotices(view) {
+        var enabled = view.querySelector('.chkEnableGenreBasedLibraryRouting').checked;
+        var documentaryNotice = view.querySelector('.documentaryGenreRoutingNotice');
+        var docuSeriesNotice = view.querySelector('.docuSeriesGenreRoutingNotice');
+        if (documentaryNotice) documentaryNotice.style.display = enabled ? '' : 'none';
+        if (docuSeriesNotice) docuSeriesNotice.style.display = enabled ? '' : 'none';
     }
 
     // ---- Live TV Categories ----

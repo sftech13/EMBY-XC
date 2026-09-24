@@ -792,6 +792,18 @@
                     <div class="settingsOptionList">
                         <div class="settingsOptionItem">
                             <div>
+                                <div class="settingsOptionTitle">Split Documentary Libraries by Genre</div>
+                                <div class="settingsOptionDescription">Use the Movies source categories for Movies and Documentaries, and the TV Shows source categories for TV Shows and Docu Series. Documentary movies go to Documentaries; Documentary and Reality series go to Docu Series. Titles with unavailable genre metadata stay in the main Movies or TV Shows library.</div>
+                            </div>
+                            <div class="checkboxContainer checkboxContainer-withDescription">
+                                <label>
+                                    <input class="chkEnableGenreBasedLibraryRouting" type="checkbox" is="emby-checkbox" />
+                                    <span>Enabled</span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="settingsOptionItem">
+                            <div>
                                 <div class="settingsOptionTitle">Smart Skip Existing</div>
                                 <div class="settingsOptionDescription">Compatibility setting. XC2EMBY always compares normalized URLs and never rewrites an unchanged STRM file.</div>
                             </div>
@@ -805,7 +817,7 @@
                         <div class="settingsOptionItem">
                             <div>
                                 <div class="settingsOptionTitle">Sync Parallelism</div>
-                                <div class="settingsOptionDescription">Parallel operations during sync. Higher is faster but increases provider load.</div>
+                                <div class="settingsOptionDescription">Maximum concurrent operations during sync. Higher is faster but increases provider load. Rate-limited VOD genre requests are also automatically paced.</div>
                             </div>
                             <div class="inputContainer">
                                 <input class="txtSyncParallelism" type="number" is="emby-input"
@@ -849,7 +861,7 @@
                         <div class="settingsOptionItem">
                             <div>
                                 <div class="settingsOptionTitle">Write NFO Metadata Files</div>
-                                <div class="settingsOptionDescription">Writes Kodi-compatible NFO sidecars for faster Emby metadata matching.</div>
+                                <div class="settingsOptionDescription">Writes Kodi-compatible movie, show, and episode metadata. Missing NFOs are backfilled without rewriting unchanged STRMs; provider codec details are included when available.</div>
                             </div>
                             <div class="checkboxContainer checkboxContainer-withDescription">
                                 <label>

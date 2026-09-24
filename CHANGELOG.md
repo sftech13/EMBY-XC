@@ -4,6 +4,31 @@ All notable changes to XC2EMBY are listed here, newest first.
 
 ---
 
+## v1.1.138
+- NFO sidecars are now written to a same-directory temporary file and atomically replaced, so Emby cannot observe a partially written XC2EMBY XML document during concurrent metadata activity.
+- Delayed targeted library refreshes now inspect Emby's active per-library refresh state and queued metadata work before starting. Matching work is postponed and retried instead of overlapping a manual refresh of the same library.
+- Added a recent-NFO-activity fallback for Emby versions that do not fully expose per-library refresh state, plus regression coverage for complete NFO replacement and matching-refresh deferral.
+
+## v1.1.137
+- Reworked **Write NFO Metadata Files** into a provider-backed movie, show, and episode metadata writer. Movie TMDB IDs and descriptive metadata are now retained independently of metadata-ID folder naming, while series and episode NFOs include the provider's title, plot, dates, runtime, rating, genres, cast, artwork, trailer, and available external IDs.
+- Missing NFO sidecars are backfilled even when the matching STRM URL is unchanged. Existing NFOs are compared before writing, preserving modification times when their generated content is identical and preventing unnecessary Emby refresh churn.
+- Added generic optional codec handling for both nested and flattened Xtream response shapes. Video/audio codec, resolution, frame rate, bitrate, channel, sample-rate, language, and duration fields are included as Kodi `streamdetails` when supplied, but missing codec data no longer prevents the descriptive NFO from being created.
+- Series Smart Skip fingerprints now include NFO-relevant provider metadata when NFO writing is enabled, so real metadata changes update sidecars while unchanged series remain fast.
+- Applied the shared request-start pacer to VOD and series detail calls, including NFO backfills and media-stream population, preventing high parallelism from producing provider HTTP 429 bursts.
+
+## v1.1.136
+- VOD genre discovery once again honors **Sync Parallelism** as its maximum concurrent-operation count. A separate shared start-rate pacer spaces `get_vod_info` requests across those workers, preserving useful concurrency for slow responses without turning it into a provider rate-limit burst.
+- Clarified the Sync Parallelism setting to distinguish concurrent operations from automatic pacing applied to rate-limited VOD genre requests.
+
+## v1.1.135
+- The first VOD classification pass now reports real item progress instead of `0 / 0`.
+- VOD detail discovery now uses one queue paced below ten initial requests per second, preventing local XC servers from returning bursts of HTTP 429 responses while retaining every 500-item persistent cache checkpoint.
+
+## v1.1.134
+- Added opt-in genre-based library routing for providers that expose service/source categories instead of dedicated documentary categories. Movies and Documentaries can now share the Movies category selection, while TV Shows and DocuSeries share the TV selection without duplicating titles.
+- VOD titles whose `get_vod_info` genre contains `Documentary` are routed to Documentaries. The persistent, title-validated genre cache is checkpointed during large first runs. Failed or missing genre metadata safely falls back to Movies instead of dropping content.
+- Series whose catalog genre contains `Documentary` or `Reality` are routed to DocuSeries; all other or missing genres remain in TV Shows. Existing category-based behavior remains unchanged until **Split Documentary Libraries by Genre** is enabled.
+
 ## v1.1.133
 - Fixed Live TV tuner slots leaking after upgrading to Emby 4.10. Emby's new consumer API registers the initial viewer explicitly, so XC2EMBY now starts 4.10 streams at zero consumers while retaining the legacy initial count required by Emby 4.8/4.9. Stopping the final viewer once again closes the stream instead of eventually reaching a false simultaneous-stream limit.
 

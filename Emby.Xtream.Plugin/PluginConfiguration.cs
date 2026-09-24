@@ -57,6 +57,15 @@ namespace Emby.Xtream.Plugin
         public string DocumentaryFolderMode { get; set; } = "single";
         public string DocumentaryFolderMappings { get; set; } = string.Empty;
 
+        // When enabled, Movies/Documentaries share the movie category selection and
+        // TV Shows/DocuSeries share the series category selection. Provider genres
+        // decide which output library receives each item.
+        public bool EnableGenreBasedLibraryRouting { get; set; }
+
+        // Persistent stream_id -> genre cache populated from get_vod_info. The main
+        // VOD list commonly omits genre, so this avoids re-querying every title.
+        public string VodGenreCacheJson { get; set; } = string.Empty;
+
         // Series / TV Shows
         public bool SyncSeries { get; set; }
         public string SeriesRootFolderName { get; set; } = "TV Shows";

@@ -2,6 +2,7 @@ using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -9,6 +10,8 @@ using System.Net.Http.Headers;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Text.Json;
+using System.Xml;
+using Emby.Xtream.Plugin.Client.Models;
 using Emby.Xtream.Plugin.Service;
 
 namespace Emby.Xtream.Plugin.Tests
@@ -39,6 +42,13 @@ namespace Emby.Xtream.Plugin.Tests
                 ("cold Live TV tune receives completed probe metadata", ColdLiveTvTuneAwaitsProbeAsync),
                 ("cold Live TV probe wait remains bounded", ColdLiveTvProbeWaitIsBoundedAsync),
                 ("sanitized logs redact IPv6 addresses", SanitizedLogsRedactIpv6Async),
+                ("genre routing separates documentary libraries without dropping unknown VOD", GenreRoutingSeparatesLibrariesAsync),
+                ("movie NFO keeps provider metadata and generic codecs", RichMovieNfoUsesProviderMetadataAsync),
+                ("episode NFO does not require codec data", EpisodeNfoWithoutCodecAsync),
+                ("provider episode detail shape retains metadata and generic codecs", ProviderEpisodeMetadataDeserializesAsync),
+                ("NFO metadata changes invalidate series smart skip", NfoMetadataChangesInvalidateSmartSkipAsync),
+                ("NFO updates use a complete replacement and clean temporary files", NfoReplacementIsCompleteAsync),
+                ("targeted library refresh defers for matching Emby work", TargetedRefreshDefersForMatchingEmbyWorkAsync),
             };
 
             foreach (var test in tests)
@@ -95,6 +105,225 @@ namespace Emby.Xtream.Plugin.Tests
                 request.Headers.Range?.Ranges.Single().To == EpisodePlaybackValidator.RangeBytes - 1 &&
                 request.Headers.UserAgent.ToString() == EpisodePlaybackValidator.DefaultMediaUserAgent),
                 "validation must use a VLC-compatible 1 KB Range GET, never HEAD");
+        }
+
+        private static Task GenreRoutingSeparatesLibrariesAsync()
+        {
+            Assert(StrmSyncService.ShouldIncludeVodForGenreRouting("Documentary, History", true),
+                "documentary VOD must enter Documentaries");
+            Assert(!StrmSyncService.ShouldIncludeVodForGenreRouting("Documentary, History", false),
+                "documentary VOD must not be duplicated in Movies");
+            Assert(StrmSyncService.ShouldIncludeVodForGenreRouting("Drama", false),
+                "ordinary VOD must remain in Movies");
+            Assert(!StrmSyncService.ShouldIncludeVodForGenreRouting("Drama", true),
+                "ordinary VOD must not enter Documentaries");
+            Assert(StrmSyncService.ShouldIncludeVodForGenreRouting(null, false),
+                "missing VOD genre must safely fall back to Movies");
+            Assert(!StrmSyncService.ShouldIncludeVodForGenreRouting(null, true),
+                "missing VOD genre must not create a documentary duplicate");
+            Assert(StrmSyncService.IsDocuSeriesGenre("Reality-TV"),
+                "Reality series must enter DocuSeries");
+            Assert(StrmSyncService.IsDocuSeriesGenre("Crime, Documentary"),
+                "Documentary series must enter DocuSeries");
+            Assert(!StrmSyncService.IsDocuSeriesGenre("Drama, Comedy"),
+                "ordinary series must remain in TV Shows");
+            return Task.CompletedTask;
+        }
+
+        private static Task RichMovieNfoUsesProviderMetadataAsync()
+        {
+            var directory = Path.Combine(Path.GetTempPath(), "xc2emby-nfo-" + Guid.NewGuid().ToString("N"));
+            var path = Path.Combine(directory, "Alien (1979).nfo");
+            try
+            {
+                var detail = new VodDetailInfo
+                {
+                    Name = "Provider title that should not replace the cleaned title",
+                    TmdbId = "348",
+                    Genre = "Horror, Science Fiction",
+                    Plot = "A test plot & escaped value.",
+                    Cast = "Sigourney Weaver, Tom Skerritt",
+                    Director = "Ridley Scott",
+                    ReleaseDate = "1979-05-25",
+                    DurationSecs = 7020,
+                    Rating = "8.17",
+                    MediaInfo = new EpisodeMediaInfo
+                    {
+                        VideoCodec = "hevc",
+                        AudioCodec = "eac3",
+                        Resolution = "3840x2160",
+                        FrameRate = "60000/1001",
+                        Channels = 6,
+                    },
+                };
+
+                Assert(NfoWriter.WriteMovieNfo(path, "Alien (1979)", detail, 1979),
+                    "a missing movie NFO must be created");
+                var content = File.ReadAllText(path);
+                Assert(content.Contains("<title>Alien (1979)</title>"),
+                    "the cleaned library title must win over the raw provider title");
+                Assert(content.Contains("<uniqueid type=\"tmdb\" default=\"true\">348</uniqueid>"),
+                    "provider TMDB ID must be written independently of folder naming");
+                Assert(content.Contains("A test plot &amp; escaped value."),
+                    "provider plot must be XML escaped");
+                Assert(content.Contains("<codec>hevc</codec>") &&
+                       content.Contains("<codec>eac3</codec>") &&
+                       content.Contains("<width>3840</width>"),
+                    "generic flat codec fields must become Kodi streamdetails");
+                Assert(!NfoWriter.WriteMovieNfo(path, "Alien (1979)", detail, 1979),
+                    "an identical NFO must not be rewritten");
+            }
+            finally
+            {
+                if (Directory.Exists(directory)) Directory.Delete(directory, true);
+            }
+            return Task.CompletedTask;
+        }
+
+        private static Task EpisodeNfoWithoutCodecAsync()
+        {
+            var directory = Path.Combine(Path.GetTempPath(), "xc2emby-episode-nfo-" + Guid.NewGuid().ToString("N"));
+            var path = Path.Combine(directory, "Show - S01E01.nfo");
+            try
+            {
+                var episode = new EpisodeInfo
+                {
+                    Title = "Pilot",
+                    Season = 1,
+                    EpisodeNum = 1,
+                    Info = new EpisodeMediaInfo
+                    {
+                        Plot = "The series begins.",
+                        ReleaseDate = "2026-09-23",
+                        DurationSecs = 3060,
+                        Rating = "7.5",
+                    },
+                };
+                Assert(NfoWriter.WriteEpisodeNfo(path, "Pilot", 1, 1, episode),
+                    "descriptive episode metadata must create an NFO without codecs");
+                var content = File.ReadAllText(path);
+                Assert(content.Contains("<aired>2026-09-23</aired>"), "episode air date must be written");
+                Assert(content.Contains("<plot>The series begins.</plot>"), "episode plot must be written");
+                Assert(content.Contains("<runtime>51</runtime>"), "episode runtime must be written in minutes");
+                Assert(!content.Contains("<streamdetails>"),
+                    "missing optional codec data must omit only streamdetails");
+            }
+            finally
+            {
+                if (Directory.Exists(directory)) Directory.Delete(directory, true);
+            }
+            return Task.CompletedTask;
+        }
+
+        private static Task NfoMetadataChangesInvalidateSmartSkipAsync()
+        {
+            var episodes = new Dictionary<string, List<EpisodeInfo>>
+            {
+                ["1"] = new List<EpisodeInfo>
+                {
+                    new EpisodeInfo
+                    {
+                        Id = 101,
+                        Season = 1,
+                        EpisodeNum = 1,
+                        ContainerExtension = "mkv",
+                        Info = new EpisodeMediaInfo { Plot = "Original plot" },
+                    },
+                },
+            };
+            var withNfo = new PluginConfiguration { EnableNfoFiles = true };
+            var withoutNfo = new PluginConfiguration { EnableNfoFiles = false };
+            var nfoBefore = StrmSyncService.ComputeSeriesSyncFingerprint(episodes, withNfo);
+            var strmBefore = StrmSyncService.ComputeSeriesSyncFingerprint(episodes, withoutNfo);
+            episodes["1"][0].Info.Plot = "Updated plot";
+            var nfoAfter = StrmSyncService.ComputeSeriesSyncFingerprint(episodes, withNfo);
+            var strmAfter = StrmSyncService.ComputeSeriesSyncFingerprint(episodes, withoutNfo);
+            Assert(nfoBefore != nfoAfter, "NFO-enabled sync must notice provider metadata changes");
+            Assert(strmBefore == strmAfter, "metadata-only changes must not invalidate STRM-only smart skip");
+            return Task.CompletedTask;
+        }
+
+        private static Task NfoReplacementIsCompleteAsync()
+        {
+            var directory = Path.Combine(Path.GetTempPath(), "xc2emby-atomic-nfo-" + Guid.NewGuid().ToString("N"));
+            var path = Path.Combine(directory, "Movie.nfo");
+            try
+            {
+                Assert(NfoWriter.WriteMovieNfo(
+                    path,
+                    "First title",
+                    new VodDetailInfo { Plot = "First plot" },
+                    1955),
+                    "the first NFO must be created");
+                Assert(NfoWriter.WriteMovieNfo(
+                    path,
+                    "Replacement title",
+                    new VodDetailInfo { Plot = "Replacement plot" },
+                    1956),
+                    "changed NFO content must replace the prior file");
+
+                var document = new XmlDocument();
+                document.Load(path);
+                Assert(document.DocumentElement?.Name == "movie", "the replacement must remain one complete XML document");
+                Assert(document.SelectSingleNode("/movie/title")?.InnerText == "Replacement title",
+                    "the final path must contain only the replacement content");
+                Assert(!Directory.EnumerateFiles(directory, "*.xc2emby-*.tmp").Any(),
+                    "atomic NFO writes must not leave temporary files behind");
+            }
+            finally
+            {
+                if (Directory.Exists(directory)) Directory.Delete(directory, true);
+            }
+            return Task.CompletedTask;
+        }
+
+        private static Task TargetedRefreshDefersForMatchingEmbyWorkAsync()
+        {
+            var targets = new long[] { 10, 20 };
+            Assert(StrmSyncService.ShouldDeferTargetedLibraryRefresh(true, targets, Array.Empty<long>(), Array.Empty<long>()),
+                "a global Emby scan must postpone the targeted refresh");
+            Assert(StrmSyncService.ShouldDeferTargetedLibraryRefresh(false, targets, new long[] { 20 }, Array.Empty<long>()),
+                "an active refresh of the same library must postpone the targeted refresh");
+            Assert(StrmSyncService.ShouldDeferTargetedLibraryRefresh(false, targets, Array.Empty<long>(), new long[] { 99 }),
+                "a queued child refresh already mapped to the target must postpone the targeted refresh");
+            Assert(!StrmSyncService.ShouldDeferTargetedLibraryRefresh(false, targets, new long[] { 30 }, Array.Empty<long>()),
+                "unrelated Emby refresh work must not block the target library");
+            return Task.CompletedTask;
+        }
+
+        private static Task ProviderEpisodeMetadataDeserializesAsync()
+        {
+            const string json = @"{
+              ""episodes"": {
+                ""1"": [{
+                  ""id"": ""5001"", ""episode_num"": 1, ""season"": 1,
+                  ""title"": ""Pilot"", ""container_extension"": ""mkv"",
+                  ""info"": {
+                    ""plot"": ""Provider plot"", ""releaseDate"": ""2026-09-23"",
+                    ""duration"": ""00:51:00"", ""duration_secs"": ""3060"",
+                    ""rating"": 7.5, ""movie_image"": ""https://images.invalid/episode.jpg"",
+                    ""video_codec"": ""hevc"", ""audio_codec"": ""eac3"",
+                    ""resolution"": ""3840x2160"", ""channels"": ""6""
+                  }
+                }]
+              },
+              ""info"": {""name"": ""Test Show"", ""releaseDate"": ""2026-09-23""}
+            }";
+            var options = new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true,
+                NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString,
+            };
+            var detail = JsonSerializer.Deserialize<SeriesDetailInfo>(json, options);
+            var episode = detail.Episodes["1"][0];
+            Assert(episode.Info.Plot == "Provider plot", "provider episode plot must survive deserialization");
+            Assert(episode.Info.ReleaseDate == "2026-09-23", "provider episode date must survive deserialization");
+            Assert(episode.Info.DurationSecs == 3060, "string duration_secs must deserialize flexibly");
+            Assert(episode.Info.VideoCodec == "hevc" && episode.Info.AudioCodec == "eac3",
+                "generic flat codec aliases must survive deserialization");
+            Assert(episode.Info.Width == null && episode.Info.Resolution == "3840x2160",
+                "generic resolution must remain available for NFO parsing");
+            return Task.CompletedTask;
         }
 
         private static async Task Http200MediaIsAliveAsync()

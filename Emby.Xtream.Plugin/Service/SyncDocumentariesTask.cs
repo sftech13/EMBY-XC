@@ -69,6 +69,7 @@ namespace Emby.Xtream.Plugin.Service
                     config.LastDocumentarySyncTimestamp = docConfig.LastMovieSyncTimestamp;
                     config.StrmNamingVersion = docConfig.StrmNamingVersion;
                     config.MovieTmdbCacheJson = docConfig.MovieTmdbCacheJson;
+                    config.VodGenreCacheJson = docConfig.VodGenreCacheJson;
                     Plugin.Instance.SaveConfiguration();
                 },
                 progress,
@@ -77,6 +78,7 @@ namespace Emby.Xtream.Plugin.Service
             config.LastDocumentarySyncTimestamp = docConfig.LastMovieSyncTimestamp;
             config.StrmNamingVersion = docConfig.StrmNamingVersion;
             config.MovieTmdbCacheJson = docConfig.MovieTmdbCacheJson;
+            config.VodGenreCacheJson = docConfig.VodGenreCacheJson;
             Plugin.Instance.SaveConfiguration();
             progress.Report(100);
         }
@@ -92,7 +94,9 @@ namespace Emby.Xtream.Plugin.Service
                 StrmLibraryPath = source.StrmLibraryPath,
                 SyncMovies = source.SyncDocumentaries,
                 MovieRootFolderName = source.DocumentaryRootFolderName,
-                SelectedVodCategoryIds = source.SelectedDocumentaryCategoryIds ?? new int[0],
+                SelectedVodCategoryIds = source.EnableGenreBasedLibraryRouting
+                    ? source.SelectedVodCategoryIds ?? new int[0]
+                    : source.SelectedDocumentaryCategoryIds ?? new int[0],
                 MovieFolderMode = source.DocumentaryFolderMode,
                 MovieFolderMappings = source.DocumentaryFolderMappings,
                 EnableContentNameCleaning = source.EnableContentNameCleaning,
@@ -100,6 +104,8 @@ namespace Emby.Xtream.Plugin.Service
                 EnableTmdbFolderNaming = source.EnableTmdbFolderNaming,
                 EnableTmdbFallbackLookup = source.EnableTmdbFallbackLookup,
                 MovieTmdbCacheJson = source.MovieTmdbCacheJson,
+                EnableGenreBasedLibraryRouting = source.EnableGenreBasedLibraryRouting,
+                VodGenreCacheJson = source.VodGenreCacheJson,
                 EnableNfoFiles = source.EnableNfoFiles,
                 SmartSkipExisting = source.SmartSkipExisting,
                 EnableLocalMediaFilter = source.EnableLocalMediaFilter,

@@ -29,6 +29,20 @@ namespace Emby.Xtream.Plugin.Client.Models
         [JsonPropertyName("releaseDate")]
         public string ReleaseDate { get; set; } = string.Empty;
 
+        [JsonPropertyName("release_date")]
+        public string ReleaseDateAlt { get; set; } = string.Empty;
+
+        [JsonPropertyName("year")]
+        [JsonConverter(typeof(StringOrNumberConverter))]
+        public string Year { get; set; } = string.Empty;
+
+        [JsonPropertyName("episode_run_time")]
+        [JsonConverter(typeof(StringOrNumberConverter))]
+        public string EpisodeRunTime { get; set; } = string.Empty;
+
+        [JsonPropertyName("youtube_trailer")]
+        public string YoutubeTrailer { get; set; } = string.Empty;
+
         [JsonPropertyName("rating")]
         [JsonConverter(typeof(StringOrNumberConverter))]
         public string Rating { get; set; } = string.Empty;
@@ -47,5 +61,25 @@ namespace Emby.Xtream.Plugin.Client.Models
         [JsonPropertyName("tmdb")]
         [JsonConverter(typeof(StringOrNumberConverter))]
         public string TmdbId { get; set; } = string.Empty;
+
+        [JsonPropertyName("tmdb_id")]
+        [JsonConverter(typeof(StringOrNumberConverter))]
+        public string TmdbIdAlt { get; set; } = string.Empty;
+
+        [JsonPropertyName("tvdb")]
+        [JsonConverter(typeof(StringOrNumberConverter))]
+        public string TvdbId { get; set; } = string.Empty;
+
+        [JsonPropertyName("tvdb_id")]
+        [JsonConverter(typeof(StringOrNumberConverter))]
+        public string TvdbIdAlt { get; set; } = string.Empty;
+
+        [JsonPropertyName("imdb")]
+        [JsonConverter(typeof(StringOrNumberConverter))]
+        public string ImdbId { get; set; } = string.Empty;
+
+        [JsonPropertyName("imdb_id")]
+        [JsonConverter(typeof(StringOrNumberConverter))]
+        public string ImdbIdAlt { get; set; } = string.Empty;
     }
 }
