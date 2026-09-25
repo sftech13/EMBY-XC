@@ -29,6 +29,10 @@ namespace Emby.Xtream.Plugin.Service
         public int Added;
         public int Changed;
         public int NfoChanged;
+        public int NfoAdded;
+        public int NfoUpdated;
+        public int NfoDeleted;
+        public int MetadataDirectoriesDeleted;
         public int Deleted;
         public volatile bool IsRunning;
 
@@ -724,6 +728,7 @@ namespace Emby.Xtream.Plugin.Service
                 (Volatile.Read(ref p.Added) > 0 ||
                  Volatile.Read(ref p.Changed) > 0 ||
                  Volatile.Read(ref p.NfoChanged) > 0 ||
+                 Volatile.Read(ref p.MetadataDirectoriesDeleted) > 0 ||
                  Volatile.Read(ref p.Deleted) > 0));
 
             lock (_libraryScanLock)
@@ -748,6 +753,50 @@ namespace Emby.Xtream.Plugin.Service
 
                 _libraryScanTimer.Change(LibraryScanQuietPeriod, Timeout.InfiniteTimeSpan);
             }
+        }
+
+        private static void RecordNfoWrite(SyncProgress progress, bool existedBefore)
+        {
+            if (progress == null) return;
+            Interlocked.Increment(ref progress.NfoChanged);
+            if (existedBefore)
+                Interlocked.Increment(ref progress.NfoUpdated);
+            else
+                Interlocked.Increment(ref progress.NfoAdded);
+        }
+
+        private static void RecordMetadataCleanup(
+            SyncProgress progress,
+            MetadataCleanupResult cleanup)
+        {
+            if (progress == null || cleanup == null) return;
+            if (cleanup.NfoFilesRemoved > 0)
+            {
+                Interlocked.Add(ref progress.NfoChanged, cleanup.NfoFilesRemoved);
+                Interlocked.Add(ref progress.NfoDeleted, cleanup.NfoFilesRemoved);
+            }
+            if (cleanup.DirectoriesRemoved > 0)
+                Interlocked.Add(ref progress.MetadataDirectoriesDeleted, cleanup.DirectoriesRemoved);
+        }
+
+        private void LogNfoChangeSummary(string contentType, params SyncProgress[] progressItems)
+        {
+            if (progressItems == null) return;
+            var added = progressItems.Where(p => p != null).Sum(p => Volatile.Read(ref p.NfoAdded));
+            var updated = progressItems.Where(p => p != null).Sum(p => Volatile.Read(ref p.NfoUpdated));
+            var deleted = progressItems.Where(p => p != null).Sum(p => Volatile.Read(ref p.NfoDeleted));
+            var directoriesDeleted = progressItems
+                .Where(p => p != null)
+                .Sum(p => Volatile.Read(ref p.MetadataDirectoriesDeleted));
+            if (added == 0 && updated == 0 && deleted == 0 && directoriesDeleted == 0) return;
+
+            _logger.Info(
+                "{0} metadata changes: {1} NFO added, {2} updated, {3} deleted; {4} metadata-only/empty directories deleted",
+                contentType,
+                added,
+                updated,
+                deleted,
+                directoriesDeleted);
         }
 
         private void FlushCoalescedLibraryScan(object state)
@@ -1897,12 +1946,13 @@ namespace Emby.Xtream.Plugin.Service
 
                             try
                             {
+                                var nfoExisted = File.Exists(nfoPath);
                                 if (NfoWriter.WriteMovieNfo(
                                     nfoPath,
                                     owner.CleanedName,
                                     owner.Detail ?? new VodDetailInfo { TmdbId = owner.TmdbId },
                                     nfoYear))
-                                    Interlocked.Increment(ref mp.NfoChanged);
+                                    RecordNfoWrite(mp, nfoExisted);
                             }
                             catch (Exception ex)
                             {
@@ -2007,11 +2057,10 @@ namespace Emby.Xtream.Plugin.Service
                         mp.Deleted = DeleteOrphans(orphans, moviesRoot);
                     }
 
-                    var metadataOnlyDirectories = PruneMetadataOnlyDirectories(
+                    var metadataCleanup = PruneMetadataOnlyDirectories(
                         moviesRoot,
                         cancellationToken);
-                    if (metadataOnlyDirectories > 0)
-                        Interlocked.Increment(ref mp.NfoChanged);
+                    RecordMetadataCleanup(mp, metadataCleanup);
                 }
                 mp.Deleted += filterDeletedMovies;
 
@@ -2028,6 +2077,7 @@ namespace Emby.Xtream.Plugin.Service
                 }
 
                 LogStreamUrlChangeSummary(isDocumentaries ? "Documentary" : "Movie", urlChangeStats);
+                LogNfoChangeSummary(isDocumentaries ? "Documentary" : "Movie", mp);
                 _logger.Info("Movie STRM sync completed: {0} added, {1} changed, {2} skipped, {3} deleted, {4} failed",
                     mp.Added, mp.Changed, mp.Skipped, mp.Deleted, mp.Failed);
                 CompleteSyncAndCoalesceLibraryScan(
@@ -2433,10 +2483,12 @@ namespace Emby.Xtream.Plugin.Service
 
                         var seriesDir = Path.Combine(config.StrmLibraryPath, subFolder, folderName);
                         var isNewSeries = !Directory.Exists(seriesDir);
+                        var hasMaterializedEpisode = false;
 
                         // Track max LastModified for delta state
                         long seriesLm = 0;
                         long.TryParse(series.LastModified, NumberStyles.None, CultureInfo.InvariantCulture, out seriesLm);
+                        var providerSeriesChanged = lastSeriesTs <= 0 || seriesLm > lastSeriesTs;
                         if (seriesLm > 0)
                         {
                             lock (_historyLock)
@@ -2552,6 +2604,13 @@ namespace Emby.Xtream.Plugin.Service
                                 else
                                     Interlocked.Increment(ref ep.Skipped);
 
+                                // A provider series becomes library content only when at
+                                // least one episode STRM actually exists. Without this
+                                // guard, an all-locally-filtered series creates only a
+                                // tvshow.nfo, cleanup removes it, and every no-op sync
+                                // incorrectly schedules another Emby library refresh.
+                                hasMaterializedEpisode = true;
+
                                 var nfoPath = Path.ChangeExtension(strmPath, ".nfo");
                                 if (config.EnableNfoFiles &&
                                     (strmResult != StrmWriteResult.Unchanged ||
@@ -2560,8 +2619,9 @@ namespace Emby.Xtream.Plugin.Service
                                 {
                                     try
                                     {
+                                        var nfoExisted = File.Exists(nfoPath);
                                         if (NfoWriter.WriteEpisodeNfo(nfoPath, rawEpisodeTitle, seasonNum, episodeNum, episode))
-                                            Interlocked.Increment(ref ep.NfoChanged);
+                                            RecordNfoWrite(ep, nfoExisted);
                                     }
                                     catch (Exception ex) { _logger.Warn("WriteEpisodeNfo failed for '{0}': {1}", nfoPath, ex.Message); }
                                 }
@@ -2580,7 +2640,13 @@ namespace Emby.Xtream.Plugin.Service
                             !pathOwnership.FolderOwners.TryGetValue(seriesDir, out folderOwnerId) ||
                             folderOwnerId == series.SeriesId;
                         var showNfoPath = Path.Combine(seriesDir, "tvshow.nfo");
-                        if (config.EnableNfoFiles && ownsSeriesFolder)
+                        if (ShouldWriteShowNfo(
+                            config.EnableNfoFiles,
+                            ownsSeriesFolder,
+                            hasMaterializedEpisode,
+                            canSmartSkip,
+                            providerSeriesChanged,
+                            File.Exists(showNfoPath)))
                         {
                             var tvdbIdMatch = Regex.Match(folderName, @"\[tvdbid=(\d+)\]");
                             var tmdbIdMatch = Regex.Match(folderName, @"\[tmdbid=(\d+)\]");
@@ -2593,18 +2659,19 @@ namespace Emby.Xtream.Plugin.Service
                             if (string.IsNullOrWhiteSpace(showTmdbId)) showTmdbId = providerTmdbId;
                             try
                             {
+                                var nfoExisted = File.Exists(showNfoPath);
                                 if (NfoWriter.WriteShowNfo(
                                     showNfoPath,
                                     seriesName,
                                     detail?.Info ?? series,
                                     showTvdbId,
                                     showTmdbId))
-                                    Interlocked.Increment(ref sp.NfoChanged);
+                                    RecordNfoWrite(sp, nfoExisted);
                             }
                             catch (Exception ex) { _logger.Debug("Show NFO write failed for '{0}': {1}", seriesName, ex.Message); }
                         }
 
-                        if (isNewSeries)
+                        if (isNewSeries && hasMaterializedEpisode && ownsSeriesFolder)
                         {
                             Interlocked.Increment(ref sp.Added);
                             lock (addedSeriesTitles)
@@ -2738,11 +2805,10 @@ namespace Emby.Xtream.Plugin.Service
                         ep.Deleted = deleted;
                     }
 
-                    var metadataOnlyDirectories = PruneMetadataOnlyDirectories(
+                    var metadataCleanup = PruneMetadataOnlyDirectories(
                         showsRoot,
                         cancellationToken);
-                    if (metadataOnlyDirectories > 0)
-                        Interlocked.Increment(ref sp.NfoChanged);
+                    RecordMetadataCleanup(sp, metadataCleanup);
                 }
                 ep.Deleted += filterDeletedEpisodes;
 
@@ -2779,6 +2845,7 @@ namespace Emby.Xtream.Plugin.Service
                         pathOwnership.CompetingPathCount);
                 ep.Failed = sp.Failed;
                 LogStreamUrlChangeSummary(isDocuSeries ? "DocuSeries" : "Series", urlChangeStats);
+                LogNfoChangeSummary(isDocuSeries ? "DocuSeries" : "Series", sp, ep);
                 _logger.Info("Series STRM sync completed: {0} episodes added, {1} changed, {2} skipped, {3} deleted, {4} failed",
                     ep.Added, ep.Changed, ep.Skipped, ep.Deleted, sp.Failed);
                 CompleteSyncAndCoalesceLibraryScan(
@@ -2973,12 +3040,13 @@ namespace Emby.Xtream.Plugin.Service
                 }
                 try
                 {
+                    var nfoExisted = File.Exists(nfoPath);
                     if (NfoWriter.WriteMovieNfo(
                         nfoPath,
                         cleanedName,
                         new VodDetailInfo { Name = cleanedName, TmdbId = item.TmdbId },
                         nfoYear))
-                        Interlocked.Increment(ref _retryProgress.NfoChanged);
+                        RecordNfoWrite(_retryProgress, nfoExisted);
                 }
                 catch (Exception ex) { _logger.Debug("NFO write failed on retry for '{0}': {1}", item.Name, ex.Message); }
             }
@@ -3042,8 +3110,9 @@ namespace Emby.Xtream.Plugin.Service
                     {
                         try
                         {
+                            var nfoExisted = File.Exists(nfoPath);
                             if (NfoWriter.WriteEpisodeNfo(nfoPath, rawTitle, seasonNum, episodeNum, ep))
-                                Interlocked.Increment(ref _retryProgress.NfoChanged);
+                                RecordNfoWrite(_retryProgress, nfoExisted);
                         }
                         catch { }
                     }
@@ -4619,12 +4688,30 @@ namespace Emby.Xtream.Plugin.Service
             }
         }
 
-        private int PruneMetadataOnlyDirectories(
+        internal static bool ShouldWriteShowNfo(
+            bool enableNfoFiles,
+            bool ownsSeriesFolder,
+            bool hasMaterializedEpisode,
+            bool canSmartSkip,
+            bool providerSeriesChanged,
+            bool nfoExists)
+            => enableNfoFiles &&
+               ownsSeriesFolder &&
+               hasMaterializedEpisode &&
+               (!canSmartSkip || providerSeriesChanged || !nfoExists);
+
+        private sealed class MetadataCleanupResult
+        {
+            public int DirectoriesRemoved;
+            public int NfoFilesRemoved;
+        }
+
+        private MetadataCleanupResult PruneMetadataOnlyDirectories(
             string rootPath,
             CancellationToken cancellationToken)
         {
             if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
-                return 0;
+                return new MetadataCleanupResult();
 
             var root = Path.GetFullPath(rootPath)
                 .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
@@ -4746,7 +4833,11 @@ namespace Emby.Xtream.Plugin.Service
                     root);
             }
 
-            return removedDirectories;
+            return new MetadataCleanupResult
+            {
+                DirectoriesRemoved = removedDirectories,
+                NfoFilesRemoved = removedNfoFiles,
+            };
         }
 
         // Stages orphan full paths as relative paths in PendingOrphansJson.

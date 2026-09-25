@@ -48,6 +48,7 @@ namespace Emby.Xtream.Plugin.Tests
                 ("provider episode detail shape retains metadata and generic codecs", ProviderEpisodeMetadataDeserializesAsync),
                 ("NFO metadata changes invalidate series smart skip", NfoMetadataChangesInvalidateSmartSkipAsync),
                 ("NFO updates use a complete replacement and clean temporary files", NfoReplacementIsCompleteAsync),
+                ("metadata-only series do not create show NFO folders", MetadataOnlySeriesDoesNotCreateShowNfoAsync),
                 ("targeted library refresh defers for matching Emby work", TargetedRefreshDefersForMatchingEmbyWorkAsync),
             };
 
@@ -67,6 +68,25 @@ namespace Emby.Xtream.Plugin.Tests
 
             Console.WriteLine($"All {tests.Count} regression tests passed.");
             return 0;
+        }
+
+        private static Task MetadataOnlySeriesDoesNotCreateShowNfoAsync()
+        {
+            Assert(!StrmSyncService.ShouldWriteShowNfo(true, true, false, true, false, false),
+                "NFO writing must remain off when every provider episode was filtered or absent");
+            Assert(!StrmSyncService.ShouldWriteShowNfo(true, false, true, false, true, false),
+                "a duplicate provider record must not write the owner folder's show NFO");
+            Assert(!StrmSyncService.ShouldWriteShowNfo(false, true, true, false, true, false),
+                "the NFO setting must still be respected");
+            Assert(StrmSyncService.ShouldWriteShowNfo(true, true, true, false, true, false),
+                "an owned series with a materialized STRM must write its show NFO");
+            Assert(!StrmSyncService.ShouldWriteShowNfo(true, true, true, true, false, true),
+                "an unchanged provider record must preserve its existing show NFO");
+            Assert(StrmSyncService.ShouldWriteShowNfo(true, true, true, true, true, true),
+                "changed provider metadata must update an existing show NFO");
+            Assert(StrmSyncService.ShouldWriteShowNfo(true, true, true, true, false, false),
+                "a missing show NFO must be created even when Smart Skip applies");
+            return Task.CompletedTask;
         }
 
         private static async Task EmptyDetailAndWorkingEpisodesPreserveAllAsync()

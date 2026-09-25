@@ -4,6 +4,12 @@ All notable changes to XC2EMBY are listed here, newest first.
 
 ---
 
+## v1.1.139
+- Fixed unchanged TV Shows and DocuSeries syncs creating `tvshow.nfo` files for provider series with no materialized STRM episodes, then deleting those metadata-only folders during cleanup and incorrectly scheduling another targeted Emby refresh.
+- Existing show NFOs are now preserved when Smart Skip confirms both the provider series and its episodes are unchanged. Missing NFOs and genuine provider metadata changes are still written, preventing XC2EMBY and Emby from repeatedly overwriting the same files.
+- A series is now counted as added only after an episode STRM is materialized, and sync logs separately report NFO additions, updates, deletions, and metadata-only directory cleanup for clearer refresh diagnostics.
+- Added regression coverage for metadata-only series, duplicate folder ownership, unchanged existing NFO preservation, genuine metadata updates, and missing-NFO backfill behavior.
+
 ## v1.1.138
 - NFO sidecars are now written to a same-directory temporary file and atomically replaced, so Emby cannot observe a partially written XC2EMBY XML document during concurrent metadata activity.
 - Delayed targeted library refreshes now inspect Emby's active per-library refresh state and queued metadata work before starting. Matching work is postponed and retried instead of overlapping a manual refresh of the same library.
