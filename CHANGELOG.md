@@ -4,6 +4,11 @@ All notable changes to XC2EMBY are listed here, newest first.
 
 ---
 
+## v1.1.140
+- Unified **Refresh Channel & EPG Cache**, dashboard/configuration refreshes, logo refreshes, and the scheduled Live TV refresh around Emby's built-in `RefreshGuide` task—the same operation Emby's manual **Refresh Guide** button runs.
+- A plugin refresh now invalidates XC2EMBY's channel/EPG caches, makes its in-memory channel lineup cold, optionally clears configured channel logos, and lets one Emby task synchronously fetch the fresh XC channel list and XMLTV guide before reconciling the database.
+- Removed the previous tuner-save/background-follow-up sequence that could cancel the first guide job and start a second overlapping refresh. Active stream objects remain independent, and Emby's persistent channel data stays available until the fresh task replaces it.
+
 ## v1.1.139
 - Fixed unchanged TV Shows and DocuSeries syncs creating `tvshow.nfo` files for provider series with no materialized STRM episodes, then deleting those metadata-only folders during cleanup and incorrectly scheduling another targeted Emby refresh.
 - Existing show NFOs are now preserved when Smart Skip confirms both the provider series and its episodes are unchanged. Missing NFOs and genuine provider metadata changes are still written, preventing XC2EMBY and Emby from repeatedly overwriting the same files.

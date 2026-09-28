@@ -41,17 +41,23 @@ namespace Emby.Xtream.Plugin.Service
             progress.Report(10);
             Plugin.Instance.LiveTvService.InvalidateCache();
 
-            progress.Report(30);
-            XtreamTunerHost.Instance?.InvalidateChannelCacheTime();
+            // Match Emby's manual "Refresh Guide" action: make the XC2EMBY
+            // caches cold, then queue Emby's one built-in RefreshGuide task.
+            // That task owns both channel reconciliation and guide rebuilding.
+            // Starting a tuner save and a listing-provider save here used to
+            // cancel/restart the first guide job after the background fetch.
+            progress.Report(40);
+            XtreamTunerHost.Instance?.ClearCaches();
 
-            progress.Report(50);
-            XtreamServerEntryPoint.Instance?.TriggerChannelRescan();
-
-            progress.Report(80);
-            XtreamServerEntryPoint.Instance?.TriggerGuideRefresh();
+            progress.Report(70);
+            var refreshResult = XtreamServerEntryPoint.Instance?.TriggerGuideRefresh();
+            var refreshQueued = refreshResult?.GuideRefreshTriggered == true;
 
             progress.Report(100);
-            _logger.Info("Scheduled Live TV refresh complete.");
+            if (refreshQueued)
+                _logger.Info("Scheduled Live TV cache invalidation complete; Emby RefreshGuide task queued.");
+            else
+                _logger.Warn("Scheduled Live TV cache invalidation completed, but Emby RefreshGuide could not be queued.");
             return Task.CompletedTask;
         }
     }

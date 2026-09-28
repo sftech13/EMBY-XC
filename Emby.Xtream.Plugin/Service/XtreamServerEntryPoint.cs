@@ -295,66 +295,21 @@ namespace Emby.Xtream.Plugin.Service
                 ? ClearGuideLogos()
                 : new GuideLogoCleanupResult { Success = true, Skipped = true };
 
-            try
+            logoCleanup.GuideRefreshTriggered = TriggerEmbyGuideRefresh();
+            if (logoCleanup.GuideRefreshTriggered)
             {
-                var infos = GetListingProviderInfos();
-                var info = infos.FirstOrDefault(p =>
-                    string.Equals(p.Type, XtreamListingsProvider.ProviderType, StringComparison.OrdinalIgnoreCase));
-                if (info == null)
-                {
-                    _logger.Warn("TriggerGuideRefresh: xtream-epg listing provider not found");
-                    logoCleanup.GuideRefreshTriggered = false;
-                    return logoCleanup;
-                }
-
-                // startRefresh=true causes Emby to re-fetch listings and rebuild the guide.
-                _liveTvManager.SaveListingProvider(info, false, true, CancellationToken.None)
-                    .GetAwaiter().GetResult();
-
-                logoCleanup.GuideRefreshTriggered = true;
                 _logger.Info(
-                    "Guide refresh triggered after cache clear; logo cleanup skipped={0}, scanned {1} channel(s), removed {2} logo(s), {3} failed",
+                    "Emby RefreshGuide queued after cache clear; logo cleanup skipped={0}, scanned {1} channel(s), removed {2} logo(s), {3} failed",
                     logoCleanup.Skipped,
                     logoCleanup.ChannelsScanned,
                     logoCleanup.LogosDeleted,
                     logoCleanup.Failed);
             }
-            catch (Exception ex)
-            {
-                _logger.Warn("TriggerGuideRefresh failed: {0}", ex.Message);
-                logoCleanup.GuideRefreshTriggered = false;
-            }
 
             return logoCleanup;
         }
 
-        // Triggers Emby to re-fetch the channel list from the tuner, picking up any new
-        // channels added by the provider. Called only from the "Refresh Channel & EPG Cache"
-        // button — not from guide-only refresh paths.
-        internal void TriggerChannelRescan()
-        {
-            try
-            {
-                var tuners = _liveTvManager.GetTunerHostInfos(XtreamTunerHost.TunerType);
-                var tuner = tuners?.Count > 0 ? tuners[0] : null;
-                if (tuner != null)
-                {
-                    _liveTvManager.SaveTunerHost(tuner, CancellationToken.None)
-                        .GetAwaiter().GetResult();
-                    _logger.Info("Tuner channel rescan triggered");
-                }
-                else
-                {
-                    _logger.Warn("TriggerChannelRescan: no xtream tuner host found");
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.Warn("TriggerChannelRescan failed: {0}", ex.Message);
-            }
-        }
-
-        internal void TriggerEmbyGuideRefresh()
+        internal bool TriggerEmbyGuideRefresh()
         {
             try
             {
@@ -362,7 +317,7 @@ namespace Emby.Xtream.Plugin.Service
                 if (taskManager == null)
                 {
                     _logger.Warn("TriggerEmbyGuideRefresh: ITaskManager not available");
-                    return;
+                    return false;
                 }
 
                 var task = taskManager.ScheduledTasks
@@ -371,15 +326,17 @@ namespace Emby.Xtream.Plugin.Service
                 if (task == null)
                 {
                     _logger.Warn("TriggerEmbyGuideRefresh: RefreshGuide task not found");
-                    return;
+                    return false;
                 }
 
                 taskManager.Execute(task, new TaskOptions());
                 _logger.Info("Emby RefreshGuide task queued for full channel reconciliation");
+                return true;
             }
             catch (Exception ex)
             {
                 _logger.Warn("TriggerEmbyGuideRefresh failed: {0}", ex.Message);
+                return false;
             }
         }
 

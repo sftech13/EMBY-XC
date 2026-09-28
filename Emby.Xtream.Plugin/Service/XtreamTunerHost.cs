@@ -40,9 +40,6 @@ namespace Emby.Xtream.Plugin.Service
         private DateTime _cacheTime = DateTime.MinValue;
         private readonly object _channelCacheLock = new object();
         private int _isRefreshing;
-        // Set by InvalidateChannelCacheTime() so RefreshChannelCacheAsync can fire a second
-        // TriggerChannelRescan() once fresh data is ready, propagating it to Emby's DB.
-        private volatile bool _explicitInvalidate;
         public int CachedChannelCount { get { lock (_channelCacheLock) { return _cachedChannels?.Count ?? 0; } } }
 
         public XtreamTunerHost(IServerApplicationHost applicationHost)
@@ -76,8 +73,8 @@ namespace Emby.Xtream.Plugin.Service
         // EPG is provided entirely by XtreamListingsProvider — no GetProgramsInternal override.
         public override bool SupportsGuideData(TunerHostInfo tuner) => true;
 
-        // Skip the base-class validation (which calls GetChannelsInternal while _channelInfoLock
-        // is held) to prevent a deadlock when TriggerChannelRescan() calls SaveTunerHost().
+        // Configuration validation does not require a provider channel fetch; Emby's
+        // RefreshGuide task owns channel retrieval and reconciliation.
         public override Task ValdidateOptions(TunerHostInfo tuner, CancellationToken cancellationToken)
         {
             return Task.CompletedTask;
@@ -296,19 +293,6 @@ namespace Emby.Xtream.Plugin.Service
                     Logger.Info("Guide mapping diagnostic sample: {0}", sample);
 
                 WritePersistentChannelCache(tuner, result, config);
-
-                // If this refresh was triggered by an explicit RefreshCache call (not just
-                // auto-staleness), queue a second Emby channel rescan now that fresh data
-                // is in _cachedChannels. The first rescan (fired by TriggerChannelRescan in
-                // the API handler) got old data because the refresh hadn't completed yet.
-                // This second rescan picks up the fresh list and propagates it to Emby's DB.
-                if (_explicitInvalidate)
-                {
-                    _explicitInvalidate = false;
-                    Logger.Info("Explicit cache refresh complete; queuing follow-up channel rescan to propagate fresh data");
-                    try { XtreamServerEntryPoint.Instance?.TriggerChannelRescan(); }
-                    catch (Exception rescanEx) { Logger.Warn("Follow-up rescan failed: {0}", rescanEx.Message); }
-                }
             }
             catch (Exception ex)
             {
@@ -558,21 +542,6 @@ namespace Emby.Xtream.Plugin.Service
             {
                 Logger.Warn("WritePersistentChannelCache failed: {0}", ex.Message);
             }
-        }
-
-        // Marks the channel cache as stale without nulling it out.
-        // Old channel data remains available while a background refresh runs,
-        // so active streams and the guide stay intact during a cache refresh.
-        // Sets _explicitInvalidate so RefreshChannelCacheAsync fires a second
-        // TriggerChannelRescan once fresh data is ready.
-        public void InvalidateChannelCacheTime()
-        {
-            lock (_channelCacheLock)
-            {
-                _cacheTime = DateTime.MinValue;
-            }
-            _explicitInvalidate = true;
-            Logger.Info("Xtream tuner channel cache marked stale (data preserved for active streams)");
         }
 
         public new void ClearCaches()

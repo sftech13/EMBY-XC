@@ -1562,21 +1562,13 @@ namespace Emby.Xtream.Plugin.Api
         public void Post(RefreshCache request)
         {
             Plugin.Instance.LiveTvService.InvalidateCache();
-            // Mark the channel cache stale rather than nulling it. This lets active
-            // streams and the guide keep working while new data fetches in the background.
-            // GetChannelsInternal returns the old list immediately and fires a background
-            // refresh; Emby picks up the new data on its next rescan cycle.
-            // ClearCaches() (null) is intentionally NOT called here — doing so while
-            // streams are active causes Emby to defer the rescan until all streams end,
-            // leaving the guide blank for the entire watch session.
-            XtreamTunerHost.Instance?.InvalidateChannelCacheTime();
-
-            // Saving the tuner host already starts Emby's guide refresh. Once the
-            // background channel-cache refresh completes, XtreamTunerHost requests a
-            // second rescan with the fresh channel list. Do not also call
-            // TriggerGuideRefresh() or TriggerEmbyGuideRefresh() here: doing so starts
-            // redundant, overlapping guide rebuilds for the same cache invalidation.
-            XtreamServerEntryPoint.Instance?.TriggerChannelRescan();
+            // Use the same operation as Emby's manual "Refresh Guide" action.
+            // Clearing only XC2EMBY's in-memory channel cache makes RefreshGuide fetch
+            // the current lineup synchronously; Emby's persistent channel data remains
+            // intact until that one task reconciles it. Active stream objects are not
+            // part of this cache and continue independently.
+            XtreamTunerHost.Instance?.ClearCaches();
+            XtreamServerEntryPoint.Instance?.TriggerGuideRefresh();
         }
 
         public object Post(RefreshLogos request)
