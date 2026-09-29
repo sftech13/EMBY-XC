@@ -4,6 +4,13 @@ All notable changes to XC2EMBY are listed here, newest first.
 
 ---
 
+## v1.1.141
+- Fixed the TV Shows and DocuSeries sync performance regression reported in issue #6. Safely unchanged series now bypass the paced `get_series_info` request instead of waiting 250 ms for every provider record before Smart Skip can apply.
+- The delta fast path requires an existing successful episode fingerprint, an unchanged provider timestamp, matching generation settings, one unambiguous existing series folder, and every required NFO sidecar. New, changed, missing, ambiguous, or incomplete series continue through the normal detail and repair path.
+- Existing v1.1.139/v1.1.140 checkpoints are adopted on the first upgraded run only after a representative STRM confirms the current endpoint and credentials. TV Shows and DocuSeries keep independent persistent checkpoints.
+- Fast-skipped episode paths remain protected from orphan cleanup. A full series-detail verification is forced every seven days so inaccurate provider timestamps cannot hide upstream episode changes indefinitely.
+- Added regression coverage for every delta safety guard, connection-setting changes, missing STRMs/NFOs, ambiguous folders, and the weekly verification boundary.
+
 ## v1.1.140
 - Unified **Refresh Channel & EPG Cache**, dashboard/configuration refreshes, logo refreshes, and the scheduled Live TV refresh around Emby's built-in `RefreshGuide` task—the same operation Emby's manual **Refresh Guide** button runs.
 - A plugin refresh now invalidates XC2EMBY's channel/EPG caches, makes its in-memory channel lineup cold, optionally clears configured channel logos, and lets one Emby task synchronously fetch the fresh XC channel list and XMLTV guide before reconciling the database.

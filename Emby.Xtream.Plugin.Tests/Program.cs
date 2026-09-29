@@ -49,6 +49,9 @@ namespace Emby.Xtream.Plugin.Tests
                 ("NFO metadata changes invalidate series smart skip", NfoMetadataChangesInvalidateSmartSkipAsync),
                 ("NFO updates use a complete replacement and clean temporary files", NfoReplacementIsCompleteAsync),
                 ("metadata-only series do not create show NFO folders", MetadataOnlySeriesDoesNotCreateShowNfoAsync),
+                ("series delta fast path requires every safety guard", SeriesDeltaFastPathRequiresSafeguardsAsync),
+                ("series delta fast path performs weekly full verification", SeriesDeltaFastPathExpiresAsync),
+                ("series delta fast path rejects ambiguous or incomplete folders", SeriesDeltaFastPathValidatesFoldersAsync),
                 ("targeted library refresh defers for matching Emby work", TargetedRefreshDefersForMatchingEmbyWorkAsync),
             };
 
@@ -88,6 +91,101 @@ namespace Emby.Xtream.Plugin.Tests
                 "a missing show NFO must be created even when Smart Skip applies");
             return Task.CompletedTask;
         }
+
+        private static Task SeriesDeltaFastPathRequiresSafeguardsAsync()
+        {
+            Assert(StrmSyncService.CanUseSeriesDeltaFastPath(
+                    true, 200, 200, true, true, false, 12, true),
+                "an unchanged checkpointed series with existing files must use the fast path");
+            Assert(!StrmSyncService.CanUseSeriesDeltaFastPath(
+                    false, 200, 200, true, true, false, 12, true),
+                "Smart Skip must remain the user-facing fast-path switch");
+            Assert(!StrmSyncService.CanUseSeriesDeltaFastPath(
+                    true, 200, 201, true, true, false, 12, true),
+                "a changed provider timestamp must fetch series detail");
+            Assert(!StrmSyncService.CanUseSeriesDeltaFastPath(
+                    true, 200, 200, false, true, false, 12, true),
+                "a series without a successful episode checkpoint must fetch detail");
+            Assert(!StrmSyncService.CanUseSeriesDeltaFastPath(
+                    true, 200, 200, true, false, false, 12, true),
+                "changed generation settings must force a complete detail pass");
+            Assert(!StrmSyncService.CanUseSeriesDeltaFastPath(
+                    true, 200, 200, true, true, true, 12, true),
+                "an overdue full verification must bypass the fast path");
+            Assert(!StrmSyncService.CanUseSeriesDeltaFastPath(
+                    true, 200, 200, true, true, false, 0, true),
+                "missing STRMs must fetch detail so they can be recreated");
+            Assert(!StrmSyncService.CanUseSeriesDeltaFastPath(
+                    true, 200, 200, true, true, false, 12, false),
+                "missing required NFOs must fetch detail so they can be created");
+            return Task.CompletedTask;
+        }
+
+        private static Task SeriesDeltaFastPathExpiresAsync()
+        {
+            var now = new DateTime(2026, 9, 29, 12, 0, 0, DateTimeKind.Utc);
+            Assert(StrmSyncService.IsSeriesFullVerificationDue(0, now),
+                "a missing full-verification checkpoint must force a full pass");
+            Assert(!StrmSyncService.IsSeriesFullVerificationDue(now.AddDays(-6).Ticks, now),
+                "a recent complete verification must allow delta sync");
+            Assert(StrmSyncService.IsSeriesFullVerificationDue(now.AddDays(-7).Ticks, now),
+                "seven days must force another complete verification");
+            Assert(StrmSyncService.IsSeriesFullVerificationDue(now.AddMinutes(1).Ticks, now),
+                "a future checkpoint must be treated as invalid");
+            return Task.CompletedTask;
+        }
+
+        private static Task SeriesDeltaFastPathValidatesFoldersAsync()
+        {
+            var root = Path.Combine(Path.GetTempPath(), "xc2emby-delta-" + Guid.NewGuid().ToString("N"));
+            var show = Path.Combine(root, "TV Shows", "Example Show");
+            var season = Path.Combine(show, "Season 01");
+            try
+            {
+                Directory.CreateDirectory(season);
+                var first = Path.Combine(season, "Example Show - S01E01.strm");
+                var second = Path.Combine(season, "Example Show - S01E02.strm");
+                File.WriteAllText(first, "https://provider.invalid/series/u/p/1.mkv");
+                File.WriteAllText(second, "https://provider.invalid/series/u/p/2.mkv");
+
+                var paths = StrmSyncService.FindExistingSeriesFilesForFastPath(
+                    root, "TV Shows", "Example Show");
+                Assert(paths.Length == 2, "one unambiguous folder must expose all existing STRMs");
+                Assert(StrmSyncService.RequiredSeriesNfosPresent(paths, false),
+                    "NFO files must not be required when NFO writing is disabled");
+                Assert(!StrmSyncService.RequiredSeriesNfosPresent(paths, true),
+                    "missing NFO files must prevent the fast path");
+
+                File.WriteAllText(Path.Combine(show, "tvshow.nfo"), "<tvshow />");
+                File.WriteAllText(Path.ChangeExtension(first, ".nfo"), "<episodedetails />");
+                File.WriteAllText(Path.ChangeExtension(second, ".nfo"), "<episodedetails />");
+                Assert(StrmSyncService.RequiredSeriesNfosPresent(paths, true),
+                    "complete show and episode NFOs must permit the fast path");
+
+                var config = new Emby.Xtream.Plugin.PluginConfiguration
+                {
+                    BaseUrl = "https://provider.invalid",
+                    Username = "u",
+                    Password = "p",
+                };
+                Assert(StrmSyncService.ExistingSeriesStrmMatchesSettings(first, config),
+                    "legacy checkpoints may be adopted when an existing STRM matches current connection settings");
+                config.Password = "changed";
+                Assert(!StrmSyncService.ExistingSeriesStrmMatchesSettings(first, config),
+                    "legacy checkpoints must be rejected after connection settings change");
+
+                Directory.CreateDirectory(Path.Combine(root, "TV Shows", "Example Show [tmdbid=1]"));
+                Assert(StrmSyncService.FindExistingSeriesFilesForFastPath(
+                        root, "TV Shows", "Example Show").Length == 0,
+                    "multiple matching folders must fall back to normal detail resolution");
+            }
+            finally
+            {
+                if (Directory.Exists(root)) Directory.Delete(root, true);
+            }
+            return Task.CompletedTask;
+        }
+
 
         private static async Task EmptyDetailAndWorkingEpisodesPreserveAllAsync()
         {

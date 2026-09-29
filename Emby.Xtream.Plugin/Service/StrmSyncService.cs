@@ -450,6 +450,7 @@ namespace Emby.Xtream.Plugin.Service
         private static readonly TimeSpan LibraryScanQuietPeriod = TimeSpan.FromMinutes(90);
         private static readonly TimeSpan ActiveSyncScanRetryDelay = TimeSpan.FromMinutes(15);
         private static readonly TimeSpan ExternalNfoWriteQuietPeriod = TimeSpan.FromMinutes(15);
+        internal static readonly TimeSpan SeriesFullVerificationInterval = TimeSpan.FromDays(7);
         private const double LargeOrphanRatio = 0.20;
 
         private sealed class CatalogObservation
@@ -1126,6 +1127,165 @@ namespace Emby.Xtream.Plugin.Service
             }
         }
 
+        /// <summary>
+        /// Fingerprints every setting that can change the destination path, STRM URL,
+        /// local filtering, or required NFO output. Credentials are represented only by
+        /// the final SHA-256 value and are never persisted or logged in plain text.
+        /// </summary>
+        internal static string ComputeSeriesFastPathSettingsHash(PluginConfiguration config)
+        {
+            var sb = new StringBuilder();
+            AppendFingerprintValue(sb, NormalizeStreamUrl(config?.BaseUrl ?? string.Empty));
+            AppendFingerprintValue(sb, config?.Username);
+            AppendFingerprintValue(sb, config?.Password);
+            AppendFingerprintValue(sb, config?.SeriesRootFolderName);
+            AppendFingerprintValue(sb, config?.SeriesFolderMode);
+            AppendFingerprintValue(sb, config?.SeriesFolderMappings);
+            AppendFingerprintValue(sb, config?.EnableContentNameCleaning == true ? "1" : "0");
+            AppendFingerprintValue(sb, config?.ContentRemoveTerms);
+            AppendFingerprintValue(sb, config?.EnableSeriesIdFolderNaming == true ? "1" : "0");
+            AppendFingerprintValue(sb, config?.EnableSeriesMetadataLookup == true ? "1" : "0");
+            AppendFingerprintValue(sb, config?.TvdbFolderIdOverrides);
+            AppendFingerprintValue(sb, config?.EnableGenreBasedLibraryRouting == true ? "1" : "0");
+            AppendFingerprintValue(sb, config?.EnableNfoFiles == true ? "1" : "0");
+            AppendFingerprintValue(sb, config?.EnableLocalMediaFilter == true ? "1" : "0");
+            AppendFingerprintValue(
+                sb,
+                config == null
+                    ? string.Empty
+                    : config.StrmNamingVersion.ToString(CultureInfo.InvariantCulture));
+            AppendFingerprintValue(
+                sb,
+                config?.SelectedSeriesCategoryIds == null
+                    ? string.Empty
+                    : string.Join(",", config.SelectedSeriesCategoryIds.OrderBy(id => id)));
+
+            using (var sha = SHA256.Create())
+            {
+                var bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(sb.ToString()));
+                return BitConverter.ToString(bytes).Replace("-", string.Empty).ToLowerInvariant();
+            }
+        }
+
+        internal static bool IsSeriesFullVerificationDue(long lastVerificationUtcTicks, DateTime utcNow)
+        {
+            if (lastVerificationUtcTicks <= 0) return true;
+            try
+            {
+                var lastVerificationUtc = new DateTime(lastVerificationUtcTicks, DateTimeKind.Utc);
+                if (lastVerificationUtc > utcNow) return true;
+                return utcNow - lastVerificationUtc >= SeriesFullVerificationInterval;
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                return true;
+            }
+        }
+
+        internal static bool CanUseSeriesDeltaFastPath(
+            bool smartSkipEnabled,
+            long lastCatalogTimestamp,
+            long seriesTimestamp,
+            bool hasEpisodeCheckpoint,
+            bool settingsMatch,
+            bool fullVerificationDue,
+            int existingStrmCount,
+            bool requiredNfosPresent)
+        {
+            return smartSkipEnabled &&
+                   lastCatalogTimestamp > 0 &&
+                   seriesTimestamp > 0 &&
+                   seriesTimestamp <= lastCatalogTimestamp &&
+                   hasEpisodeCheckpoint &&
+                   settingsMatch &&
+                   !fullVerificationDue &&
+                   existingStrmCount > 0 &&
+                   requiredNfosPresent;
+        }
+
+        internal static string[] FindExistingSeriesFilesForFastPath(
+            string strmLibraryPath,
+            string subFolder,
+            string seriesName)
+        {
+            var parent = Path.Combine(strmLibraryPath, subFolder);
+            if (!Directory.Exists(parent)) return new string[0];
+
+            try
+            {
+                var matchingDirectories = Directory.GetDirectories(
+                        parent,
+                        seriesName + "*",
+                        SearchOption.TopDirectoryOnly)
+                    .Where(path =>
+                    {
+                        var folderName = Path.GetFileName(path);
+                        return string.Equals(folderName, seriesName, StringComparison.OrdinalIgnoreCase) ||
+                               folderName.StartsWith(seriesName + " [", StringComparison.OrdinalIgnoreCase);
+                    })
+                    .ToArray();
+
+                // Multiple matching folders are ambiguous (for example separate TMDB
+                // records with the same title). Let the normal detail path resolve them.
+                if (matchingDirectories.Length != 1) return new string[0];
+                return Directory.GetFiles(matchingDirectories[0], "*.strm", SearchOption.AllDirectories);
+            }
+            catch (IOException)
+            {
+                return new string[0];
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return new string[0];
+            }
+        }
+
+        internal static bool RequiredSeriesNfosPresent(string[] strmPaths, bool nfoEnabled)
+        {
+            if (!nfoEnabled) return true;
+            if (strmPaths == null || strmPaths.Length == 0) return false;
+            var seasonDirectory = Path.GetDirectoryName(strmPaths[0]);
+            var seriesDirectory = string.IsNullOrWhiteSpace(seasonDirectory)
+                ? null
+                : Directory.GetParent(seasonDirectory)?.FullName;
+            return !string.IsNullOrWhiteSpace(seriesDirectory) &&
+                   File.Exists(Path.Combine(seriesDirectory, "tvshow.nfo")) &&
+                   strmPaths.All(path => File.Exists(Path.ChangeExtension(path, ".nfo")));
+        }
+
+        internal static bool ExistingSeriesStrmMatchesSettings(
+            string strmPath,
+            PluginConfiguration config)
+        {
+            if (string.IsNullOrWhiteSpace(strmPath) || config == null) return false;
+            try
+            {
+                var currentUrl = File.ReadAllText(strmPath);
+                StreamUrlParts current;
+                if (!TryParseStreamUrl(currentUrl, out current) ||
+                    !string.Equals(current.Kind, "series", StringComparison.OrdinalIgnoreCase))
+                    return false;
+
+                var intendedUrl = string.Format(
+                    CultureInfo.InvariantCulture,
+                    "{0}/series/{1}/{2}/{3}.{4}",
+                    config.BaseUrl,
+                    config.Username,
+                    config.Password,
+                    current.StreamId,
+                    current.Extension);
+                return ClassifyStreamUrlChange(currentUrl, intendedUrl) == StreamUrlChangeKind.None;
+            }
+            catch (IOException)
+            {
+                return false;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return false;
+            }
+        }
+
         private static string ComputeSeriesNfoMetadataHash(
             Dictionary<string, List<EpisodeInfo>> episodes)
         {
@@ -1446,6 +1606,10 @@ namespace Emby.Xtream.Plugin.Service
             config.LastDocuSeriesSyncTimestamp = 0;
             config.SeriesEpisodeHashesJson = string.Empty;
             config.DocuSeriesEpisodeHashesJson = string.Empty;
+            config.SeriesFastPathSettingsHash = string.Empty;
+            config.DocuSeriesFastPathSettingsHash = string.Empty;
+            config.LastSeriesFullVerificationUtcTicks = 0;
+            config.LastDocuSeriesFullVerificationUtcTicks = 0;
             config.SeriesPlaybackValidationJson = string.Empty;
             config.DocuSeriesPlaybackValidationJson = string.Empty;
             config.SeriesCatalogObservationJson = string.Empty;
@@ -2287,7 +2451,22 @@ namespace Emby.Xtream.Plugin.Service
                 // safe across provider and configuration changes without persisting secrets.
                 var storedHashes = DeserializeEpisodeHashes(config.SeriesEpisodeHashesJson);
                 var updatedHashes = new ConcurrentDictionary<string, string>(storedHashes);
+                var legacyFastPathBaseline =
+                    string.IsNullOrWhiteSpace(config.SeriesFastPathSettingsHash) &&
+                    lastSeriesTs > 0 &&
+                    storedHashes.Count > 0;
+                var fastPathSettingsHash = ComputeSeriesFastPathSettingsHash(config);
+                var fastPathSettingsMatch = legacyFastPathBaseline ||
+                    string.Equals(
+                        config.SeriesFastPathSettingsHash,
+                        fastPathSettingsHash,
+                        StringComparison.Ordinal);
+                var fullVerificationDue = !legacyFastPathBaseline &&
+                    IsSeriesFullVerificationDue(config.LastSeriesFullVerificationUtcTicks, DateTime.UtcNow);
+                var forceFullVerification = !fastPathSettingsMatch || fullVerificationDue;
                 var urlChangeStats = new StreamUrlChangeStats();
+                int deltaFastSkippedSeries = 0;
+                int deltaFastSkippedEpisodes = 0;
                 int smartSkippedSeries = 0;
                 int smartSkippedEpisodes = 0;
                 int noFolderSkippedCount = 0;
@@ -2295,6 +2474,15 @@ namespace Emby.Xtream.Plugin.Service
                 int protectedDetailFailureCount = 0;
                 int unsafeProcessingFailureCount = 0;
                 int duplicatePathSkippedCount = 0;
+
+                if (forceFullVerification)
+                {
+                    _logger.Info(
+                        "Series delta fast path is disabled for this run: {0}",
+                        !fastPathSettingsMatch
+                            ? "sync settings changed or have not been checkpointed"
+                            : "the seven-day full verification is due");
+                }
 
                 var tasks = allSeries.Select(async series =>
                 {
@@ -2322,6 +2510,71 @@ namespace Emby.Xtream.Plugin.Service
                         {
                             Interlocked.Increment(ref noFolderSkippedCount);
                             Interlocked.Increment(ref sp.Skipped);
+                            Interlocked.Increment(ref sp.Completed);
+                            ReportTaskProgress(sp, taskProgress);
+                            return;
+                        }
+
+                        var epHashKey = series.SeriesId.ToString(CultureInfo.InvariantCulture);
+                        string storedEpHash;
+                        var hasEpisodeCheckpoint = storedHashes.TryGetValue(epHashKey, out storedEpHash);
+                        long seriesLm = 0;
+                        long.TryParse(
+                            series.LastModified,
+                            NumberStyles.None,
+                            CultureInfo.InvariantCulture,
+                            out seriesLm);
+                        var providerSeriesChanged = lastSeriesTs <= 0 || seriesLm > lastSeriesTs;
+                        if (seriesLm > 0)
+                        {
+                            lock (_historyLock)
+                            {
+                                if (seriesLm > maxSeriesTs) maxSeriesTs = seriesLm;
+                            }
+                        }
+
+                        string[] existingFastPathFiles = new string[0];
+                        if (config.SmartSkipExisting &&
+                            !config.EnableLocalMediaFilter &&
+                            lastSeriesTs > 0 &&
+                            seriesLm > 0 &&
+                            seriesLm <= lastSeriesTs &&
+                            hasEpisodeCheckpoint &&
+                            fastPathSettingsMatch &&
+                            !fullVerificationDue)
+                        {
+                            existingFastPathFiles = FindExistingSeriesFilesForFastPath(
+                                config.StrmLibraryPath,
+                                subFolder,
+                                seriesName);
+                        }
+                        var effectiveFastPathSettingsMatch = fastPathSettingsMatch &&
+                            (!legacyFastPathBaseline ||
+                             (existingFastPathFiles.Length > 0 &&
+                              ExistingSeriesStrmMatchesSettings(existingFastPathFiles[0], config)));
+
+                        var requiredNfosPresent = RequiredSeriesNfosPresent(
+                            existingFastPathFiles,
+                            config.EnableNfoFiles);
+                        if (CanUseSeriesDeltaFastPath(
+                            config.SmartSkipExisting && !config.EnableLocalMediaFilter,
+                            lastSeriesTs,
+                            seriesLm,
+                            hasEpisodeCheckpoint,
+                            effectiveFastPathSettingsMatch,
+                            fullVerificationDue,
+                            existingFastPathFiles.Length,
+                            requiredNfosPresent))
+                        {
+                            lock (writtenPaths)
+                            {
+                                foreach (var path in existingFastPathFiles)
+                                    writtenPaths.Add(path);
+                            }
+                            Interlocked.Increment(ref deltaFastSkippedSeries);
+                            Interlocked.Add(ref deltaFastSkippedEpisodes, existingFastPathFiles.Length);
+                            Interlocked.Add(ref ep.Total, existingFastPathFiles.Length);
+                            Interlocked.Add(ref ep.Skipped, existingFastPathFiles.Length);
                             Interlocked.Increment(ref sp.Completed);
                             ReportTaskProgress(sp, taskProgress);
                             return;
@@ -2485,23 +2738,9 @@ namespace Emby.Xtream.Plugin.Service
                         var isNewSeries = !Directory.Exists(seriesDir);
                         var hasMaterializedEpisode = false;
 
-                        // Track max LastModified for delta state
-                        long seriesLm = 0;
-                        long.TryParse(series.LastModified, NumberStyles.None, CultureInfo.InvariantCulture, out seriesLm);
-                        var providerSeriesChanged = lastSeriesTs <= 0 || seriesLm > lastSeriesTs;
-                        if (seriesLm > 0)
-                        {
-                            lock (_historyLock)
-                            {
-                                if (seriesLm > maxSeriesTs) maxSeriesTs = seriesLm;
-                            }
-                        }
-
                         var currentEpHash = ComputeSeriesSyncFingerprint(detail.Episodes, config);
-                        var epHashKey = series.SeriesId.ToString(CultureInfo.InvariantCulture);
-                        string storedEpHash;
                         var canSmartSkip = config.SmartSkipExisting &&
-                            storedHashes.TryGetValue(epHashKey, out storedEpHash) &&
+                            hasEpisodeCheckpoint &&
                             string.Equals(storedEpHash, currentEpHash, StringComparison.Ordinal);
                         if (canSmartSkip)
                             Interlocked.Increment(ref smartSkippedSeries);
@@ -2823,6 +3062,12 @@ namespace Emby.Xtream.Plugin.Service
                 // Persist successful per-series fingerprints even when another provider
                 // record failed. Failed records retain their previous fingerprints and
                 // will be fully checked on their next successful response.
+                if (seriesFullyValidated)
+                {
+                    config.SeriesFastPathSettingsHash = fastPathSettingsHash;
+                    if (forceFullVerification || legacyFastPathBaseline)
+                        config.LastSeriesFullVerificationUtcTicks = DateTime.UtcNow.Ticks;
+                }
                 config.SeriesEpisodeHashesJson = SerializeEpisodeHashes(updatedHashes);
                 saveConfig?.Invoke();
 
@@ -2832,6 +3077,11 @@ namespace Emby.Xtream.Plugin.Service
                     _logger.Warn(
                         "Series provider skips: {0} stale 404 or empty-detail record(s) were protected",
                         providerErrorSkippedCount);
+                if (Volatile.Read(ref deltaFastSkippedSeries) > 0)
+                    _logger.Info(
+                        "Series delta fast path: {0} unchanged series bypassed get_series_info; protected {1} existing STRM file(s)",
+                        Volatile.Read(ref deltaFastSkippedSeries),
+                        Volatile.Read(ref deltaFastSkippedEpisodes));
                 if (Volatile.Read(ref smartSkippedSeries) > 0)
                     _logger.Info(
                         "Series Smart Skip: {0} series fingerprints unchanged; skipped reading {1} existing STRM file(s)",

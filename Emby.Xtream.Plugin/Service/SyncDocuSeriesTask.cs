@@ -68,6 +68,8 @@ namespace Emby.Xtream.Plugin.Service
                 {
                     config.LastDocuSeriesSyncTimestamp = docConfig.LastSeriesSyncTimestamp;
                     config.DocuSeriesEpisodeHashesJson = docConfig.SeriesEpisodeHashesJson;
+                    config.DocuSeriesFastPathSettingsHash = docConfig.SeriesFastPathSettingsHash;
+                    config.LastDocuSeriesFullVerificationUtcTicks = docConfig.LastSeriesFullVerificationUtcTicks;
                     config.DocuSeriesPlaybackValidationJson = docConfig.SeriesPlaybackValidationJson;
                     config.DocuSeriesCatalogObservationJson = docConfig.SeriesCatalogObservationJson;
                     config.PendingOrphansJson = docConfig.PendingOrphansJson;
@@ -79,6 +81,8 @@ namespace Emby.Xtream.Plugin.Service
 
             config.LastDocuSeriesSyncTimestamp = docConfig.LastSeriesSyncTimestamp;
             config.DocuSeriesEpisodeHashesJson = docConfig.SeriesEpisodeHashesJson;
+            config.DocuSeriesFastPathSettingsHash = docConfig.SeriesFastPathSettingsHash;
+            config.LastDocuSeriesFullVerificationUtcTicks = docConfig.LastSeriesFullVerificationUtcTicks;
             config.DocuSeriesPlaybackValidationJson = docConfig.SeriesPlaybackValidationJson;
             config.DocuSeriesCatalogObservationJson = docConfig.SeriesCatalogObservationJson;
             config.PendingOrphansJson = docConfig.PendingOrphansJson;
@@ -123,6 +127,8 @@ namespace Emby.Xtream.Plugin.Service
                 PendingOrphansJson = source.PendingOrphansJson,
                 LastSeriesSyncTimestamp = source.LastDocuSeriesSyncTimestamp,
                 SeriesEpisodeHashesJson = source.DocuSeriesEpisodeHashesJson,
+                SeriesFastPathSettingsHash = source.DocuSeriesFastPathSettingsHash,
+                LastSeriesFullVerificationUtcTicks = source.LastDocuSeriesFullVerificationUtcTicks,
                 SeriesPlaybackValidationJson = source.DocuSeriesPlaybackValidationJson,
                 SeriesCatalogObservationJson = source.DocuSeriesCatalogObservationJson,
                 StrmNamingVersion = source.StrmNamingVersion,

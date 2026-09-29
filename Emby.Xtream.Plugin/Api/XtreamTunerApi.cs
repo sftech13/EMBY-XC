@@ -872,6 +872,8 @@ namespace Emby.Xtream.Plugin.Api
                     {
                         config.LastDocuSeriesSyncTimestamp = docuConfig.LastSeriesSyncTimestamp;
                         config.DocuSeriesEpisodeHashesJson = docuConfig.SeriesEpisodeHashesJson;
+                        config.DocuSeriesFastPathSettingsHash = docuConfig.SeriesFastPathSettingsHash;
+                        config.LastDocuSeriesFullVerificationUtcTicks = docuConfig.LastSeriesFullVerificationUtcTicks;
                         config.DocuSeriesPlaybackValidationJson = docuConfig.SeriesPlaybackValidationJson;
                         config.DocuSeriesCatalogObservationJson = docuConfig.SeriesCatalogObservationJson;
                         config.PendingOrphansJson = docuConfig.PendingOrphansJson;
@@ -882,6 +884,8 @@ namespace Emby.Xtream.Plugin.Api
 
                 config.LastDocuSeriesSyncTimestamp = docuConfig.LastSeriesSyncTimestamp;
                 config.DocuSeriesEpisodeHashesJson = docuConfig.SeriesEpisodeHashesJson;
+                config.DocuSeriesFastPathSettingsHash = docuConfig.SeriesFastPathSettingsHash;
+                config.LastDocuSeriesFullVerificationUtcTicks = docuConfig.LastSeriesFullVerificationUtcTicks;
                 config.DocuSeriesPlaybackValidationJson = docuConfig.SeriesPlaybackValidationJson;
                 config.DocuSeriesCatalogObservationJson = docuConfig.SeriesCatalogObservationJson;
                 config.PendingOrphansJson = docuConfig.PendingOrphansJson;
@@ -1485,6 +1489,8 @@ namespace Emby.Xtream.Plugin.Api
             config.SeriesFolderMappings = source.DocuSeriesFolderMappings;
             config.LastSeriesSyncTimestamp = source.LastDocuSeriesSyncTimestamp;
             config.SeriesEpisodeHashesJson = source.DocuSeriesEpisodeHashesJson;
+            config.SeriesFastPathSettingsHash = source.DocuSeriesFastPathSettingsHash;
+            config.LastSeriesFullVerificationUtcTicks = source.LastDocuSeriesFullVerificationUtcTicks;
             config.SeriesPlaybackValidationJson = source.DocuSeriesPlaybackValidationJson;
             config.SeriesCatalogObservationJson = source.DocuSeriesCatalogObservationJson;
             return config;

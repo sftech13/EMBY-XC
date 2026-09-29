@@ -150,6 +150,22 @@ namespace Emby.Xtream.Plugin
         public string DocuSeriesEpisodeHashesJson { get; set; } = string.Empty;
 
         /// <summary>
+        /// Privacy-safe fingerprints of the settings that affect generated series
+        /// paths, STRM URLs, filtering, and NFO output. They allow unchanged catalog
+        /// records to bypass get_series_info without overlooking configuration changes.
+        /// </summary>
+        public string SeriesFastPathSettingsHash { get; set; } = string.Empty;
+        public string DocuSeriesFastPathSettingsHash { get; set; } = string.Empty;
+
+        /// <summary>
+        /// UTC ticks for the last complete series-detail verification. Delta syncs
+        /// periodically bypass their fast path so stale provider timestamps cannot
+        /// hide episode changes indefinitely.
+        /// </summary>
+        public long LastSeriesFullVerificationUtcTicks { get; set; }
+        public long LastDocuSeriesFullVerificationUtcTicks { get; set; }
+
+        /// <summary>
         /// Privacy-safe per-episode playback validation state. Playback URLs and
         /// credentials are never persisted; TV and documentary series are isolated.
         /// </summary>
