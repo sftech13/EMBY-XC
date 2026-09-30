@@ -4,6 +4,13 @@ All notable changes to XC2EMBY are listed here, newest first.
 
 ---
 
+## v1.1.142
+- Fixed TV Shows and DocuSeries STRMs remaining on disk after their category was deliberately unchecked. The plugin now persists independent category-ownership snapshots and treats an explicit user deselection separately from a provider catalog or metadata failure.
+- Explicit category cleanup deletes only directories uniquely owned by the removed category. Series still present in a selected category, cross-listed/shared directories, locally filtered files, and unresolved ownership remain protected.
+- Category-driven removal continues to honor **Clean Orphans**, orphan preview, and the configured deletion safety threshold. Approved preview items from an explicitly removed category no longer require two playback 404/410 results, while ordinary provider orphans retain that safeguard.
+- Matching generated NFO files and newly empty directories are pruned through the existing safe cleanup path. The first upgraded sync establishes ownership; categories removed before upgrading can be reselected for one baseline sync and then unchecked.
+- Added regression coverage for ownership persistence, cross-listed and temporarily missing series, path-containment safety, deletion thresholds, and explicit-category orphan preview.
+
 ## v1.1.141
 - Fixed the TV Shows and DocuSeries sync performance regression reported in issue #6. Safely unchanged series now bypass the paced `get_series_info` request instead of waiting 250 ms for every provider record before Smart Skip can apply.
 - The delta fast path requires an existing successful episode fingerprint, an unchanged provider timestamp, matching generation settings, one unambiguous existing series folder, and every required NFO sidecar. New, changed, missing, ambiguous, or incomplete series continue through the normal detail and repair path.

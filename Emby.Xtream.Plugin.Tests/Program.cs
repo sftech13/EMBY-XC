@@ -52,6 +52,8 @@ namespace Emby.Xtream.Plugin.Tests
                 ("series delta fast path requires every safety guard", SeriesDeltaFastPathRequiresSafeguardsAsync),
                 ("series delta fast path performs weekly full verification", SeriesDeltaFastPathExpiresAsync),
                 ("series delta fast path rejects ambiguous or incomplete folders", SeriesDeltaFastPathValidatesFoldersAsync),
+                ("series category snapshot preserves cross-listed and missing shows", SeriesCategorySnapshotTracksExplicitRemovalAsync),
+                ("explicit series category removal is scoped and thresholded", ExplicitSeriesCategoryRemovalIsScopedAsync),
                 ("targeted library refresh defers for matching Emby work", TargetedRefreshDefersForMatchingEmbyWorkAsync),
             };
 
@@ -178,6 +180,187 @@ namespace Emby.Xtream.Plugin.Tests
                 Assert(StrmSyncService.FindExistingSeriesFilesForFastPath(
                         root, "TV Shows", "Example Show").Length == 0,
                     "multiple matching folders must fall back to normal detail resolution");
+            }
+            finally
+            {
+                if (Directory.Exists(root)) Directory.Delete(root, true);
+            }
+            return Task.CompletedTask;
+        }
+
+        private static Task SeriesCategorySnapshotTracksExplicitRemovalAsync()
+        {
+            var previous = new SeriesCategorySnapshot
+            {
+                SelectedCategoryIds = new[] { 1, 2 },
+                Series = new Dictionary<string, SeriesCategoryPathState>
+                {
+                    ["101"] = new SeriesCategoryPathState
+                    {
+                        SeriesId = 101,
+                        CategoryId = 1,
+                        RelativeDirectory = Path.Combine("TV Shows", "Cross Listed"),
+                    },
+                    ["102"] = new SeriesCategoryPathState
+                    {
+                        SeriesId = 102,
+                        CategoryId = 1,
+                        RelativeDirectory = Path.Combine("TV Shows", "Removed"),
+                    },
+                    ["202"] = new SeriesCategoryPathState
+                    {
+                        SeriesId = 202,
+                        CategoryId = 2,
+                        RelativeDirectory = Path.Combine("TV Shows", "Temporarily Missing"),
+                    },
+                },
+            };
+            var current = new Dictionary<string, SeriesCategoryPathState>
+            {
+                ["101"] = new SeriesCategoryPathState
+                {
+                    SeriesId = 101,
+                    CategoryId = 2,
+                    RelativeDirectory = Path.Combine("TV Shows", "Cross Listed"),
+                },
+            };
+
+            var next = StrmSyncService.UpdateSeriesCategorySnapshot(
+                previous,
+                new[] { 2 },
+                current,
+                new[] { 1 });
+            Assert(next.SelectedCategoryIds.SequenceEqual(new[] { 2 }),
+                "a handled deselection must leave only currently selected categories");
+            Assert(next.Series["101"].CategoryId == 2,
+                "a cross-listed series must move to its still-selected category");
+            Assert(!next.Series.ContainsKey("102"),
+                "a handled removed-category-only series must leave the snapshot");
+            Assert(next.Series.ContainsKey("202"),
+                "a temporarily missing series in a selected category must remain protected");
+
+            var roundTrip = StrmSyncService.DeserializeSeriesCategorySnapshot(
+                StrmSyncService.SerializeSeriesCategorySnapshot(next));
+            Assert(roundTrip.Series.Count == next.Series.Count &&
+                   roundTrip.SelectedCategoryIds.SequenceEqual(next.SelectedCategoryIds),
+                "category ownership must survive persistent serialization");
+            return Task.CompletedTask;
+        }
+
+        private static Task ExplicitSeriesCategoryRemovalIsScopedAsync()
+        {
+            var root = Path.Combine(Path.GetTempPath(), "xc2emby-category-" + Guid.NewGuid().ToString("N"));
+            var showsRoot = Path.Combine(root, "TV Shows");
+            try
+            {
+                var removedSeason = Path.Combine(showsRoot, "Removed Show", "Season 01");
+                var selectedSeason = Path.Combine(showsRoot, "Selected Show", "Season 01");
+                var sharedSeason = Path.Combine(showsRoot, "Shared Show", "Season 01");
+                Directory.CreateDirectory(removedSeason);
+                Directory.CreateDirectory(selectedSeason);
+                Directory.CreateDirectory(sharedSeason);
+
+                var removedOne = Path.Combine(removedSeason, "Removed Show - S01E01.strm");
+                var removedTwo = Path.Combine(removedSeason, "Removed Show - S01E02.strm");
+                var selected = Path.Combine(selectedSeason, "Selected Show - S01E01.strm");
+                var shared = Path.Combine(sharedSeason, "Shared Show - S01E01.strm");
+                File.WriteAllText(removedOne, "removed-1");
+                File.WriteAllText(removedTwo, "removed-2");
+                File.WriteAllText(selected, "selected");
+                File.WriteAllText(shared, "shared");
+
+                var snapshot = new SeriesCategorySnapshot
+                {
+                    SelectedCategoryIds = new[] { 1, 2 },
+                    Series = new Dictionary<string, SeriesCategoryPathState>
+                    {
+                        ["101"] = new SeriesCategoryPathState
+                        {
+                            SeriesId = 101,
+                            CategoryId = 1,
+                            RelativeDirectory = Path.Combine("TV Shows", "Removed Show"),
+                        },
+                        ["102"] = new SeriesCategoryPathState
+                        {
+                            SeriesId = 102,
+                            CategoryId = 1,
+                            RelativeDirectory = Path.Combine("TV Shows", "Shared Show"),
+                        },
+                        ["103"] = new SeriesCategoryPathState
+                        {
+                            SeriesId = 103,
+                            CategoryId = 1,
+                            RelativeDirectory = Path.Combine("..", "outside"),
+                        },
+                        ["202"] = new SeriesCategoryPathState
+                        {
+                            SeriesId = 202,
+                            CategoryId = 2,
+                            RelativeDirectory = Path.Combine("TV Shows", "Selected Show"),
+                        },
+                        ["203"] = new SeriesCategoryPathState
+                        {
+                            SeriesId = 203,
+                            CategoryId = 2,
+                            RelativeDirectory = Path.Combine("TV Shows", "Shared Show"),
+                        },
+                    },
+                };
+                var currentAssignments = new Dictionary<string, SeriesCategoryPathState>
+                {
+                    ["202"] = snapshot.Series["202"],
+                    ["203"] = snapshot.Series["203"],
+                };
+                var written = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    selected,
+                    shared,
+                };
+
+                var plan = StrmSyncService.BuildExplicitCategoryRemovalPlan(
+                    root,
+                    showsRoot,
+                    snapshot,
+                    new[] { 2 },
+                    new[] { 202, 203 },
+                    currentAssignments,
+                    written,
+                    new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+
+                Assert(plan.RemovedCategoryIds.SetEquals(new[] { 1 }),
+                    "only the deliberately unchecked category must enter explicit cleanup");
+                Assert(plan.CandidatePaths.Count == 2 &&
+                       plan.CandidatePaths.Contains(removedOne) &&
+                       plan.CandidatePaths.Contains(removedTwo),
+                    "only files owned by the removed category's unique directory may be deleted");
+                Assert(!plan.CandidatePaths.Contains(selected) &&
+                       !plan.CandidatePaths.Contains(shared),
+                    "selected and shared directories must remain protected");
+                Assert(plan.BlockedCategoryIds.Contains(1),
+                    "shared or out-of-root ownership must keep the category checkpoint pending");
+                Assert(StrmSyncService.IsExplicitCategoryRemovalWithinSafetyThreshold(2, 20, 0.20),
+                    "a removal below the configured threshold must proceed");
+                Assert(!StrmSyncService.IsExplicitCategoryRemovalWithinSafetyThreshold(5, 20, 0.20),
+                    "a removal above the configured threshold must remain blocked");
+                Assert(StrmSyncService.IsExplicitCategoryRemovalWithinSafetyThreshold(20, 20, 0),
+                    "a zero threshold must retain the existing disabled-threshold behavior");
+
+                var config = new PluginConfiguration
+                {
+                    SeriesRootFolderName = "TV Shows",
+                    DocuSeriesRootFolderName = "Docu Series",
+                    SelectedSeriesCategoryIds = new[] { 2 },
+                    SeriesCategorySnapshotJson =
+                        StrmSyncService.SerializeSeriesCategorySnapshot(snapshot),
+                };
+                var removedRelative = Path.Combine(
+                    "TV Shows", "Removed Show", "Season 01", "Removed Show - S01E01.strm");
+                var selectedRelative = Path.Combine(
+                    "TV Shows", "Selected Show", "Season 01", "Selected Show - S01E01.strm");
+                Assert(StrmSyncService.IsExplicitCategoryRemovalPendingPath(config, removedRelative),
+                    "preview commit must recognize an episode from a deliberately unchecked category");
+                Assert(!StrmSyncService.IsExplicitCategoryRemovalPendingPath(config, selectedRelative),
+                    "preview commit must not bypass playback safeguards for a selected category");
             }
             finally
             {

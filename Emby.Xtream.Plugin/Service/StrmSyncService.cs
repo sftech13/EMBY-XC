@@ -120,6 +120,27 @@ namespace Emby.Xtream.Plugin.Service
         public string Genre { get; set; }
     }
 
+    internal sealed class SeriesCategoryPathState
+    {
+        public int SeriesId { get; set; }
+        public int CategoryId { get; set; }
+        public string RelativeDirectory { get; set; } = string.Empty;
+    }
+
+    internal sealed class SeriesCategorySnapshot
+    {
+        public int[] SelectedCategoryIds { get; set; } = new int[0];
+        public Dictionary<string, SeriesCategoryPathState> Series { get; set; } =
+            new Dictionary<string, SeriesCategoryPathState>();
+    }
+
+    internal sealed class ExplicitCategoryRemovalPlan
+    {
+        public HashSet<int> RemovedCategoryIds { get; } = new HashSet<int>();
+        public HashSet<int> BlockedCategoryIds { get; } = new HashSet<int>();
+        public List<string> CandidatePaths { get; } = new List<string>();
+    }
+
     internal sealed class RequestStartPacer
     {
         private readonly SemaphoreSlim _gate = new SemaphoreSlim(1, 1);
@@ -1375,6 +1396,84 @@ namespace Emby.Xtream.Plugin.Service
                 return string.Empty;
             return STJ.JsonSerializer.Serialize(hashes);
         }
+        internal static SeriesCategorySnapshot DeserializeSeriesCategorySnapshot(string json)
+        {
+            if (string.IsNullOrWhiteSpace(json))
+                return new SeriesCategorySnapshot();
+
+            try
+            {
+                var snapshot = STJ.JsonSerializer.Deserialize<SeriesCategorySnapshot>(json, JsonOptions)
+                               ?? new SeriesCategorySnapshot();
+                snapshot.SelectedCategoryIds = snapshot.SelectedCategoryIds ?? new int[0];
+                snapshot.Series = snapshot.Series ??
+                    new Dictionary<string, SeriesCategoryPathState>();
+                return snapshot;
+            }
+            catch
+            {
+                return new SeriesCategorySnapshot();
+            }
+        }
+
+        internal static string SerializeSeriesCategorySnapshot(SeriesCategorySnapshot snapshot)
+        {
+            if (snapshot == null) return string.Empty;
+            return STJ.JsonSerializer.Serialize(snapshot, JsonOptions);
+        }
+
+        internal static SeriesCategorySnapshot UpdateSeriesCategorySnapshot(
+            SeriesCategorySnapshot previous,
+            IEnumerable<int> currentSelectedCategoryIds,
+            IDictionary<string, SeriesCategoryPathState> currentAssignments,
+            IEnumerable<int> handledRemovedCategoryIds)
+        {
+            previous = previous ?? new SeriesCategorySnapshot();
+            var handled = new HashSet<int>(
+                handledRemovedCategoryIds ?? Enumerable.Empty<int>());
+            var current = currentAssignments ??
+                new Dictionary<string, SeriesCategoryPathState>();
+            var nextSeries = new Dictionary<string, SeriesCategoryPathState>();
+
+            foreach (var item in previous.Series ??
+                new Dictionary<string, SeriesCategoryPathState>())
+            {
+                var state = item.Value;
+                if (state == null) continue;
+                if (handled.Contains(state.CategoryId) && !current.ContainsKey(item.Key))
+                    continue;
+                nextSeries[item.Key] = new SeriesCategoryPathState
+                {
+                    SeriesId = state.SeriesId,
+                    CategoryId = state.CategoryId,
+                    RelativeDirectory = state.RelativeDirectory ?? string.Empty,
+                };
+            }
+
+            foreach (var item in current)
+            {
+                var state = item.Value;
+                if (state == null) continue;
+                nextSeries[item.Key] = new SeriesCategoryPathState
+                {
+                    SeriesId = state.SeriesId,
+                    CategoryId = state.CategoryId,
+                    RelativeDirectory = state.RelativeDirectory ?? string.Empty,
+                };
+            }
+
+            var selected = new HashSet<int>(
+                previous.SelectedCategoryIds ?? new int[0]);
+            selected.UnionWith(currentSelectedCategoryIds ?? Enumerable.Empty<int>());
+            selected.ExceptWith(handled);
+
+            return new SeriesCategorySnapshot
+            {
+                SelectedCategoryIds = selected.OrderBy(id => id).ToArray(),
+                Series = nextSeries,
+            };
+        }
+
 
         internal static ConcurrentDictionary<string, string> DeserializeMovieTmdbCache(string json)
         {
@@ -1606,6 +1705,8 @@ namespace Emby.Xtream.Plugin.Service
             config.LastDocuSeriesSyncTimestamp = 0;
             config.SeriesEpisodeHashesJson = string.Empty;
             config.DocuSeriesEpisodeHashesJson = string.Empty;
+            config.SeriesCategorySnapshotJson = string.Empty;
+            config.DocuSeriesCategorySnapshotJson = string.Empty;
             config.SeriesFastPathSettingsHash = string.Empty;
             config.DocuSeriesFastPathSettingsHash = string.Empty;
             config.LastSeriesFullVerificationUtcTicks = 0;
@@ -2442,6 +2543,20 @@ namespace Emby.Xtream.Plugin.Service
                 var writtenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var locallyFilteredPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var detailFailurePaths = new ConcurrentBag<string>();
+                var categorySnapshot = DeserializeSeriesCategorySnapshot(
+                    config.SeriesCategorySnapshotJson);
+                var currentSelectedCategoryIds = new HashSet<int>(
+                    config.SelectedSeriesCategoryIds ?? new int[0]);
+                var currentSeriesIds = new HashSet<int>(
+                    allSeries.Select(series => series.SeriesId));
+                var removedCategoryIds = new HashSet<int>(
+                    (categorySnapshot.SelectedCategoryIds ?? new int[0])
+                        .Where(id => !currentSelectedCategoryIds.Contains(id)));
+                var currentCategoryAssignments =
+                    new ConcurrentDictionary<string, SeriesCategoryPathState>(
+                        StringComparer.Ordinal);
+                var handledRemovedCategoryIds = new HashSet<int>();
+
                 var playbackValidationRunId = Guid.NewGuid().ToString("N");
                 var semaphore = new SemaphoreSlim(config.SyncParallelism);
                 int filterDeletedEpisodes = 0;
@@ -2571,6 +2686,15 @@ namespace Emby.Xtream.Plugin.Service
                                 foreach (var path in existingFastPathFiles)
                                     writtenPaths.Add(path);
                             }
+                            var seasonDirectory = Path.GetDirectoryName(existingFastPathFiles[0]);
+                            var fastSeriesDirectory = string.IsNullOrWhiteSpace(seasonDirectory)
+                                ? null
+                                : Directory.GetParent(seasonDirectory)?.FullName;
+                            RecordSeriesCategoryAssignment(
+                                currentCategoryAssignments,
+                                series,
+                                config.StrmLibraryPath,
+                                fastSeriesDirectory);
                             Interlocked.Increment(ref deltaFastSkippedSeries);
                             Interlocked.Add(ref deltaFastSkippedEpisodes, existingFastPathFiles.Length);
                             Interlocked.Add(ref ep.Total, existingFastPathFiles.Length);
@@ -2923,6 +3047,12 @@ namespace Emby.Xtream.Plugin.Service
                         // this series completed successfully. A later file-processing
                         // exception must leave the previous fingerprint in place so the
                         // next run performs a full verification.
+                        RecordSeriesCategoryAssignment(
+                            currentCategoryAssignments,
+                            series,
+                            config.StrmLibraryPath,
+                            seriesDir);
+
                         updatedHashes[epHashKey] = currentEpHash;
                         Interlocked.Increment(ref sp.Completed);
                         ReportTaskProgress(sp, taskProgress);
@@ -2998,6 +3128,102 @@ namespace Emby.Xtream.Plugin.Service
                 if (config.CleanupOrphans && cleanupSafe)
                 {
                     sp.Phase = "Cleaning up orphaned files";
+                    if (removedCategoryIds.Count > 0)
+                    {
+                        var explicitPlan = BuildExplicitCategoryRemovalPlan(
+                            config.StrmLibraryPath,
+                            showsRoot,
+                            categorySnapshot,
+                            currentSelectedCategoryIds,
+                            currentSeriesIds,
+                            currentCategoryAssignments,
+                            writtenPaths,
+                            locallyFilteredPaths);
+                        var removableCategoryIds = new HashSet<int>(
+                            explicitPlan.RemovedCategoryIds);
+                        removableCategoryIds.ExceptWith(explicitPlan.BlockedCategoryIds);
+
+                        if (explicitPlan.BlockedCategoryIds.Count > 0)
+                        {
+                            _logger.Warn(
+                                "Explicit series category cleanup deferred for {0} categor{1}: a saved directory is shared with selected or unresolved content",
+                                explicitPlan.BlockedCategoryIds.Count,
+                                explicitPlan.BlockedCategoryIds.Count == 1 ? "y" : "ies");
+                        }
+
+                        var existingCount = Directory.Exists(showsRoot)
+                            ? Directory.GetFiles(showsRoot, "*.strm", SearchOption.AllDirectories).Length
+                            : 0;
+                        var withinThreshold = IsExplicitCategoryRemovalWithinSafetyThreshold(
+                            explicitPlan.CandidatePaths.Count,
+                            existingCount,
+                            config.OrphanSafetyThreshold);
+                        if (!withinThreshold)
+                        {
+                            _logger.Warn(
+                                "Explicit series category cleanup skipped: {0}/{1} ({2:P0}) exceeds safety threshold {3:P0}",
+                                explicitPlan.CandidatePaths.Count,
+                                existingCount,
+                                existingCount > 0
+                                    ? (double)explicitPlan.CandidatePaths.Count / existingCount
+                                    : 0,
+                                config.OrphanSafetyThreshold);
+                            lock (writtenPaths)
+                            {
+                                foreach (var path in explicitPlan.CandidatePaths)
+                                    writtenPaths.Add(path);
+                            }
+                        }
+                        else if (config.EnableOrphanPreview &&
+                                 explicitPlan.CandidatePaths.Count > 0)
+                        {
+                            StagePendingOrphans(config, explicitPlan.CandidatePaths);
+                            lock (writtenPaths)
+                            {
+                                foreach (var path in explicitPlan.CandidatePaths)
+                                    writtenPaths.Add(path);
+                            }
+                            handledRemovedCategoryIds.UnionWith(removableCategoryIds);
+                            _logger.Info(
+                                "{0} episode file(s) from {1} explicitly removed series categor{2} staged for review",
+                                explicitPlan.CandidatePaths.Count,
+                                removableCategoryIds.Count,
+                                removableCategoryIds.Count == 1 ? "y" : "ies");
+                        }
+                        else
+                        {
+                            var deleted = DeleteOrphans(
+                                explicitPlan.CandidatePaths,
+                                showsRoot);
+                            sp.Deleted += deleted;
+                            ep.Deleted += deleted;
+                            if (deleted == explicitPlan.CandidatePaths.Count)
+                            {
+                                handledRemovedCategoryIds.UnionWith(removableCategoryIds);
+                                _logger.Info(
+                                    "Explicit series category cleanup completed for {0} categor{1}: {2} episode file(s) removed",
+                                    removableCategoryIds.Count,
+                                    removableCategoryIds.Count == 1 ? "y" : "ies",
+                                    deleted);
+                            }
+                            else
+                            {
+                                lock (writtenPaths)
+                                {
+                                    foreach (var path in explicitPlan.CandidatePaths)
+                                    {
+                                        if (File.Exists(path))
+                                            writtenPaths.Add(path);
+                                    }
+                                }
+                                _logger.Warn(
+                                    "Explicit series category cleanup remains pending because {0} of {1} episode file(s) could not be removed",
+                                    explicitPlan.CandidatePaths.Count - deleted,
+                                    explicitPlan.CandidatePaths.Count);
+                            }
+                        }
+                    }
+
                     var catalogOrphans = CollectOrphans(
                         showsRoot,
                         writtenPaths,
@@ -3040,8 +3266,8 @@ namespace Emby.Xtream.Plugin.Service
                     else
                     {
                         var deleted = DeleteOrphans(orphans, showsRoot);
-                        sp.Deleted = deleted;
-                        ep.Deleted = deleted;
+                        sp.Deleted += deleted;
+                        ep.Deleted += deleted;
                     }
 
                     var metadataCleanup = PruneMetadataOnlyDirectories(
@@ -3051,6 +3277,17 @@ namespace Emby.Xtream.Plugin.Service
                 }
                 ep.Deleted += filterDeletedEpisodes;
 
+                if (cleanupSafe)
+                {
+                    var nextCategorySnapshot = UpdateSeriesCategorySnapshot(
+                        categorySnapshot,
+                        currentSelectedCategoryIds,
+                        currentCategoryAssignments,
+                        handledRemovedCategoryIds);
+                    config.SeriesCategorySnapshotJson =
+                        SerializeSeriesCategorySnapshot(nextCategorySnapshot);
+
+                }
                 // Persist the highest LastModified timestamp seen
                 cancellationToken.ThrowIfCancellationRequested();
                 if (seriesFullyValidated && maxSeriesTs > config.LastSeriesSyncTimestamp)
@@ -4827,6 +5064,181 @@ namespace Emby.Xtream.Plugin.Service
                 ? full.Substring(prefix.Length)
                 : full;
         }
+        private static void RecordSeriesCategoryAssignment(
+            ConcurrentDictionary<string, SeriesCategoryPathState> assignments,
+            SeriesInfo series,
+            string strmLibraryPath,
+            string seriesDirectory)
+        {
+            if (assignments == null ||
+                series == null ||
+                !series.CategoryId.HasValue ||
+                string.IsNullOrWhiteSpace(seriesDirectory))
+                return;
+
+            var key = series.SeriesId.ToString(CultureInfo.InvariantCulture);
+            assignments[key] = new SeriesCategoryPathState
+            {
+                SeriesId = series.SeriesId,
+                CategoryId = series.CategoryId.Value,
+                RelativeDirectory = GetRelativePath(strmLibraryPath, seriesDirectory),
+            };
+        }
+
+
+        internal static ExplicitCategoryRemovalPlan BuildExplicitCategoryRemovalPlan(
+            string strmLibraryPath,
+            string seriesRootPath,
+            SeriesCategorySnapshot snapshot,
+            IEnumerable<int> currentSelectedCategoryIds,
+            IEnumerable<int> currentSeriesIds,
+            IDictionary<string, SeriesCategoryPathState> currentAssignments,
+            HashSet<string> writtenPaths,
+            HashSet<string> locallyFilteredPaths)
+        {
+            var plan = new ExplicitCategoryRemovalPlan();
+            snapshot = snapshot ?? new SeriesCategorySnapshot();
+            var currentCategories = new HashSet<int>(
+                currentSelectedCategoryIds ?? Enumerable.Empty<int>());
+            var currentIds = new HashSet<int>(
+                currentSeriesIds ?? Enumerable.Empty<int>());
+            foreach (var categoryId in snapshot.SelectedCategoryIds ?? new int[0])
+            {
+                if (!currentCategories.Contains(categoryId))
+                    plan.RemovedCategoryIds.Add(categoryId);
+            }
+            if (plan.RemovedCategoryIds.Count == 0) return plan;
+
+            var libraryRoot = Path.GetFullPath(strmLibraryPath)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var seriesRoot = Path.GetFullPath(seriesRootPath)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var seriesPrefix = seriesRoot + Path.DirectorySeparatorChar;
+            var preservedDirectories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var state in (snapshot.Series ??
+                new Dictionary<string, SeriesCategoryPathState>()).Values)
+            {
+                if (state == null || string.IsNullOrWhiteSpace(state.RelativeDirectory))
+                    continue;
+                if (!plan.RemovedCategoryIds.Contains(state.CategoryId) ||
+                    currentIds.Contains(state.SeriesId))
+                {
+                    string directory;
+                    if (TryResolveSeriesSnapshotDirectory(
+                        libraryRoot, seriesRoot, seriesPrefix, state.RelativeDirectory, out directory))
+                        preservedDirectories.Add(directory);
+                }
+            }
+
+            foreach (var state in (currentAssignments ??
+                new Dictionary<string, SeriesCategoryPathState>()).Values)
+            {
+                if (state == null || string.IsNullOrWhiteSpace(state.RelativeDirectory))
+                    continue;
+                string directory;
+                if (TryResolveSeriesSnapshotDirectory(
+                    libraryRoot, seriesRoot, seriesPrefix, state.RelativeDirectory, out directory))
+                    preservedDirectories.Add(directory);
+            }
+
+            var candidatesByCategory = new Dictionary<int, HashSet<string>>();
+            foreach (var state in (snapshot.Series ??
+                new Dictionary<string, SeriesCategoryPathState>()).Values)
+            {
+                if (state == null ||
+                    !plan.RemovedCategoryIds.Contains(state.CategoryId) ||
+                    currentIds.Contains(state.SeriesId))
+                    continue;
+
+                string directory;
+                if (!TryResolveSeriesSnapshotDirectory(
+                    libraryRoot, seriesRoot, seriesPrefix, state.RelativeDirectory, out directory))
+                {
+                    plan.BlockedCategoryIds.Add(state.CategoryId);
+                    continue;
+                }
+
+                if (preservedDirectories.Contains(directory))
+                {
+                    plan.BlockedCategoryIds.Add(state.CategoryId);
+                    continue;
+                }
+
+                if (!Directory.Exists(directory)) continue;
+                HashSet<string> categoryCandidates;
+                if (!candidatesByCategory.TryGetValue(state.CategoryId, out categoryCandidates))
+                {
+                    categoryCandidates = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    candidatesByCategory[state.CategoryId] = categoryCandidates;
+                }
+
+                try
+                {
+                    foreach (var path in Directory.GetFiles(directory, "*.strm", SearchOption.AllDirectories))
+                    {
+                        if ((writtenPaths == null || !writtenPaths.Contains(path)) &&
+                            (locallyFilteredPaths == null || !locallyFilteredPaths.Contains(path)))
+                            categoryCandidates.Add(path);
+                    }
+                }
+                catch (IOException)
+                {
+                    plan.BlockedCategoryIds.Add(state.CategoryId);
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    plan.BlockedCategoryIds.Add(state.CategoryId);
+                }
+            }
+
+            var uniquePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var item in candidatesByCategory)
+            {
+                uniquePaths.UnionWith(item.Value);
+            }
+            plan.CandidatePaths.AddRange(
+                uniquePaths.OrderBy(path => path, StringComparer.OrdinalIgnoreCase));
+            return plan;
+        }
+
+        private static bool TryResolveSeriesSnapshotDirectory(
+            string libraryRoot,
+            string seriesRoot,
+            string seriesPrefix,
+            string relativeDirectory,
+            out string directory)
+        {
+            directory = null;
+            if (string.IsNullOrWhiteSpace(relativeDirectory) ||
+                Path.IsPathRooted(relativeDirectory))
+                return false;
+
+            try
+            {
+                var full = Path.GetFullPath(Path.Combine(libraryRoot, relativeDirectory))
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                if (!string.Equals(full, seriesRoot, StringComparison.OrdinalIgnoreCase) &&
+                    !full.StartsWith(seriesPrefix, StringComparison.OrdinalIgnoreCase))
+                    return false;
+                directory = full;
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        internal static bool IsExplicitCategoryRemovalWithinSafetyThreshold(
+            int candidateCount,
+            int existingCount,
+            double safetyThreshold)
+        {
+            if (candidateCount <= 0 || existingCount <= 10 || safetyThreshold <= 0)
+                return true;
+            return (double)candidateCount / existingCount <= safetyThreshold;
+        }
 
         // Collects orphaned STRM paths under rootPath respecting the safety threshold.
         // Returns empty list if safety threshold blocks cleanup.
@@ -5226,6 +5638,51 @@ namespace Emby.Xtream.Plugin.Service
             {
                 return false;
             }
+        }
+
+        internal static bool IsExplicitCategoryRemovalPendingPath(
+            PluginConfiguration config,
+            string relativePath)
+        {
+            if (config == null || string.IsNullOrWhiteSpace(relativePath))
+                return false;
+
+            var normalized = NormalizeRelativePath(relativePath);
+            var docuRoot = NormalizeRelativePath(GetDocuSeriesRootFolderName(config));
+            var isDocu = StartsWithNormalizedRoot(normalized, docuRoot);
+            var snapshotJson = isDocu
+                ? config.DocuSeriesCategorySnapshotJson
+                : config.SeriesCategorySnapshotJson;
+            var snapshot = DeserializeSeriesCategorySnapshot(snapshotJson);
+            var selected = new HashSet<int>(config.SelectedSeriesCategoryIds ?? new int[0]);
+
+            foreach (var state in snapshot.Series.Values)
+            {
+                if (state == null ||
+                    selected.Contains(state.CategoryId) ||
+                    string.IsNullOrWhiteSpace(state.RelativeDirectory))
+                    continue;
+
+                var directory = NormalizeRelativePath(state.RelativeDirectory);
+                if (StartsWithNormalizedRoot(normalized, directory))
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static string NormalizeRelativePath(string path)
+        {
+            return (path ?? string.Empty)
+                .Replace('\\', '/')
+                .Trim('/');
+        }
+
+        private static bool StartsWithNormalizedRoot(string relativePath, string rootName)
+        {
+            if (string.IsNullOrEmpty(rootName)) return false;
+            return string.Equals(relativePath, rootName, StringComparison.OrdinalIgnoreCase) ||
+                   relativePath.StartsWith(rootName + "/", StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool StartsWithRoot(string relativePath, string rootName)

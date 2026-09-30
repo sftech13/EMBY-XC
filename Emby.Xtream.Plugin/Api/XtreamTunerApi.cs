@@ -872,6 +872,7 @@ namespace Emby.Xtream.Plugin.Api
                     {
                         config.LastDocuSeriesSyncTimestamp = docuConfig.LastSeriesSyncTimestamp;
                         config.DocuSeriesEpisodeHashesJson = docuConfig.SeriesEpisodeHashesJson;
+                        config.DocuSeriesCategorySnapshotJson = docuConfig.SeriesCategorySnapshotJson;
                         config.DocuSeriesFastPathSettingsHash = docuConfig.SeriesFastPathSettingsHash;
                         config.LastDocuSeriesFullVerificationUtcTicks = docuConfig.LastSeriesFullVerificationUtcTicks;
                         config.DocuSeriesPlaybackValidationJson = docuConfig.SeriesPlaybackValidationJson;
@@ -884,6 +885,7 @@ namespace Emby.Xtream.Plugin.Api
 
                 config.LastDocuSeriesSyncTimestamp = docuConfig.LastSeriesSyncTimestamp;
                 config.DocuSeriesEpisodeHashesJson = docuConfig.SeriesEpisodeHashesJson;
+                config.DocuSeriesCategorySnapshotJson = docuConfig.SeriesCategorySnapshotJson;
                 config.DocuSeriesFastPathSettingsHash = docuConfig.SeriesFastPathSettingsHash;
                 config.LastDocuSeriesFullVerificationUtcTicks = docuConfig.LastSeriesFullVerificationUtcTicks;
                 config.DocuSeriesPlaybackValidationJson = docuConfig.SeriesPlaybackValidationJson;
@@ -1489,6 +1491,7 @@ namespace Emby.Xtream.Plugin.Api
             config.SeriesFolderMappings = source.DocuSeriesFolderMappings;
             config.LastSeriesSyncTimestamp = source.LastDocuSeriesSyncTimestamp;
             config.SeriesEpisodeHashesJson = source.DocuSeriesEpisodeHashesJson;
+            config.SeriesCategorySnapshotJson = source.DocuSeriesCategorySnapshotJson;
             config.SeriesFastPathSettingsHash = source.DocuSeriesFastPathSettingsHash;
             config.LastSeriesFullVerificationUtcTicks = source.LastDocuSeriesFullVerificationUtcTicks;
             config.SeriesPlaybackValidationJson = source.DocuSeriesPlaybackValidationJson;

@@ -369,6 +369,8 @@ namespace Emby.Xtream.Plugin
             target.SyncHistoryJson = source.SyncHistoryJson;
             target.SeriesEpisodeHashesJson = source.SeriesEpisodeHashesJson;
             target.DocuSeriesEpisodeHashesJson = source.DocuSeriesEpisodeHashesJson;
+            target.SeriesCategorySnapshotJson = source.SeriesCategorySnapshotJson;
+            target.DocuSeriesCategorySnapshotJson = source.DocuSeriesCategorySnapshotJson;
             target.SeriesFastPathSettingsHash = source.SeriesFastPathSettingsHash;
             target.DocuSeriesFastPathSettingsHash = source.DocuSeriesFastPathSettingsHash;
             target.LastSeriesFullVerificationUtcTicks = source.LastSeriesFullVerificationUtcTicks;

@@ -149,6 +149,8 @@ namespace Emby.Xtream.Plugin
         public string SeriesEpisodeHashesJson { get; set; } = string.Empty;
         public string DocuSeriesEpisodeHashesJson { get; set; } = string.Empty;
 
+        public string SeriesCategorySnapshotJson { get; set; } = string.Empty;
+        public string DocuSeriesCategorySnapshotJson { get; set; } = string.Empty;
         /// <summary>
         /// Privacy-safe fingerprints of the settings that affect generated series
         /// paths, STRM URLs, filtering, and NFO output. They allow unchanged catalog
