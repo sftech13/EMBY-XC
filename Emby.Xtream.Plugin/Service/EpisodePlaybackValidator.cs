@@ -280,6 +280,27 @@ namespace Emby.Xtream.Plugin.Service
                 state.ConsecutiveDefinitiveFailures >= 2;
         }
 
+        internal static bool ObserveCatalogAbsence(
+            EpisodePlaybackValidationState state,
+            string syncRunId,
+            DateTime observedUtc)
+        {
+            if (state == null) throw new ArgumentNullException(nameof(state));
+
+            // Count at most one absence for a path in each completed sync. This
+            // deliberately does not depend on the entire provider catalog being
+            // byte-for-byte identical to the previous run.
+            if (!string.Equals(state.LastCatalogRunId, syncRunId, StringComparison.Ordinal))
+            {
+                state.ConsecutiveCatalogAbsences++;
+                state.FirstCatalogAbsentUtc = state.FirstCatalogAbsentUtc ?? observedUtc;
+                state.LastCatalogAbsentUtc = observedUtc;
+                state.LastCatalogRunId = syncRunId ?? string.Empty;
+            }
+
+            return state.ConsecutiveCatalogAbsences >= 2;
+        }
+
         internal static bool IsMediaContentType(string mediaType)
         {
             if (string.IsNullOrWhiteSpace(mediaType)) return false;

@@ -1,5 +1,6 @@
 using System;
 using System.Buffers;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -30,6 +31,8 @@ namespace Emby.Xtream.Plugin.Tests
                 ("definitive failure state survives restart serialization", FailureStateSurvivesSerializationAsync),
                 ("404 then 410 does not qualify", DifferentDefinitiveResultsDoNotAccumulateAsync),
                 ("non-definitive response breaks failure sequence", InconclusiveResponseBreaksSequenceAsync),
+                ("catalog absence is tracked per path across changing catalogs", PerPathCatalogAbsenceIsIndependentAsync),
+                ("same stream ID leaves one canonical episode path", CanonicalEpisodePathSupersedesOldNameAsync),
                 ("single live viewer backpressures instead of being dropped", SingleViewerBackpressurePreservesSubscriberAsync),
                 ("second live viewer exits single-viewer backpressure", SecondViewerEndsSingleViewerBackpressureAsync),
                 ("shared live viewer remains bounded when its queue fills", SharedViewerBufferRemainsBoundedAsync),
@@ -91,6 +94,69 @@ namespace Emby.Xtream.Plugin.Tests
                 "changed provider metadata must update an existing show NFO");
             Assert(StrmSyncService.ShouldWriteShowNfo(true, true, true, true, false, false),
                 "a missing show NFO must be created even when Smart Skip applies");
+            return Task.CompletedTask;
+        }
+
+        private static Task PerPathCatalogAbsenceIsIndependentAsync()
+        {
+            var state = new EpisodePlaybackValidationState
+            {
+                EpisodeId = 42,
+                RelativePath = "Show/Season 01/Show - S01E01.strm",
+            };
+            var firstObserved = DateTime.UtcNow;
+
+            Assert(!EpisodePlaybackValidator.ObserveCatalogAbsence(
+                    state, "catalog-a", firstObserved),
+                "one completed sync absence must preserve the path");
+            Assert(!EpisodePlaybackValidator.ObserveCatalogAbsence(
+                    state, "catalog-a", firstObserved.AddSeconds(1)),
+                "the same sync must not count the path absent twice");
+            Assert(EpisodePlaybackValidator.ObserveCatalogAbsence(
+                    state, "catalog-b-with-unrelated-changes", firstObserved.AddDays(1)),
+                "a second sync absence must qualify independently of the whole-catalog fingerprint");
+            Assert(state.ConsecutiveCatalogAbsences == 2,
+                "exactly two separate sync absences must be recorded");
+            return Task.CompletedTask;
+        }
+
+        private static Task CanonicalEpisodePathSupersedesOldNameAsync()
+        {
+            var root = Path.Combine(Path.GetTempPath(), "xc2emby-canonical-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+            try
+            {
+                var oldPath = Path.Combine(root, "Show - S01E01.strm");
+                var canonicalPath = Path.Combine(root, "Show - S01E01 - Pilot.strm");
+                var alternateCurrentPath = Path.Combine(root, "Mirror - S01E01 - Pilot.strm");
+                const string streamUrl = "https://provider.invalid/series/user/pass/42001.mkv";
+                File.WriteAllText(oldPath, streamUrl);
+                File.WriteAllText(canonicalPath, streamUrl);
+
+                var currentPaths = new ConcurrentDictionary<int, ConcurrentDictionary<string, byte>>();
+                var oneCurrentPath = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
+                oneCurrentPath[canonicalPath] = 0;
+                currentPaths[42001] = oneCurrentPath;
+
+                var superseded = StrmSyncService.FindSupersededEpisodePaths(
+                    new[] { oldPath },
+                    currentPaths);
+                Assert(superseded.SequenceEqual(new[] { oldPath }),
+                    "the old filename with the same stream ID must be superseded");
+
+                File.WriteAllText(alternateCurrentPath, streamUrl);
+                currentPaths[42001][alternateCurrentPath] = 0;
+                superseded = StrmSyncService.FindSupersededEpisodePaths(
+                    new[] { oldPath },
+                    currentPaths);
+                Assert(superseded.Count == 0,
+                    "ambiguous multiple current paths must preserve the older path");
+            }
+            finally
+            {
+                Directory.Delete(root, true);
+            }
+
             return Task.CompletedTask;
         }
 

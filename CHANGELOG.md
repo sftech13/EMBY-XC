@@ -4,6 +4,13 @@ All notable changes to XC2EMBY are listed here, newest first.
 
 ---
 
+## v1.1.143
+- Fixed daily TV Shows and DocuSeries filename churn when a provider adds or changes an episode title. After writing the one current path, XC2EMBY now removes an older alternate path only when both files contain the same provider episode stream ID; matching NFO sidecars and newly empty folders are cleaned through the existing safe path.
+- Replaced the ineffective whole-catalog identity gate for ordinary episode orphans with persistent per-path absence tracking. A path must be absent from two separate successful sync runs before playback validation begins, even when unrelated provider catalog records change between runs.
+- Retained the conservative playback safeguard: a genuine provider removal is deleted only after the same definitive HTTP 404 or 410 is returned on two separate sync runs. Alive, unauthorized, rate-limited, server-error, timeout, TLS, and other inconclusive responses continue to preserve the file.
+- Increased the bounded playback-validation batch to 2,000 paths while retaining connection-aware parallelism of at most two requests, allowing large provider catalogs to retire stale records without exceeding a five-connection account limit.
+- Added sync-history reporting for superseded paths and regression coverage for canonical path cleanup, ambiguous current paths, and per-path absence tracking across changing catalogs.
+
 ## v1.1.142
 - Fixed TV Shows and DocuSeries STRMs remaining on disk after their category was deliberately unchecked. The plugin now persists independent category-ownership snapshots and treats an explicit user deselection separately from a provider catalog or metadata failure.
 - Explicit category cleanup deletes only directories uniquely owned by the removed category. Series still present in a selected category, cross-listed/shared directories, locally filtered files, and unresolved ownership remain protected.

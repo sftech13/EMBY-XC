@@ -34,6 +34,7 @@ namespace Emby.Xtream.Plugin.Service
         public int NfoDeleted;
         public int MetadataDirectoriesDeleted;
         public int Deleted;
+        public int Superseded;
         public volatile bool IsRunning;
 
         /// <summary>Set when sync exits early (e.g. invalid folder configuration).</summary>
@@ -62,6 +63,7 @@ namespace Emby.Xtream.Plugin.Service
         public int EpisodeSkipped { get; set; }
         public int EpisodeFailed { get; set; }
         public int EpisodeDeleted { get; set; }
+        public int EpisodeSuperseded { get; set; }
         public bool WasMovieSync { get; set; }
         public bool WasDocumentarySync { get; set; }
         public bool WasSeriesSync { get; set; }
@@ -304,10 +306,11 @@ namespace Emby.Xtream.Plugin.Service
             TimeSpan.FromSeconds(5),
             TimeSpan.FromSeconds(10),
         };
-        private const int MaxEpisodePlaybackValidationsPerSync = 200;
+        private const int MaxEpisodePlaybackValidationsPerSync = 2000;
 
         // Increment when naming logic changes so existing installs force a full re-sync on next run.
         internal const int CurrentStrmNamingVersion = 1;
+        private const int CurrentSeriesFastPathAlgorithmVersion = 2;
 
         private static void ApplyUserAgentToSharedClient()
         {
@@ -1175,6 +1178,9 @@ namespace Emby.Xtream.Plugin.Service
                 config == null
                     ? string.Empty
                     : config.StrmNamingVersion.ToString(CultureInfo.InvariantCulture));
+            AppendFingerprintValue(
+                sb,
+                CurrentSeriesFastPathAlgorithmVersion.ToString(CultureInfo.InvariantCulture));
             AppendFingerprintValue(
                 sb,
                 config?.SelectedSeriesCategoryIds == null
@@ -2541,6 +2547,8 @@ namespace Emby.Xtream.Plugin.Service
                 }
 
                 var writtenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var currentEpisodePathsById =
+                    new ConcurrentDictionary<int, ConcurrentDictionary<string, byte>>();
                 var locallyFilteredPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var detailFailurePaths = new ConcurrentBag<string>();
                 var categorySnapshot = DeserializeSeriesCategorySnapshot(
@@ -2684,7 +2692,12 @@ namespace Emby.Xtream.Plugin.Service
                             lock (writtenPaths)
                             {
                                 foreach (var path in existingFastPathFiles)
+                                {
                                     writtenPaths.Add(path);
+                                    RegisterCurrentEpisodePathFromFile(
+                                        currentEpisodePathsById,
+                                        path);
+                                }
                             }
                             var seasonDirectory = Path.GetDirectoryName(existingFastPathFiles[0]);
                             var fastSeriesDirectory = string.IsNullOrWhiteSpace(seasonDirectory)
@@ -2995,6 +3008,10 @@ namespace Emby.Xtream.Plugin.Service
                                 {
                                     writtenPaths.Add(strmPath);
                                 }
+                                RegisterCurrentEpisodePath(
+                                    currentEpisodePathsById,
+                                    episode.Id,
+                                    strmPath);
                             }
                         }
 
@@ -3231,6 +3248,31 @@ namespace Emby.Xtream.Plugin.Service
                         stableCatalogRuns,
                         locallyFilteredPaths);
 
+                    // A title-enrichment rename can create a new canonical path while
+                    // leaving the old filename behind. Matching provider stream IDs
+                    // prove these paths point at the same episode, so remove only the
+                    // non-current path without spending playback-validation requests.
+                    var supersededPaths = FindSupersededEpisodePaths(
+                        catalogOrphans,
+                        currentEpisodePathsById);
+                    if (supersededPaths.Count > 0)
+                    {
+                        var supersededDeleted = DeleteOrphans(
+                            supersededPaths,
+                            showsRoot);
+                        sp.Deleted += supersededDeleted;
+                        ep.Deleted += supersededDeleted;
+                        sp.Superseded += supersededDeleted;
+                        ep.Superseded += supersededDeleted;
+                        _logger.Info(
+                            "Series canonical-path cleanup removed {0} superseded STRM path(s) whose provider stream ID now has one current path",
+                            supersededDeleted);
+
+                        catalogOrphans = catalogOrphans
+                            .Where(File.Exists)
+                            .ToList();
+                    }
+
                     // Catalog absence and series-detail failure only create pending
                     // candidates. The actual episode URL is the sole dead/alive signal.
                     var confirmedDead = await ValidateStaleEpisodePathsAsync(
@@ -3239,7 +3281,6 @@ namespace Emby.Xtream.Plugin.Service
                         detailFailurePaths,
                         catalogOrphans,
                         writtenPaths,
-                        stableCatalogRuns,
                         playbackValidationRunId,
                         cancellationToken).ConfigureAwait(false);
                     lock (writtenPaths)
@@ -3333,8 +3374,8 @@ namespace Emby.Xtream.Plugin.Service
                 ep.Failed = sp.Failed;
                 LogStreamUrlChangeSummary(isDocuSeries ? "DocuSeries" : "Series", urlChangeStats);
                 LogNfoChangeSummary(isDocuSeries ? "DocuSeries" : "Series", sp, ep);
-                _logger.Info("Series STRM sync completed: {0} episodes added, {1} changed, {2} skipped, {3} deleted, {4} failed",
-                    ep.Added, ep.Changed, ep.Skipped, ep.Deleted, sp.Failed);
+                _logger.Info("Series STRM sync completed: {0} episodes added, {1} changed, {2} skipped, {3} deleted ({4} superseded path(s)), {5} failed",
+                    ep.Added, ep.Changed, ep.Skipped, ep.Deleted, ep.Superseded, sp.Failed);
                 CompleteSyncAndCoalesceLibraryScan(
                     isDocuSeries ? "DocuSeries" : "Series",
                     showsRoot,
@@ -3381,6 +3422,7 @@ namespace Emby.Xtream.Plugin.Service
                     EpisodeSkipped = ep.Skipped,
                     EpisodeFailed = sp.Failed,
                     EpisodeDeleted = ep.Deleted,
+                    EpisodeSuperseded = ep.Superseded,
                     AddedSeriesTitles = addedSeriesTitles,
                 });
                 EndSyncCancellation(syncCancellation);
@@ -4781,7 +4823,6 @@ namespace Emby.Xtream.Plugin.Service
             IEnumerable<string> detailFailurePaths,
             IEnumerable<string> catalogOrphanPaths,
             HashSet<string> writtenPaths,
-            int consecutiveCompleteCatalogRuns,
             string syncRunId,
             CancellationToken cancellationToken)
         {
@@ -4845,27 +4886,12 @@ namespace Emby.Xtream.Plugin.Service
             foreach (var fullPath in catalogSet)
             {
                 var candidate = CreatePlaybackValidationCandidate(contentRoot, fullPath, "catalog endpoint");
-                EpisodePlaybackValidationState state;
-                if (states.TryGetValue(candidate.RelativePath, out state))
-                {
-                    if (!string.Equals(state.LastCatalogRunId, syncRunId, StringComparison.Ordinal))
-                    {
-                        state.ConsecutiveCatalogAbsences++;
-                        state.FirstCatalogAbsentUtc = state.FirstCatalogAbsentUtc ?? now;
-                        state.LastCatalogAbsentUtc = now;
-                        state.LastCatalogRunId = syncRunId;
-                    }
-
-                    if (consecutiveCompleteCatalogRuns >= 2 && state.ConsecutiveCatalogAbsences >= 2)
-                        candidates[candidate.RelativePath] = candidate;
-                }
-                else if (consecutiveCompleteCatalogRuns >= 2)
-                {
-                    // The identical catalog fingerprint proves this path was absent
-                    // from both complete snapshots. Delay allocating persistent state
-                    // until the path reaches the bounded validation batch.
+                var state = GetOrCreateValidationState(states, candidate, now);
+                if (EpisodePlaybackValidator.ObserveCatalogAbsence(
+                    state,
+                    syncRunId,
+                    now))
                     candidates[candidate.RelativePath] = candidate;
-                }
             }
 
             var orderedCandidates = candidates.Values
@@ -4892,21 +4918,7 @@ namespace Emby.Xtream.Plugin.Service
             // Materialize state before parallel HTTP work; Dictionary writes are
             // intentionally kept on this single thread.
             foreach (var candidate in orderedCandidates)
-            {
-                var state = GetOrCreateValidationState(states, candidate, now);
-                if (string.Equals(candidate.Source, "catalog endpoint", StringComparison.Ordinal) &&
-                    !string.Equals(state.LastCatalogRunId, syncRunId, StringComparison.Ordinal))
-                {
-                    // New states can infer two absences from the persistent pair of
-                    // identical complete catalog snapshots that made them eligible.
-                    state.ConsecutiveCatalogAbsences = Math.Max(
-                        2,
-                        state.ConsecutiveCatalogAbsences + 1);
-                    state.FirstCatalogAbsentUtc = state.FirstCatalogAbsentUtc ?? now;
-                    state.LastCatalogAbsentUtc = now;
-                    state.LastCatalogRunId = syncRunId;
-                }
-            }
+                GetOrCreateValidationState(states, candidate, now);
 
             var confirmedDead = new ConcurrentBag<string>();
             var alive = 0;
@@ -5052,6 +5064,82 @@ namespace Emby.Xtream.Plugin.Service
                 EpisodeId = episodeId,
                 Source = source,
             };
+        }
+
+        private static void RegisterCurrentEpisodePath(
+            ConcurrentDictionary<int, ConcurrentDictionary<string, byte>> currentPathsByEpisodeId,
+            int episodeId,
+            string fullPath)
+        {
+            if (currentPathsByEpisodeId == null || episodeId <= 0 || string.IsNullOrWhiteSpace(fullPath))
+                return;
+
+            var paths = currentPathsByEpisodeId.GetOrAdd(
+                episodeId,
+                _ => new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase));
+            paths[fullPath] = 0;
+        }
+
+        private static void RegisterCurrentEpisodePathFromFile(
+            ConcurrentDictionary<int, ConcurrentDictionary<string, byte>> currentPathsByEpisodeId,
+            string fullPath)
+        {
+            int episodeId;
+            if (TryReadEpisodeStreamId(fullPath, out episodeId))
+                RegisterCurrentEpisodePath(currentPathsByEpisodeId, episodeId, fullPath);
+        }
+
+        internal static List<string> FindSupersededEpisodePaths(
+            IEnumerable<string> orphanPaths,
+            ConcurrentDictionary<int, ConcurrentDictionary<string, byte>> currentPathsByEpisodeId)
+        {
+            var result = new List<string>();
+            if (orphanPaths == null || currentPathsByEpisodeId == null)
+                return result;
+
+            foreach (var orphanPath in orphanPaths)
+            {
+                int episodeId;
+                ConcurrentDictionary<string, byte> currentPaths;
+                if (!TryReadEpisodeStreamId(orphanPath, out episodeId) ||
+                    !currentPathsByEpisodeId.TryGetValue(episodeId, out currentPaths) ||
+                    currentPaths.Count != 1)
+                    continue;
+
+                var canonicalPath = currentPaths.Keys.FirstOrDefault();
+                if (!string.IsNullOrWhiteSpace(canonicalPath) &&
+                    File.Exists(canonicalPath) &&
+                    !string.Equals(orphanPath, canonicalPath, StringComparison.OrdinalIgnoreCase))
+                    result.Add(orphanPath);
+            }
+
+            return result;
+        }
+
+        private static bool TryReadEpisodeStreamId(string fullPath, out int episodeId)
+        {
+            episodeId = 0;
+            try
+            {
+                if (!File.Exists(fullPath)) return false;
+                StreamUrlParts parts;
+                return TryParseStreamUrl(File.ReadAllText(fullPath), out parts) &&
+                    string.Equals(parts.Kind, "series", StringComparison.OrdinalIgnoreCase) &&
+                    int.TryParse(
+                        parts.StreamId,
+                        NumberStyles.None,
+                        CultureInfo.InvariantCulture,
+                        out episodeId) &&
+                    episodeId > 0;
+            }
+            catch (IOException)
+            {
+                return false;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return false;
+            }
         }
 
         private static string GetRelativePath(string rootPath, string fullPath)

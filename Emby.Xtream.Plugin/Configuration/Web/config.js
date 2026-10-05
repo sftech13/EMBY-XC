@@ -3091,6 +3091,7 @@ function (BaseView, loading) {
                 ' ep <span style="opacity:0.5;">(' +
                 '<span style="color:' + accentColor + '; opacity:1;">+' + (e.EpisodeAdded || 0) + '</span> ' +
                 '<span style="color:#e74c3c; opacity:1;">-' + (e.EpisodeDeleted || 0) + '</span>, ' +
+                (e.EpisodeSuperseded ? e.EpisodeSuperseded + ' superseded, ' : '') +
                 (e.EpisodeSkipped || 0) + ' skip, ' +
                 (e.EpisodeFailed || 0) + ' fail' +
                 ')</span>';
