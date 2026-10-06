@@ -108,7 +108,13 @@ namespace Emby.Xtream.Plugin.Service
         public MediaSourceInfo MediaSource { get; set; }
         public string UniqueId { get; }
         public DateTimeOffset DateOpened { get; }
-        public bool SupportsCopyTo => true;
+        // Provider HLS is a playlist rather than one continuous byte stream. Let Emby or
+        // the client consume that URL directly; the MPEG-TS fan-out copier is not suitable
+        // for repeatedly refreshed HLS manifests.
+        public bool SupportsCopyTo => !string.Equals(
+            MediaSource?.Container,
+            "hls",
+            StringComparison.OrdinalIgnoreCase);
 
         // The upstream connection is deferred until Emby creates the first response writer.
         public Task Open(CancellationToken openCancellationToken)

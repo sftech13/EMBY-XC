@@ -38,6 +38,8 @@ namespace Emby.Xtream.Plugin.Tests
                 ("shared live viewer remains bounded when its queue fills", SharedViewerBufferRemainsBoundedAsync),
                 ("legacy Emby mixed consumers keep the shared stream alive", LegacyMixedLiveConsumersRemainCountedAsync),
                 ("Emby 4.10 first consumer closes without leaking a tuner slot", ModernLiveConsumerClosesCleanlyAsync),
+                ("repeated short playback stops activate a temporary per-channel HLS override", AdaptiveHlsActivatesAndExpiresAsync),
+                ("adaptive HLS evidence remains isolated by device and channel", AdaptiveHlsEvidenceIsIsolatedAsync),
                 ("EPG time shift moves timestamps and clamps to twelve hours", EpgTimeShiftIsAppliedAndClampedAsync),
                 ("Live TV probe supplies bitrate and fractional frame rate", LiveTvProbeSuppliesPlaybackMetadataAsync),
                 ("Live TV probe estimates missing MPEG-TS bitrate from packets", LiveTvProbeEstimatesPacketBitRateAsync),
@@ -94,6 +96,95 @@ namespace Emby.Xtream.Plugin.Tests
                 "changed provider metadata must update an existing show NFO");
             Assert(StrmSyncService.ShouldWriteShowNfo(true, true, true, true, false, false),
                 "a missing show NFO must be created even when Smart Skip applies");
+            return Task.CompletedTask;
+        }
+
+        private static Task AdaptiveHlsActivatesAndExpiresAsync()
+        {
+            var manager = AdaptiveHlsFallbackManager.Instance;
+            manager.ResetForTests();
+            var config = new PluginConfiguration
+            {
+                LiveTvOutputFormat = "ts",
+                EnableAdaptiveHlsFallback = true,
+                AdaptiveHlsOverrideMinutes = 60,
+            };
+            var start = new DateTime(2026, 10, 6, 12, 0, 0, DateTimeKind.Utc);
+
+            manager.RecordPlaybackStarted("samsung", "session-1", "xtream_live_44360005", false, start);
+            Assert(!manager.RecordPlaybackStopped(
+                    "samsung", "session-1", "xtream_live_44360005", false,
+                    config, null, start.AddMinutes(10)),
+                "the first short stop must not activate HLS");
+
+            manager.RecordPlaybackStarted(
+                "samsung", "session-2", "xtream_live_44360005", false, start.AddMinutes(11));
+            Assert(manager.RecordPlaybackStopped(
+                    "samsung", "session-2", "xtream_live_44360005", false,
+                    config, null, start.AddMinutes(17)),
+                "the second short stop on the same device and channel must activate HLS");
+
+            bool adaptive;
+            var activeFormat = manager.GetEffectiveOutputFormat(
+                44360005, config, null, start.AddMinutes(18), out adaptive);
+            Assert(adaptive && activeFormat == "m3u8",
+                "the affected channel must use provider HLS while the override is active");
+
+            var otherFormat = manager.GetEffectiveOutputFormat(
+                44350005, config, null, start.AddMinutes(18), out adaptive);
+            Assert(!adaptive && otherFormat == "ts",
+                "an unrelated channel must remain MPEG-TS");
+
+            var expiredFormat = manager.GetEffectiveOutputFormat(
+                44360005, config, null, start.AddMinutes(78), out adaptive);
+            Assert(!adaptive && expiredFormat == "ts",
+                "the channel must return to MPEG-TS after the configured duration");
+            manager.ResetForTests();
+            return Task.CompletedTask;
+        }
+
+        private static Task AdaptiveHlsEvidenceIsIsolatedAsync()
+        {
+            var manager = AdaptiveHlsFallbackManager.Instance;
+            manager.ResetForTests();
+            var config = new PluginConfiguration
+            {
+                LiveTvOutputFormat = "ts",
+                EnableAdaptiveHlsFallback = true,
+                AdaptiveHlsOverrideMinutes = 60,
+            };
+            var start = new DateTime(2026, 10, 6, 13, 0, 0, DateTimeKind.Utc);
+
+            manager.RecordPlaybackStarted("device-a", "a1", "xtream_live_44360005", false, start);
+            manager.RecordPlaybackStopped(
+                "device-a", "a1", "xtream_live_44360005", false,
+                config, null, start.AddMinutes(5));
+            manager.RecordPlaybackStarted("device-b", "b1", "xtream_live_44360005", false, start);
+            Assert(!manager.RecordPlaybackStopped(
+                    "device-b", "b1", "xtream_live_44360005", false,
+                    config, null, start.AddMinutes(6)),
+                "stops from two devices must not be combined");
+
+            manager.RecordPlaybackStarted("device-a", "a2", "xtream_live_44350005", false, start.AddMinutes(7));
+            Assert(!manager.RecordPlaybackStopped(
+                    "device-a", "a2", "xtream_live_44350005", false,
+                    config, null, start.AddMinutes(12)),
+                "stops from two channels must not be combined");
+
+            manager.RecordPlaybackStarted("device-a", "a3", "xtream_live_44360005", false, start.AddMinutes(13));
+            Assert(!manager.RecordPlaybackStopped(
+                    "device-a", "a3", "xtream_live_44360005", false,
+                    config, null, start.AddSeconds(13 * 60 + 20)),
+                "a session shorter than 45 seconds must not count");
+
+            bool adaptive;
+            Assert(manager.GetEffectiveOutputFormat(
+                    44360005, config, null, start.AddMinutes(14), out adaptive) == "ts" && !adaptive,
+                "isolated or too-short stops must leave MPEG-TS selected");
+            Assert(AdaptiveHlsFallbackManager.TryParseStreamId(
+                    "xtream_live_44360005_adaptive_hls", out var parsed) && parsed == 44360005,
+                "adaptive media-source IDs must retain a parseable Xtream stream ID");
+            manager.ResetForTests();
             return Task.CompletedTask;
         }
 

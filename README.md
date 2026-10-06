@@ -45,12 +45,13 @@
 
 ## Features Overview
 
-> Current release: **v1.1.141** — see [CHANGELOG.md](CHANGELOG.md) for full version history.
+> Current release: **v1.1.144** — see [CHANGELOG.md](CHANGELOG.md) for full version history.
 
 ### Live TV
 - Registers as a native Emby tuner host — channels appear in Live TV just like any other tuner
 - Fetches channel list from Xtream `get_live_streams` API with a 6-hour warm cache and background refresh
 - Supports `ts` (MPEG-TS) and `m3u8` (HLS) stream output formats
+- Optional per-channel adaptive HLS fallback after repeated short playback stops on one device
 - Optional **direct play** — clients connect straight to the Xtream URL, bypassing Emby's transcoder entirely
 - Filters channels by category and optionally excludes adult content
 - Optionally adds category names as M3U `group-title` tags
@@ -223,6 +224,10 @@ Master toggle for the Xtream tuner host. When disabled, no channels appear in Em
 When enabled, clients connect directly to the Xtream stream URL. No Emby transcoding process is started, which eliminates all transcoder overhead and startup delay. Clients fall back to direct-stream or transcode automatically if they cannot handle the format.
 
 When disabled, all playback routes through Emby's ffmpeg pipeline.
+
+#### Adaptive HLS Fallback
+
+When enabled while the global format is MPEG-TS, two 45-second-to-30-minute sessions of the same channel ending on the same device within 30 minutes temporarily switch only that channel to provider HLS. The override defaults to 60 minutes, then the channel automatically returns to MPEG-TS. Anyone opening the affected channel during that window receives HLS; every other channel keeps the global format, and restarting Emby clears all active overrides.
 
 #### Category Filtering
 
@@ -691,6 +696,8 @@ Complete list of all configuration fields.
 | `EnableLiveTv` | bool | `true` | Enable/disable the tuner host |
 | `LiveTvOutputFormat` | string | `"ts"` | `"ts"` or `"m3u8"` |
 | `EnableLiveTvDirectPlay` | bool | `true` | Allow client-side direct URL playback |
+| `EnableAdaptiveHlsFallback` | bool | `false` | Temporarily use HLS for a repeatedly stopped channel |
+| `AdaptiveHlsOverrideMinutes` | int | `60` | Per-channel HLS override duration (5–1440 minutes) |
 | `TunerCount` | int | `1` | Number of tuner instances Emby can use |
 | `SelectedLiveCategoryIds` | int[] | `[]` | Live categories to include (empty = all) |
 | `IncludeAdultChannels` | bool | `false` | Include adult-flagged channels |

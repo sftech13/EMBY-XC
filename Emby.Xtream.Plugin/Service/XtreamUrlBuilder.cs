@@ -18,7 +18,15 @@ namespace Emby.Xtream.Plugin.Service
         /// </summary>
         public static string BuildStreamUrl(PluginConfiguration config, int streamId)
         {
-            var extension = string.Equals(config.LiveTvOutputFormat, "ts", StringComparison.OrdinalIgnoreCase)
+            return BuildStreamUrl(config, streamId, config.LiveTvOutputFormat);
+        }
+
+        /// <summary>
+        /// Builds a live-stream URL with an explicit per-tune output format.
+        /// </summary>
+        public static string BuildStreamUrl(PluginConfiguration config, int streamId, string outputFormat)
+        {
+            var extension = string.Equals(outputFormat, "ts", StringComparison.OrdinalIgnoreCase)
                 ? "ts" : "m3u8";
             return string.Format(CultureInfo.InvariantCulture,
                 "{0}/live/{1}/{2}/{3}.{4}",

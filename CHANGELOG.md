@@ -4,6 +4,12 @@ All notable changes to XC2EMBY are listed here, newest first.
 
 ---
 
+## v1.1.144
+- Added an optional **Adaptive HLS Fallback** for Live TV. When the same device ends the same channel twice after 45 seconds but before 30 minutes, XC2EMBY temporarily changes only that provider stream from MPEG-TS to HLS; every other channel keeps the configured global format.
+- Adaptive overrides default to 60 minutes, are configurable from 5 minutes to 24 hours, expire back to MPEG-TS automatically, and remain in memory only so an Emby restart clears them.
+- Adaptive HLS uses a distinct media-source ID so Emby cannot silently reuse an older MPEG-TS live stream. Provider HLS manifests bypass the continuous MPEG-TS fan-out copier and are consumed directly by Emby or the client.
+- Added device/channel isolation, minimum session-length filtering, automatic-expiry logging, and regression coverage for activation, isolation, suffix parsing, and expiry.
+
 ## v1.1.143
 - Fixed daily TV Shows and DocuSeries filename churn when a provider adds or changes an episode title. After writing the one current path, XC2EMBY now removes an older alternate path only when both files contain the same provider episode stream ID; matching NFO sidecars and newly empty folders are cleaned through the existing safe path.
 - Replaced the ineffective whole-catalog identity gate for ordinary episode orphans with persistent per-path absence tracking. A path must be absent from two separate successful sync runs before playback validation begins, even when unrelated provider catalog records change between runs.

@@ -437,7 +437,10 @@ namespace Emby.Xtream.Plugin.Service
             }
 
             var config = Plugin.Instance.Configuration;
-            var streamUrl = XtreamUrlBuilder.BuildStreamUrl(config, streamId);
+            bool adaptiveOverride;
+            var outputFormat = AdaptiveHlsFallbackManager.Instance.GetEffectiveOutputFormat(
+                streamId, config, Logger, DateTime.UtcNow, out adaptiveOverride);
+            var streamUrl = XtreamUrlBuilder.BuildStreamUrl(config, streamId, outputFormat);
             // Emby selects direct-play/remux/transcode before opening ILiveStream. On a
             // cold channel, returning the old H.264/AC3 placeholder immediately makes
             // that first decision wrong for HEVC/EAC3 and leaves bitrate at the client's
@@ -451,7 +454,9 @@ namespace Emby.Xtream.Plugin.Service
                 streamId,
                 streamUrl,
                 config.HttpUserAgent,
-                probed);
+                probed,
+                outputFormat,
+                adaptiveOverride);
 
             return new List<MediaSourceInfo> { mediaSource };
         }
@@ -468,14 +473,21 @@ namespace Emby.Xtream.Plugin.Service
             }
 
             var config = Plugin.Instance.Configuration;
-            var streamUrl = XtreamUrlBuilder.BuildStreamUrl(config, streamId);
-            var mediaSource = CreateMediaSourceInfo(streamId, streamUrl, config.HttpUserAgent);
+            bool adaptiveOverride;
+            var outputFormat = AdaptiveHlsFallbackManager.Instance.GetEffectiveOutputFormat(
+                streamId, config, Logger, DateTime.UtcNow, out adaptiveOverride);
+            var streamUrl = XtreamUrlBuilder.BuildStreamUrl(config, streamId, outputFormat);
+            var mediaSource = CreateMediaSourceInfo(
+                streamId, streamUrl, config.HttpUserAgent, null, outputFormat, adaptiveOverride);
 
             var httpClient = Plugin.CreateHttpClient();
             ILiveStream liveStream = new XtreamLiveStream(mediaSource, tuner.Id, httpClient, Logger);
 
-            Logger.Info("Opening live stream for channel {0} (stream {1})",
-                tunerChannel?.Name ?? tunerChannel?.Id, streamId);
+            Logger.Info("Opening live stream for channel {0} (stream {1}, format {2}{3})",
+                tunerChannel?.Name ?? tunerChannel?.Id,
+                streamId,
+                outputFormat,
+                adaptiveOverride ? ", adaptive override" : string.Empty);
 
             return Task.FromResult(liveStream);
         }
@@ -711,11 +723,17 @@ namespace Emby.Xtream.Plugin.Service
             int streamId,
             string streamUrl,
             string userAgent = null,
-            StreamCodecInfo probedInfo = null)
+            StreamCodecInfo probedInfo = null,
+            string outputFormat = null,
+            bool adaptiveOverride = false)
         {
             var config   = Plugin.Instance.Configuration;
-            var sourceId = "xtream_live_" + streamId.ToString(CultureInfo.InvariantCulture);
-            var isTsOutput = string.Equals(config.LiveTvOutputFormat, "ts", StringComparison.OrdinalIgnoreCase);
+            var isTsOutput = string.Equals(
+                outputFormat ?? config.LiveTvOutputFormat,
+                "ts",
+                StringComparison.OrdinalIgnoreCase);
+            var sourceId = "xtream_live_" + streamId.ToString(CultureInfo.InvariantCulture) +
+                (adaptiveOverride ? "_adaptive_hls" : string.Empty);
             var cached = probedInfo ?? StreamProbeService.GetCachedInfo(streamId);
             var streams = cached != null ? BuildMediaStreamsFromCache(cached) : BuildDefaultMediaStreams();
 

@@ -15,6 +15,8 @@ namespace Emby.Xtream.Plugin
         public bool EnableLiveTv { get; set; } = true;
         public string LiveTvOutputFormat { get; set; } = "ts";
         public bool EnableLiveTvDirectPlay { get; set; } = true;
+        public bool EnableAdaptiveHlsFallback { get; set; }
+        public int AdaptiveHlsOverrideMinutes { get; set; } = 60;
         public bool ClearLiveTvLogoCacheOnRefresh { get; set; }
         public int TunerCount { get; set; } = 1;
 

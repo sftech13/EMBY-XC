@@ -298,6 +298,10 @@ namespace Emby.Xtream.Plugin
             target.EnableLiveTv = source.EnableLiveTv;
             target.LiveTvOutputFormat = source.LiveTvOutputFormat;
             target.EnableLiveTvDirectPlay = source.EnableLiveTvDirectPlay;
+            target.EnableAdaptiveHlsFallback = source.EnableAdaptiveHlsFallback;
+            target.AdaptiveHlsOverrideMinutes = source.AdaptiveHlsOverrideMinutes > 0
+                ? source.AdaptiveHlsOverrideMinutes
+                : 60;
             target.ClearLiveTvLogoCacheOnRefresh = source.ClearLiveTvLogoCacheOnRefresh;
             target.TunerCount = source.TunerCount > 0 ? source.TunerCount : 1;
             target.StreamCodecCacheJson = source.StreamCodecCacheJson;

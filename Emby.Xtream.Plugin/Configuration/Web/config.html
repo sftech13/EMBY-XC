@@ -1287,6 +1287,28 @@
                         </div>
                         <div class="settingsOptionItem liveTvSettings">
                             <div>
+                                <div class="settingsOptionTitle">Adaptive HLS Fallback</div>
+                                <div class="settingsOptionDescription">When one device ends the same channel twice after 45 seconds but before 30 minutes, temporarily use provider HLS for only that channel. Other channels remain MPEG-TS.</div>
+                            </div>
+                            <div class="checkboxContainer checkboxContainer-withDescription">
+                                <label>
+                                    <input class="chkAdaptiveHlsFallback" type="checkbox" is="emby-checkbox" />
+                                    <span>Enabled</span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="settingsOptionItem liveTvSettings adaptiveHlsSettings">
+                            <div>
+                                <div class="settingsOptionTitle">HLS Override Duration</div>
+                                <div class="settingsOptionDescription">After the fallback triggers, return the channel to MPEG-TS automatically after this many minutes.</div>
+                            </div>
+                            <div class="inputContainer">
+                                <input class="txtAdaptiveHlsOverrideMinutes" type="number" is="emby-input"
+                                       label="Minutes" min="5" max="1440" step="5" />
+                            </div>
+                        </div>
+                        <div class="settingsOptionItem liveTvSettings">
+                            <div>
                                 <div class="settingsOptionTitle">Guide Category Grouping</div>
                                 <div class="settingsOptionDescription">Send category names so Emby can group channels in the guide.</div>
                             </div>

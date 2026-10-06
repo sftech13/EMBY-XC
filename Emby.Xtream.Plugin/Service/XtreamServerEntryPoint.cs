@@ -9,6 +9,7 @@ using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.LiveTv;
 using MediaBrowser.Controller.Plugins;
+using MediaBrowser.Controller.Session;
 using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.LiveTv;
 using MediaBrowser.Model.Logging;
@@ -31,12 +32,19 @@ namespace Emby.Xtream.Plugin.Service
 
         private readonly ILiveTvManager _liveTvManager;
         private readonly IServerApplicationHost _appHost;
+        private readonly ISessionManager _sessionManager;
         private readonly ILogger _logger;
+        private bool _playbackEventsSubscribed;
 
-        public XtreamServerEntryPoint(ILiveTvManager liveTvManager, IServerApplicationHost appHost, ILogManager logManager)
+        public XtreamServerEntryPoint(
+            ILiveTvManager liveTvManager,
+            IServerApplicationHost appHost,
+            ISessionManager sessionManager,
+            ILogManager logManager)
         {
             _liveTvManager = liveTvManager;
             _appHost       = appHost;
+            _sessionManager = sessionManager;
             _logger        = logManager.GetLogger("XtreamTuner.EntryPoint");
         }
 
@@ -63,6 +71,43 @@ namespace Emby.Xtream.Plugin.Service
 
             // Ensure exactly one xtream-epg listing config entry
             EnsureListingsConfig();
+
+            SubscribeToPlaybackEvents();
+        }
+
+        private void SubscribeToPlaybackEvents()
+        {
+            if (_playbackEventsSubscribed || _sessionManager == null)
+                return;
+
+            _sessionManager.PlaybackStart += OnPlaybackStart;
+            _sessionManager.PlaybackStopped += OnPlaybackStopped;
+            _playbackEventsSubscribed = true;
+            _logger.Info("Adaptive HLS playback monitor registered");
+        }
+
+        private void OnPlaybackStart(object sender, PlaybackProgressEventArgs args)
+        {
+            if (args == null) return;
+            AdaptiveHlsFallbackManager.Instance.RecordPlaybackStarted(
+                args.DeviceId,
+                args.PlaySessionId,
+                args.MediaSourceId,
+                args.IsAutomated,
+                DateTime.UtcNow);
+        }
+
+        private void OnPlaybackStopped(object sender, PlaybackStopEventArgs args)
+        {
+            if (args == null) return;
+            AdaptiveHlsFallbackManager.Instance.RecordPlaybackStopped(
+                args.DeviceId,
+                args.PlaySessionId,
+                args.MediaSourceId,
+                args.IsAutomated,
+                Plugin.InstanceOrNull?.Configuration,
+                _logger,
+                DateTime.UtcNow);
         }
 
         private void ClearCachesIfVersionChanged()
@@ -435,7 +480,15 @@ namespace Emby.Xtream.Plugin.Service
             catch { return new List<ListingsProviderInfo>(); }
         }
 
-        public void Dispose() { }
+        public void Dispose()
+        {
+            if (!_playbackEventsSubscribed || _sessionManager == null)
+                return;
+
+            _sessionManager.PlaybackStart -= OnPlaybackStart;
+            _sessionManager.PlaybackStopped -= OnPlaybackStopped;
+            _playbackEventsSubscribed = false;
+        }
     }
 
     internal class GuideLogoCleanupResult
