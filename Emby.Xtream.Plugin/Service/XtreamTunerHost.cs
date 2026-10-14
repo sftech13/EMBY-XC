@@ -11,6 +11,7 @@ using MediaBrowser.Controller;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.LiveTv;
 using MediaBrowser.Model.Dto;
+using MediaBrowser.Model.Dlna;
 using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.LiveTv;
 using MediaBrowser.Model.MediaInfo;
@@ -824,6 +825,22 @@ namespace Emby.Xtream.Plugin.Service
                 if (info.AudioBitRate > 0) as_.BitRate = info.AudioBitRate;
                 as_.DisplayTitle = BuildAudioDisplayTitle(info.AudioCodec, info.AudioChannels);
                 streams.Add(as_);
+            }
+            if (info.HasClosedCaptions == true)
+            {
+                streams.Add(new MediaStream
+                {
+                    Type = MediaStreamType.Subtitle,
+                    Codec = "eia_608",
+                    Index = 100,
+                    IsDefault = false,
+                    IsForced = false,
+                    IsExternal = false,
+                    Language = "und",
+                    Title = "CC1",
+                    DisplayTitle = "Und (EIA-608)",
+                    DeliveryMethod = SubtitleDeliveryMethod.VideoSideData,
+                });
             }
             return streams;
         }

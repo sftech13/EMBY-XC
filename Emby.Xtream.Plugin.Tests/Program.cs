@@ -42,6 +42,7 @@ namespace Emby.Xtream.Plugin.Tests
                 ("adaptive HLS evidence remains isolated by device and channel", AdaptiveHlsEvidenceIsIsolatedAsync),
                 ("EPG time shift moves timestamps and clamps to twelve hours", EpgTimeShiftIsAppliedAndClampedAsync),
                 ("Live TV probe supplies bitrate and fractional frame rate", LiveTvProbeSuppliesPlaybackMetadataAsync),
+                ("Live TV probe exposes embedded captions only when detected", LiveTvProbeExposesEmbeddedCaptionsAsync),
                 ("Live TV probe estimates missing MPEG-TS bitrate from packets", LiveTvProbeEstimatesPacketBitRateAsync),
                 ("fresh Live TV probe cache avoids repeated background probes", LiveTvProbeCacheRefreshIsThrottledAsync),
                 ("cold Live TV tune receives completed probe metadata", ColdLiveTvTuneAwaitsProbeAsync),
@@ -1120,6 +1121,48 @@ namespace Emby.Xtream.Plugin.Tests
             return Task.CompletedTask;
         }
 
+        private static Task LiveTvProbeExposesEmbeddedCaptionsAsync()
+        {
+            Assert(StreamProbeService.ProbeStreamEntries
+                    .Split(',')
+                    .Contains("closed_captions"),
+                "the actual ffprobe field selection must request closed_captions");
+
+            const string captionedJson = @"{
+              ""streams"": [
+                {""codec_type"":""video"",""codec_name"":""h264"",""closed_captions"":1},
+                {""codec_type"":""audio"",""codec_name"":""aac"",""channels"":2}
+              ]
+            }";
+            const string uncaptionedJson = @"{
+              ""streams"": [
+                {""codec_type"":""video"",""codec_name"":""h264"",""closed_captions"":0},
+                {""codec_type"":""audio"",""codec_name"":""aac"",""channels"":2}
+              ]
+            }";
+
+            var captioned = StreamProbeService.ParseOutput(captionedJson);
+            Assert(captioned.HasClosedCaptions == true,
+                "ffprobe closed_captions=1 must be retained in the codec cache");
+            var streams = XtreamTunerHost.BuildMediaStreamsFromCache(captioned);
+            var subtitle = streams.Single(stream =>
+                stream.Type == MediaBrowser.Model.Entities.MediaStreamType.Subtitle);
+            Assert(subtitle.Codec == "eia_608" && subtitle.Index == 100,
+                "captions must use Emby's index-100 VideoSideData convention");
+            Assert(subtitle.DeliveryMethod == MediaBrowser.Model.Dlna.SubtitleDeliveryMethod.VideoSideData,
+                "caption delivery must be marked as VideoSideData");
+            Assert(!subtitle.IsDefault && !subtitle.IsForced,
+                "detected captions must remain user-selectable rather than forced");
+
+            var uncaptioned = StreamProbeService.ParseOutput(uncaptionedJson);
+            Assert(uncaptioned.HasClosedCaptions == false,
+                "ffprobe closed_captions=0 must be cached as a completed negative probe");
+            Assert(!XtreamTunerHost.BuildMediaStreamsFromCache(uncaptioned)
+                    .Any(stream => stream.Type == MediaBrowser.Model.Entities.MediaStreamType.Subtitle),
+                "caption-negative channels must not expose a phantom CC option");
+            return Task.CompletedTask;
+        }
+
         private static Task LiveTvProbeCacheRefreshIsThrottledAsync()
         {
             var now = new DateTimeOffset(2026, 9, 1, 12, 0, 0, TimeSpan.Zero);
@@ -1127,13 +1170,20 @@ namespace Emby.Xtream.Plugin.Tests
             {
                 ProbeVersion = StreamProbeService.CurrentProbeVersion,
                 CachedAt = now.AddHours(-1).ToUnixTimeSeconds(),
+                HasClosedCaptions = false,
             };
             var old = new StreamCodecInfo
             {
                 ProbeVersion = StreamProbeService.CurrentProbeVersion,
                 CachedAt = now.AddDays(-2).ToUnixTimeSeconds(),
+                HasClosedCaptions = false,
             };
             var legacy = new StreamCodecInfo { CachedAt = now.AddMinutes(-1).ToUnixTimeSeconds() };
+            var captionUnknown = new StreamCodecInfo
+            {
+                ProbeVersion = StreamProbeService.CurrentProbeVersion,
+                CachedAt = now.AddMinutes(-1).ToUnixTimeSeconds(),
+            };
 
             Assert(!StreamProbeService.NeedsBackgroundRefresh(fresh, now),
                 "a fresh cache entry must not start another provider probe");
@@ -1141,6 +1191,8 @@ namespace Emby.Xtream.Plugin.Tests
                 "an actively used older entry should refresh asynchronously");
             Assert(StreamProbeService.NeedsBackgroundRefresh(legacy, now),
                 "a fresh legacy codec-only entry must be enriched once in the background");
+            Assert(StreamProbeService.NeedsBackgroundRefresh(captionUnknown, now),
+                "a pre-caption cache entry must be enriched asynchronously");
             return Task.CompletedTask;
         }
 

@@ -4,6 +4,12 @@ All notable changes to XC2EMBY are listed here, newest first.
 
 ---
 
+## v1.1.145
+- Added non-blocking embedded-caption discovery for Live TV. XC2EMBY's existing codec probe now requests FFprobe's `closed_captions` field and exposes detected EIA-608/CEA-708 data to Emby as a selectable `VideoSideData` caption stream without forcing transcoding or adding another tune-time probe.
+- Existing codec-probe cache entries are enriched once in the background, while caption-negative results are cached normally so subsequent tunes retain the current fast-start behavior.
+- Added regression coverage for caption-positive and caption-negative channels, FFprobe field selection, Emby's index-100 side-data convention, and legacy probe-cache refresh behavior.
+- Cleaned the source layout by removing unused direct Emby 4.10 assembly copies and an IDE-generated project cache. The regression-test project remains source-only, and release packaging remains limited to `XC2EMBY.Plugin.dll`.
+
 ## v1.1.144
 - Added an optional **Adaptive HLS Fallback** for Live TV. When the same device ends the same channel twice after 45 seconds but before 30 minutes, XC2EMBY temporarily changes only that provider stream from MPEG-TS to HLS; every other channel keeps the configured global format.
 - Adaptive overrides default to 60 minutes, are configurable from 5 minutes to 24 hours, expire back to MPEG-TS automatically, and remain in memory only so an Emby restart clears them.

@@ -43,6 +43,8 @@ namespace Emby.Xtream.Plugin.Service
 
         internal const int ProbeSampleSeconds = 3;
         internal const int CurrentProbeVersion = 2;
+        internal const string ProbeStreamEntries =
+            "codec_type,codec_name,width,height,color_transfer,channels,avg_frame_rate,r_frame_rate,bit_rate,closed_captions";
         internal static readonly TimeSpan FirstTuneProbeWait = TimeSpan.FromSeconds(5);
 
         // ── Public API ────────────────────────────────────────────────────────
@@ -203,14 +205,15 @@ namespace Emby.Xtream.Plugin.Service
                 _cache[streamId] = info;
                 SaveToConfig();
                 logger?.Info(
-                    "[XtreamProbe] Cached media for stream {0}: video={1} {2}x{3} {4:0.##}fps bitrate={5} audio={6}",
+                    "[XtreamProbe] Cached media for stream {0}: video={1} {2}x{3} {4:0.##}fps bitrate={5} audio={6} captions={7}",
                     streamId,
                     info.VideoCodec ?? "?",
                     info.VideoWidth,
                     info.VideoHeight,
                     info.AverageFrameRate > 0 ? info.AverageFrameRate : info.RealFrameRate,
                     FormatBitRate(info.ContainerBitRate > 0 ? info.ContainerBitRate : info.VideoBitRate),
-                    info.AudioCodec ?? "?");
+                    info.AudioCodec ?? "?",
+                    info.HasClosedCaptions == true ? "yes" : "no");
                 return info;
             }
             catch (Exception ex)
@@ -290,10 +293,11 @@ namespace Emby.Xtream.Plugin.Service
             var args = string.Format(
                 CultureInfo.InvariantCulture,
                 "-v quiet -print_format json -show_streams -show_format -show_packets" +
-                " -show_entries stream=codec_type,codec_name,width,height,color_transfer,channels,avg_frame_rate,r_frame_rate,bit_rate:stream_tags=language:format=bit_rate:packet=size" +
+                " -show_entries stream={2}:stream_tags=language:format=bit_rate:packet=size" +
                 " -read_intervals %+{0} -analyzeduration 3000000 -probesize 2000000 -i \"{1}\"",
                 ProbeSampleSeconds,
-                url.Replace("\"", "\\\""));
+                url.Replace("\"", "\\\""),
+                ProbeStreamEntries);
 
             string output;
             using (var proc = new Process())
@@ -339,6 +343,7 @@ namespace Emby.Xtream.Plugin.Service
                     int videoWidth = 0, videoHeight = 0, audioChannels = 0;
                     int videoBitRate = 0, audioBitRate = 0, containerBitRate = 0;
                     float averageFrameRate = 0, realFrameRate = 0;
+                    var hasClosedCaptions = false;
 
                     foreach (var stream in streamsEl.EnumerateArray())
                     {
@@ -363,6 +368,8 @@ namespace Emby.Xtream.Plugin.Service
                                 realFrameRate = ParseFrameRate(el);
                             if (stream.TryGetProperty("bit_rate", out el))
                                 videoBitRate = ParsePositiveInt32(el);
+                            if (stream.TryGetProperty("closed_captions", out el))
+                                hasClosedCaptions = ParseBooleanFlag(el);
                         }
                         else if (type == "audio" && audioCodec == null)
                         {
@@ -438,6 +445,7 @@ namespace Emby.Xtream.Plugin.Service
                         AudioChannels = audioChannels,
                         AudioBitRate  = audioBitRate,
                         AudioLanguage = audioLang,
+                        HasClosedCaptions = hasClosedCaptions,
                     };
                 }
             }
@@ -446,7 +454,8 @@ namespace Emby.Xtream.Plugin.Service
 
         internal static bool NeedsBackgroundRefresh(StreamCodecInfo info, DateTimeOffset now)
         {
-            if (info == null || info.CachedAt <= 0 || info.ProbeVersion < CurrentProbeVersion)
+            if (info == null || info.CachedAt <= 0 || info.ProbeVersion < CurrentProbeVersion ||
+                !info.HasClosedCaptions.HasValue)
                 return true;
             var cachedAt = DateTimeOffset.FromUnixTimeSeconds(info.CachedAt);
             return now - cachedAt >= BackgroundRefreshInterval;
@@ -456,6 +465,13 @@ namespace Emby.Xtream.Plugin.Service
         {
             var parsed = ParsePositiveInt64(value);
             return parsed > int.MaxValue ? int.MaxValue : (int)parsed;
+        }
+
+        private static bool ParseBooleanFlag(STJ.JsonElement value)
+        {
+            if (value.ValueKind == STJ.JsonValueKind.True) return true;
+            if (value.ValueKind == STJ.JsonValueKind.False) return false;
+            return ParsePositiveInt64(value) > 0;
         }
 
         private static long ParsePositiveInt64(STJ.JsonElement value)
@@ -581,6 +597,12 @@ namespace Emby.Xtream.Plugin.Service
         public int    AudioChannels { get; set; }
         public int    AudioBitRate   { get; set; }
         public string AudioLanguage { get; set; }
+
+        /// <summary>
+        /// True when ffprobe found EIA-608/CEA caption data in the video stream.
+        /// Nullable so pre-caption cache entries can be refreshed asynchronously.
+        /// </summary>
+        public bool? HasClosedCaptions { get; set; }
 
         /// <summary>Unix seconds (UTC) when this entry was probed.</summary>
         public long CachedAt { get; set; }
