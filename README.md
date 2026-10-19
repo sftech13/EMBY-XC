@@ -45,7 +45,7 @@
 
 ## Features Overview
 
-> Current release: **v1.1.145** — see [CHANGELOG.md](CHANGELOG.md) for full version history.
+> Current release: **v1.1.146** — see [CHANGELOG.md](CHANGELOG.md) for full version history.
 
 ### Live TV
 - Registers as a native Emby tuner host — channels appear in Live TV just like any other tuner
@@ -228,6 +228,10 @@ When disabled, all playback routes through Emby's ffmpeg pipeline.
 #### Adaptive HLS Fallback
 
 When enabled while the global format is MPEG-TS, two 45-second-to-30-minute sessions of the same channel ending on the same device within 30 minutes temporarily switch only that channel to provider HLS. The override defaults to 60 minutes, then the channel automatically returns to MPEG-TS. Anyone opening the affected channel during that window receives HLS; every other channel keeps the global format, and restarting Emby clears all active overrides.
+
+Three confirmed 15-second upstream read stalls on the same actively watched channel within five minutes can also activate this override without a client stop/start. A confirmed stall means the read watchdog fired while the upstream producer was still active; ordinary client disconnects and shutdown cancellation do not count. The override applies on the **next tune** and does not restart existing viewers. An already active override is not repeatedly extended by its old MPEG-TS session.
+
+Optional Linux journal forwarding and lock-aware BOSS recovery integrations are documented in [contrib/monitoring](contrib/monitoring/README.md). These companions are installed separately from the plugin and are not required for per-channel HLS fallback.
 
 #### Category Filtering
 

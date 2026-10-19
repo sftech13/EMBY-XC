@@ -40,6 +40,9 @@ namespace Emby.Xtream.Plugin.Tests
                 ("Emby 4.10 first consumer closes without leaking a tuner slot", ModernLiveConsumerClosesCleanlyAsync),
                 ("repeated short playback stops activate a temporary per-channel HLS override", AdaptiveHlsActivatesAndExpiresAsync),
                 ("adaptive HLS evidence remains isolated by device and channel", AdaptiveHlsEvidenceIsIsolatedAsync),
+                ("confirmed upstream stalls activate isolated HLS without client stops", UpstreamStallsActivateIsolatedHlsAsync),
+                ("upstream stall fallback ignores idle, disabled and expired evidence", UpstreamStallSafeguardsAsync),
+                ("live read watchdog distinguishes stalls from shutdown and unrelated cancellation", ReadStallCancellationIsExplicitAsync),
                 ("EPG time shift moves timestamps and clamps to twelve hours", EpgTimeShiftIsAppliedAndClampedAsync),
                 ("Live TV probe supplies bitrate and fractional frame rate", LiveTvProbeSuppliesPlaybackMetadataAsync),
                 ("Live TV probe exposes embedded captions only when detected", LiveTvProbeExposesEmbeddedCaptionsAsync),
@@ -187,6 +190,152 @@ namespace Emby.Xtream.Plugin.Tests
                 "adaptive media-source IDs must retain a parseable Xtream stream ID");
             manager.ResetForTests();
             return Task.CompletedTask;
+        }
+
+        private static Task UpstreamStallsActivateIsolatedHlsAsync()
+        {
+            var manager = AdaptiveHlsFallbackManager.Instance;
+            manager.ResetForTests();
+            var config = new PluginConfiguration
+            {
+                LiveTvOutputFormat = "ts", EnableAdaptiveHlsFallback = true,
+                AdaptiveHlsOverrideMinutes = 60,
+            };
+            var now = new DateTime(2026, 10, 19, 16, 0, 0, DateTimeKind.Utc);
+            Assert(!manager.RecordUpstreamReadStall("xtream_live_42", 1, config, null, now),
+                "a single stall must not switch transport");
+            Assert(!manager.RecordUpstreamReadStall("xtream_live_43", 1, config, null, now),
+                "another channel must not share stall evidence");
+            Assert(!manager.RecordUpstreamReadStall("xtream_live_42", 2, config, null, now.AddSeconds(20)),
+                "two stalls are still below the threshold");
+            Assert(manager.RecordUpstreamReadStall("xtream_live_42", 1, config, null, now.AddSeconds(40)),
+                "three confirmed stalls with active viewers must activate HLS without client stops");
+            bool adaptive;
+            Assert(manager.GetEffectiveOutputFormat(42, config, null, now.AddMinutes(1), out adaptive) == "m3u8" && adaptive,
+                "the stalled channel's next tune must use HLS");
+            Assert(manager.GetEffectiveOutputFormat(43, config, null, now.AddMinutes(1), out adaptive) == "ts" && !adaptive,
+                "other channels must retain MPEG-TS");
+            Assert(!manager.RecordUpstreamReadStall("xtream_live_42", 1, config, null, now.AddMinutes(10)),
+                "an already active override must not be repeatedly extended by the old TS session");
+            Assert(manager.GetEffectiveOutputFormat(42, config, null, now.AddMinutes(61), out adaptive) == "ts" && !adaptive,
+                "the override must expire at its original configured deadline");
+            manager.ResetForTests();
+            return Task.CompletedTask;
+        }
+
+        private static Task UpstreamStallSafeguardsAsync()
+        {
+            var manager = AdaptiveHlsFallbackManager.Instance;
+            manager.ResetForTests();
+            var config = new PluginConfiguration
+            {
+                LiveTvOutputFormat = "ts", EnableAdaptiveHlsFallback = true,
+                AdaptiveHlsOverrideMinutes = 60,
+            };
+            var now = new DateTime(2026, 10, 19, 17, 0, 0, DateTimeKind.Utc);
+            for (var i = 0; i < 4; i++)
+            {
+                Assert(!manager.RecordUpstreamReadStall("xtream_live_42", 0, config, null, now),
+                    "no-viewer stalls must never count");
+                Assert(!manager.RecordUpstreamReadStall("xtream_live_42_adaptive_hls", 1, config, null, now),
+                    "HLS sessions must not contribute TS stall evidence");
+            }
+            config.EnableAdaptiveHlsFallback = false;
+            for (var i = 0; i < 3; i++) manager.RecordUpstreamReadStall("xtream_live_42", 1, config, null, now);
+            config.EnableAdaptiveHlsFallback = true;
+            Assert(!manager.RecordUpstreamReadStall("xtream_live_42", 1, config, null, now),
+                "disabled evidence must not accumulate");
+            Assert(!manager.RecordUpstreamReadStall("xtream_live_42", 1, config, null, now.AddMinutes(6)),
+                "old evidence must expire after five minutes");
+            Assert(!manager.RecordUpstreamReadStall("xtream_live_42", 1, config, null, now.AddMinutes(7)),
+                "two recent events must not reuse an expired event");
+            bool adaptive;
+            Assert(manager.GetEffectiveOutputFormat(42, config, null, now.AddMinutes(7), out adaptive) == "ts" && !adaptive,
+                "ignored and expired stalls must leave TS unchanged");
+            manager.ResetForTests();
+            config.LiveTvOutputFormat = "m3u8";
+            for (var i = 0; i < 3; i++) Assert(!manager.RecordUpstreamReadStall("xtream_live_42", 1, config, null, now),
+                "a global HLS configuration must never trigger a TS fallback");
+            manager.ResetForTests();
+            return Task.CompletedTask;
+        }
+
+        private static async Task ReadStallCancellationIsExplicitAsync()
+        {
+            using (var parent = new CancellationTokenSource())
+            using (var read = CancellationTokenSource.CreateLinkedTokenSource(parent.Token))
+            using (var stream = new StallingReadStream(false))
+            {
+                try
+                {
+                    await XtreamLiveStream.ReadUpstreamAsync(stream, new byte[16], read, parent.Token,
+                        TimeSpan.FromMilliseconds(40));
+                    throw new InvalidOperationException("a wedged source must time out");
+                }
+                catch (XtreamLiveStream.UpstreamReadStallException ex)
+                {
+                    Assert(ex.Message.Contains("reason=read-stall idleMs=") && ex.Message.Contains("timeoutMs=40"),
+                        "confirmed watchdog failures must carry timing and an unambiguous classification");
+                }
+            }
+            using (var parent = new CancellationTokenSource())
+            using (var read = CancellationTokenSource.CreateLinkedTokenSource(parent.Token))
+            using (var stream = new StallingReadStream(false))
+            {
+                parent.CancelAfter(30);
+                try
+                {
+                    await XtreamLiveStream.ReadUpstreamAsync(stream, new byte[16], read, parent.Token,
+                        TimeSpan.FromSeconds(2));
+                    throw new InvalidOperationException("shutdown must cancel the read");
+                }
+                catch (OperationCanceledException) { }
+            }
+            using (var parent = new CancellationTokenSource())
+            using (var read = CancellationTokenSource.CreateLinkedTokenSource(parent.Token))
+            using (var stream = new StallingReadStream(true))
+            {
+                try
+                {
+                    await XtreamLiveStream.ReadUpstreamAsync(stream, new byte[16], read, parent.Token,
+                        TimeSpan.FromSeconds(2));
+                    throw new InvalidOperationException("the injected cancellation must propagate");
+                }
+                catch (OperationCanceledException) { }
+            }
+            using (var parent = new CancellationTokenSource())
+            using (var read = CancellationTokenSource.CreateLinkedTokenSource(parent.Token))
+            using (var stream = new MemoryStream(new byte[] { 1, 2, 3 }))
+            {
+                Assert(await XtreamLiveStream.ReadUpstreamAsync(stream, new byte[16], read, parent.Token,
+                    TimeSpan.FromMilliseconds(30)) == 3, "normal source bytes must pass through");
+                await Task.Delay(60);
+                Assert(!read.IsCancellationRequested, "the watchdog must be disarmed between reads and during backpressure");
+                Assert(await XtreamLiveStream.ReadUpstreamAsync(stream, new byte[16], read, parent.Token,
+                    TimeSpan.FromMilliseconds(30)) == 0, "EOF must remain a separate failure classification");
+            }
+        }
+
+        private sealed class StallingReadStream : Stream
+        {
+            private readonly bool _unrelatedCancellation;
+            internal StallingReadStream(bool unrelatedCancellation) { _unrelatedCancellation = unrelatedCancellation; }
+            public override bool CanRead => true;
+            public override bool CanSeek => false;
+            public override bool CanWrite => false;
+            public override long Length => throw new NotSupportedException();
+            public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+            public override void Flush() { }
+            public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+            public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+            public override void SetLength(long value) => throw new NotSupportedException();
+            public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+            public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken token)
+            {
+                if (_unrelatedCancellation) throw new OperationCanceledException("unrelated cancellation");
+                await Task.Delay(Timeout.Infinite, token);
+                return 0;
+            }
         }
 
         private static Task PerPathCatalogAbsenceIsIndependentAsync()

@@ -28,6 +28,7 @@ namespace Emby.Xtream.Plugin.Service
 
         private readonly HttpClient _httpClient;
         private readonly ILogger _logger;
+        private readonly Action<string, int> _onReadStall;
         private readonly object _fanoutLock = new object();
         private readonly Dictionary<long, FanoutSubscriber> _subscribers =
             new Dictionary<long, FanoutSubscriber>();
@@ -39,8 +40,9 @@ namespace Emby.Xtream.Plugin.Service
         private bool _closeRequested;
         private volatile bool _disposed;
 
-        public XtreamLiveStream(MediaSourceInfo mediaSource, string tunerHostId, HttpClient httpClient, ILogger logger = null)
-            : this(mediaSource, tunerHostId, httpClient, typeof(ILiveStream), logger)
+        public XtreamLiveStream(MediaSourceInfo mediaSource, string tunerHostId, HttpClient httpClient,
+            ILogger logger = null, Action<string, int> onReadStall = null)
+            : this(mediaSource, tunerHostId, httpClient, typeof(ILiveStream), logger, onReadStall)
         {
         }
 
@@ -49,11 +51,13 @@ namespace Emby.Xtream.Plugin.Service
             string tunerHostId,
             HttpClient httpClient,
             Type runtimeLiveStreamContract,
-            ILogger logger = null)
+            ILogger logger = null,
+            Action<string, int> onReadStall = null)
         {
             MediaSource = mediaSource;
             _httpClient = httpClient;
             _logger = logger;
+            _onReadStall = onReadStall;
             UniqueId = Guid.NewGuid().ToString("N");
             TunerHostId = tunerHostId;
             OriginalStreamId = mediaSource.Id;
@@ -250,13 +254,12 @@ namespace Emby.Xtream.Plugin.Service
                                         // A healthy live MPEG-TS source produces data continuously.
                                         // Reconnect a wedged upstream socket instead of leaving every
                                         // viewer spinning forever with an empty playback buffer.
-                                        readCancellation.CancelAfter(ReadStallTimeout);
-                                        bytesRead = await stream.ReadAsync(
+                                        bytesRead = await ReadUpstreamAsync(
+                                            stream,
                                             chunk.Buffer,
-                                            0,
-                                            ReadBufferSize,
-                                            readCancellation.Token).ConfigureAwait(false);
-                                        readCancellation.CancelAfter(Timeout.Infinite);
+                                            readCancellation,
+                                            cancellationToken,
+                                            ReadStallTimeout).ConfigureAwait(false);
                                     }
                                     catch
                                     {
@@ -290,6 +293,14 @@ namespace Emby.Xtream.Plugin.Service
                     }
                     catch (Exception ex)
                     {
+                        var failureMessage = ex.Message;
+                        if (ex is UpstreamReadStallException)
+                        {
+                            var viewers = GetSubscriberCount();
+                            failureMessage += " activeViewers=" + viewers;
+                            if (viewers > 0 && !cancellationToken.IsCancellationRequested)
+                                _onReadStall?.Invoke(OriginalStreamId, viewers);
+                        }
                         reconnectAttempts++;
                         if (reconnectAttempts > MaxReconnectAttempts)
                         {
@@ -304,7 +315,7 @@ namespace Emby.Xtream.Plugin.Service
                         _logger?.Warn(
                             "[live-fanout] Upstream interrupted for stream {0}: {1}; reconnecting in {2}ms ({3}/{4})",
                             OriginalStreamId,
-                            ex.Message,
+                            failureMessage,
                             delayMs,
                             reconnectAttempts,
                             MaxReconnectAttempts);
@@ -338,6 +349,39 @@ namespace Emby.Xtream.Plugin.Service
                 }
 
                 cancellationToDispose?.Dispose();
+            }
+        }
+
+        internal static async Task<int> ReadUpstreamAsync(
+            Stream stream, byte[] buffer, CancellationTokenSource readCancellation,
+            CancellationToken producerCancellation, TimeSpan stallTimeout)
+        {
+            var started = Stopwatch.GetTimestamp();
+            readCancellation.CancelAfter(stallTimeout);
+            try
+            {
+                return await stream.ReadAsync(buffer, 0, buffer.Length, readCancellation.Token)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException ex) when (
+                !producerCancellation.IsCancellationRequested && readCancellation.IsCancellationRequested)
+            {
+                var elapsedMs = (Stopwatch.GetTimestamp() - started) * 1000.0 / Stopwatch.Frequency;
+                throw new UpstreamReadStallException(elapsedMs, stallTimeout.TotalMilliseconds, ex);
+            }
+            finally
+            {
+                readCancellation.CancelAfter(Timeout.Infinite);
+            }
+        }
+
+        internal sealed class UpstreamReadStallException : TimeoutException
+        {
+            internal UpstreamReadStallException(double elapsedMs, double timeoutMs, Exception inner)
+                : base(string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                    "Xtream live upstream read stalled: reason=read-stall idleMs={0:0} timeoutMs={1:0}",
+                    elapsedMs, timeoutMs), inner)
+            {
             }
         }
 

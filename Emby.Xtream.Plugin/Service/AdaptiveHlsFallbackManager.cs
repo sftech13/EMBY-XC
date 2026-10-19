@@ -17,6 +17,8 @@ namespace Emby.Xtream.Plugin.Service
         internal static readonly TimeSpan DetectionWindow = TimeSpan.FromMinutes(30);
         internal static readonly TimeSpan MinimumSessionLength = TimeSpan.FromSeconds(45);
         internal static readonly TimeSpan MaximumSessionLength = TimeSpan.FromMinutes(30);
+        internal const int UpstreamStallThreshold = 3;
+        internal static readonly TimeSpan UpstreamStallWindow = TimeSpan.FromMinutes(5);
 
         private static readonly AdaptiveHlsFallbackManager _instance =
             new AdaptiveHlsFallbackManager();
@@ -28,8 +30,55 @@ namespace Emby.Xtream.Plugin.Service
             new Dictionary<string, List<DateTime>>(StringComparer.Ordinal);
         private readonly Dictionary<int, DateTime> _hlsOverrides =
             new Dictionary<int, DateTime>();
+        private readonly Dictionary<int, List<DateTime>> _upstreamStalls =
+            new Dictionary<int, List<DateTime>>();
 
         public static AdaptiveHlsFallbackManager Instance => _instance;
+
+        internal bool RecordUpstreamReadStall(
+            string mediaSourceId, int activeViewers, PluginConfiguration config,
+            ILogger logger, DateTime utcNow)
+        {
+            int streamId;
+            if (activeViewers <= 0 || config == null || !config.EnableAdaptiveHlsFallback ||
+                !IsMpegTs(config.LiveTvOutputFormat) ||
+                !TryParseStreamId(mediaSourceId, out streamId) ||
+                mediaSourceId.EndsWith("_adaptive_hls", StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            var now = EnsureUtc(utcNow);
+            DateTime overrideUntil;
+            lock (_sync)
+            {
+                // Prune all channel evidence so occasional tunes cannot accumulate
+                // an unbounded list of inactive stream IDs over server uptime.
+                var empty = new List<int>();
+                foreach (var pair in _upstreamStalls)
+                {
+                    pair.Value.RemoveAll(value => value > now || now - value > UpstreamStallWindow);
+                    if (pair.Value.Count == 0) empty.Add(pair.Key);
+                }
+                foreach (var id in empty) _upstreamStalls.Remove(id);
+
+                DateTime existing;
+                if (_hlsOverrides.TryGetValue(streamId, out existing) && existing > now)
+                    return false;
+                List<DateTime> stalls;
+                if (!_upstreamStalls.TryGetValue(streamId, out stalls))
+                    _upstreamStalls[streamId] = stalls = new List<DateTime>();
+                stalls.Add(now);
+                if (stalls.Count < UpstreamStallThreshold)
+                    return false;
+                overrideUntil = now.AddMinutes(Clamp(config.AdaptiveHlsOverrideMinutes, 5, 1440));
+                _hlsOverrides[streamId] = overrideUntil;
+                _upstreamStalls.Remove(streamId);
+            }
+
+            logger?.Warn(
+                "[adaptive-hls] Stream {0} had {1} confirmed upstream read stalls within {2} minutes; using HLS on the next tune until {3:u}",
+                streamId, UpstreamStallThreshold, (int)UpstreamStallWindow.TotalMinutes, overrideUntil);
+            return true;
+        }
 
         internal void RecordPlaybackStarted(
             string deviceId,
@@ -190,6 +239,7 @@ namespace Emby.Xtream.Plugin.Service
                 _activePlaybacks.Clear();
                 _qualifyingStops.Clear();
                 _hlsOverrides.Clear();
+                _upstreamStalls.Clear();
             }
         }
 

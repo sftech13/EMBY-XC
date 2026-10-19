@@ -482,7 +482,9 @@ namespace Emby.Xtream.Plugin.Service
                 streamId, streamUrl, config.HttpUserAgent, null, outputFormat, adaptiveOverride);
 
             var httpClient = Plugin.CreateHttpClient();
-            ILiveStream liveStream = new XtreamLiveStream(mediaSource, tuner.Id, httpClient, Logger);
+            ILiveStream liveStream = new XtreamLiveStream(mediaSource, tuner.Id, httpClient, Logger,
+                (sourceId, viewers) => AdaptiveHlsFallbackManager.Instance.RecordUpstreamReadStall(
+                    sourceId, viewers, Plugin.InstanceOrNull?.Configuration, Logger, DateTime.UtcNow));
 
             Logger.Info("Opening live stream for channel {0} (stream {1}, format {2}{3})",
                 tunerChannel?.Name ?? tunerChannel?.Id,

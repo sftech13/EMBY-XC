@@ -4,6 +4,13 @@ All notable changes to XC2EMBY are listed here, newest first.
 
 ---
 
+## v1.1.146
+- Classified the Live TV fan-out reader's 15-second watchdog separately from shutdown, client disconnects, and unrelated cancellations. Confirmed stalls now include `reason=read-stall`, elapsed read time, timeout, and active-viewer count without adding requests or tune-time delays.
+- Extended optional Adaptive HLS Fallback to activate after three confirmed upstream read stalls on one channel within five minutes, even when the client never ends its playback session. The affected channel uses HLS on its next tune for the configured override duration; current viewers are not forcibly restarted and other channels keep their configured format.
+- Added optional Linux monitoring companions that forward only confirmed, actively watched read stalls to the existing transport-health signal. Generic cancellations and no-viewer stalls remain ignored; HTTP 404s remain a separate lineup-recovery signal. Existing multi-channel VPN-rotation thresholds are unchanged.
+- Added a lock-aware BOSS recovery queue: it waits behind the normal refresh, rechecks fresh 404s after acquiring the same lock, and skips redundant work already covered by a successful cache refresh. The queue never removes or bypasses a running refresh's lock. Site integration is documented under `contrib/monitoring`; no provider credentials or site-specific refresh script are distributed.
+- Added regression coverage for watchdog cancellation classification, disarming during backpressure, per-channel stall evidence and expiry, monitoring classification, held-lock deferral, post-refresh rechecks, and continuous lock ownership. Release builds now run the plugin and optional monitoring regression suites before publishing.
+
 ## v1.1.145
 - Added non-blocking embedded-caption discovery for Live TV. XC2EMBY's existing codec probe now requests FFprobe's `closed_captions` field and exposes detected EIA-608/CEA-708 data to Emby as a selectable `VideoSideData` caption stream without forcing transcoding or adding another tune-time probe.
 - Existing codec-probe cache entries are enriched once in the background, while caption-negative results are cached normally so subsequent tunes retain the current fast-start behavior.

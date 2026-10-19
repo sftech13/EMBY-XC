@@ -1288,7 +1288,7 @@
                         <div class="settingsOptionItem liveTvSettings">
                             <div>
                                 <div class="settingsOptionTitle">Adaptive HLS Fallback</div>
-                                <div class="settingsOptionDescription">When one device ends the same channel twice after 45 seconds but before 30 minutes, temporarily use provider HLS for only that channel. Other channels remain MPEG-TS.</div>
+                                <div class="settingsOptionDescription">Temporarily use provider HLS on the next tune of a channel after two short playback sessions on one device, or three confirmed upstream read stalls within five minutes. Existing playback is not restarted; other channels remain MPEG-TS.</div>
                             </div>
                             <div class="checkboxContainer checkboxContainer-withDescription">
                                 <label>
