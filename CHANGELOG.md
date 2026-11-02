@@ -4,6 +4,12 @@ All notable changes to XC2EMBY are listed here, newest first.
 
 ---
 
+## v1.1.147
+- Fixed TV Shows and DocuSeries catalogs collapsing when provider series IDs exceed 2,147,483,647. Series, episode, and VOD movie IDs now retain their full positive 64-bit values through catalog parsing, detail requests, generated STRM URLs, duplicate-path ownership, failed-item retries, metadata population, and persistent orphan-validation/checkpoint state.
+- Replaced silent media-ID conversion to zero with protective validation. Missing, zero, negative, malformed, or out-of-range IDs and malformed catalog responses now fail before deduplication, catalog snapshot updates, file generation, or orphan cleanup. Invalid episode identifiers protect the affected series through the existing detail-failure handling.
+- Preserved compatibility with existing numeric checkpoint records and refreshed the series fast-path settings fingerprint so the first upgraded TV/DocuSeries run verifies detail metadata before establishing its new checkpoint. Existing deletion thresholds and repeated playback-404/410 safeguards remain in force.
+- Added regression coverage for the observed 26,899-record catalog collapse, numeric/string IDs through the signed 64-bit limit, end-to-end series/episode/movie STRM generation, large-ID superseded-path matching, restart persistence, and invalid catalogs preserving files and timestamps even with cleanup enabled.
+
 ## v1.1.146
 - Classified the Live TV fan-out reader's 15-second watchdog separately from shutdown, client disconnects, and unrelated cancellations. Confirmed stalls now include `reason=read-stall`, elapsed read time, timeout, and active-viewer count without adding requests or tune-time delays.
 - Extended optional Adaptive HLS Fallback to activate after three confirmed upstream read stalls on one channel within five minutes, even when the client never ends its playback session. The affected channel uses HLS on its next tune for the configured override duration; current viewers are not forcibly restarted and other channels keep their configured format.

@@ -16,8 +16,8 @@ namespace Emby.Xtream.Plugin.Client.Models
     public class EpisodeInfo
     {
         [JsonPropertyName("id")]
-        [JsonConverter(typeof(FlexibleInt32Converter))]
-        public int Id { get; set; }
+        [JsonConverter(typeof(ProviderIdConverter))]
+        public long Id { get; set; }
 
         [JsonPropertyName("episode_num")]
         [JsonConverter(typeof(FlexibleInt32Converter))]

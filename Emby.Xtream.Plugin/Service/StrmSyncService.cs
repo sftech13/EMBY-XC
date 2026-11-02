@@ -75,7 +75,7 @@ namespace Emby.Xtream.Plugin.Service
     public class FailedSyncItem
     {
         public string ItemType { get; set; }   // "Movie" | "Series"
-        public int StreamId { get; set; }
+        public long StreamId { get; set; }
         public string Name { get; set; }
         public int? CategoryId { get; set; }
         public string TmdbId { get; set; }
@@ -124,7 +124,7 @@ namespace Emby.Xtream.Plugin.Service
 
     internal sealed class SeriesCategoryPathState
     {
-        public int SeriesId { get; set; }
+        public long SeriesId { get; set; }
         public int CategoryId { get; set; }
         public string RelativeDirectory { get; set; } = string.Empty;
     }
@@ -247,14 +247,14 @@ namespace Emby.Xtream.Plugin.Service
 
         private sealed class SeriesPathOwnershipPlan
         {
-            public Dictionary<int, SeriesDetailInfo> PrefetchedDetails { get; } =
-                new Dictionary<int, SeriesDetailInfo>();
+            public Dictionary<long, SeriesDetailInfo> PrefetchedDetails { get; } =
+                new Dictionary<long, SeriesDetailInfo>();
 
-            public Dictionary<string, int> EpisodeOwners { get; } =
-                new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            public Dictionary<string, long> EpisodeOwners { get; } =
+                new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
 
-            public Dictionary<string, int> FolderOwners { get; } =
-                new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            public Dictionary<string, long> FolderOwners { get; } =
+                new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
 
             public int DuplicateFolderCount { get; set; }
             public int CompetingPathCount { get; set; }
@@ -272,7 +272,7 @@ namespace Emby.Xtream.Plugin.Service
             public string FullPath { get; set; }
             public string RelativePath { get; set; }
             public string PlaybackUrl { get; set; }
-            public int EpisodeId { get; set; }
+            public long EpisodeId { get; set; }
             public string Source { get; set; }
         }
 
@@ -310,7 +310,7 @@ namespace Emby.Xtream.Plugin.Service
 
         // Increment when naming logic changes so existing installs force a full re-sync on next run.
         internal const int CurrentStrmNamingVersion = 1;
-        private const int CurrentSeriesFastPathAlgorithmVersion = 2;
+        private const int CurrentSeriesFastPathAlgorithmVersion = 3;
 
         private static void ApplyUserAgentToSharedClient()
         {
@@ -541,7 +541,7 @@ namespace Emby.Xtream.Plugin.Service
 
         private int ObserveCompleteSeriesCatalog(
             PluginConfiguration config,
-            IEnumerable<int> seriesIds,
+            IEnumerable<long> seriesIds,
             bool isDocuSeries)
         {
             var ordered = seriesIds
@@ -1774,7 +1774,7 @@ namespace Emby.Xtream.Plugin.Service
 
                 var movieTmdbCache = DeserializeMovieTmdbCache(config.MovieTmdbCacheJson);
                 var vodGenreCache = DeserializeVodGenreCache(config.VodGenreCacheJson);
-                var fetchedVodDetails = new ConcurrentDictionary<int, VodDetailInfo>();
+                var fetchedVodDetails = new ConcurrentDictionary<long, VodDetailInfo>();
                 if (config.EnableGenreBasedLibraryRouting)
                 {
                     mp.Phase = "Classifying VOD genres";
@@ -2548,14 +2548,14 @@ namespace Emby.Xtream.Plugin.Service
 
                 var writtenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var currentEpisodePathsById =
-                    new ConcurrentDictionary<int, ConcurrentDictionary<string, byte>>();
+                    new ConcurrentDictionary<long, ConcurrentDictionary<string, byte>>();
                 var locallyFilteredPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var detailFailurePaths = new ConcurrentBag<string>();
                 var categorySnapshot = DeserializeSeriesCategorySnapshot(
                     config.SeriesCategorySnapshotJson);
                 var currentSelectedCategoryIds = new HashSet<int>(
                     config.SelectedSeriesCategoryIds ?? new int[0]);
-                var currentSeriesIds = new HashSet<int>(
+                var currentSeriesIds = new HashSet<long>(
                     allSeries.Select(series => series.SeriesId));
                 var removedCategoryIds = new HashSet<int>(
                     (categorySnapshot.SelectedCategoryIds ?? new int[0])
@@ -2935,7 +2935,7 @@ namespace Emby.Xtream.Plugin.Service
                                 var ext = !string.IsNullOrEmpty(episode.ContainerExtension)
                                     ? episode.ContainerExtension
                                     : "mp4";
-                                int pathOwnerId;
+                                long pathOwnerId;
                                 if (pathOwnership.EpisodeOwners.TryGetValue(strmPath, out pathOwnerId) &&
                                     pathOwnerId != series.SeriesId)
                                 {
@@ -3015,7 +3015,7 @@ namespace Emby.Xtream.Plugin.Service
                             }
                         }
 
-                        int folderOwnerId;
+                        long folderOwnerId;
                         var ownsSeriesFolder =
                             !pathOwnership.FolderOwners.TryGetValue(seriesDir, out folderOwnerId) ||
                             folderOwnerId == series.SeriesId;
@@ -3910,8 +3910,7 @@ namespace Emby.Xtream.Plugin.Service
 
                 var json = await GetProviderStringWithRetryAsync(
                     url, "VOD catalog", cancellationToken).ConfigureAwait(false);
-                allStreams = STJ.JsonSerializer.Deserialize<List<VodStreamInfo>>(json, JsonOptions)
-                    ?? new List<VodStreamInfo>();
+                allStreams = XtreamResponseParser.DeserializeVodList(json, JsonOptions);
             }
             else
             {
@@ -3930,8 +3929,7 @@ namespace Emby.Xtream.Plugin.Service
                             url,
                             "VOD category " + catId.ToString(CultureInfo.InvariantCulture),
                             cancellationToken).ConfigureAwait(false);
-                        var streams = STJ.JsonSerializer.Deserialize<List<VodStreamInfo>>(json, JsonOptions)
-                            ?? new List<VodStreamInfo>();
+                        var streams = XtreamResponseParser.DeserializeVodList(json, JsonOptions);
 
                         // Override category_id to match the requested category.
                         // The Xtream API can return cross-listed movies whose primary
@@ -3976,13 +3974,13 @@ namespace Emby.Xtream.Plugin.Service
             PluginConfiguration config,
             ConcurrentDictionary<string, string> movieTmdbCache,
             ConcurrentDictionary<string, VodGenreCacheEntry> genreCache,
-            ConcurrentDictionary<int, VodDetailInfo> fetchedDetails,
+            ConcurrentDictionary<long, VodDetailInfo> fetchedDetails,
             Action saveConfig,
             SyncProgress progress,
             IProgress<double> taskProgress,
             CancellationToken cancellationToken)
         {
-            var resolvedGenres = new ConcurrentDictionary<int, string>();
+            var resolvedGenres = new ConcurrentDictionary<long, string>();
             // SyncParallelism remains the concurrency ceiling. get_vod_info is also
             // commonly subject to a request-rate limit, which is separate from concurrent
             // connection count, so request starts are gently spaced across all workers.
@@ -4106,7 +4104,7 @@ namespace Emby.Xtream.Plugin.Service
         }
 
         private async Task<VodDetailInfo> FetchVodDetailAsync(
-            int streamId, PluginConfiguration config, CancellationToken cancellationToken)
+            long streamId, PluginConfiguration config, CancellationToken cancellationToken)
         {
             try
             {
@@ -4322,7 +4320,7 @@ namespace Emby.Xtream.Plugin.Service
                 Recursive = true,
             });
 
-            var streamIdIndex = new Dictionary<int, MediaBrowser.Controller.Entities.BaseItem>();
+            var streamIdIndex = new Dictionary<long, MediaBrowser.Controller.Entities.BaseItem>();
             int alreadyPopulated = 0;
 
             foreach (var item in episodes)
@@ -4439,13 +4437,13 @@ namespace Emby.Xtream.Plugin.Service
             progress?.Report(100);
         }
 
-        private static int ParseSeriesStreamId(string strmContent)
+        private static long ParseSeriesStreamId(string strmContent)
         {
             var m = Regex.Match(strmContent,
                 @"/series/[^/]+/[^/]+/(\d+)\.", RegexOptions.IgnoreCase);
             if (!m.Success) return 0;
-            int id;
-            return int.TryParse(m.Groups[1].Value, NumberStyles.None, CultureInfo.InvariantCulture, out id) ? id : 0;
+            long id;
+            return long.TryParse(m.Groups[1].Value, NumberStyles.None, CultureInfo.InvariantCulture, out id) ? id : 0;
         }
 
         private static List<MediaBrowser.Model.Entities.MediaStream> BuildMediaStreams(EpisodeMediaInfo info)
@@ -4586,7 +4584,7 @@ namespace Emby.Xtream.Plugin.Service
                 .GroupBy(c => c.Series.SeriesId)
                 .Select(g => g.First())
                 .ToList();
-            var fetchedDetails = new ConcurrentDictionary<int, SeriesDetailInfo>();
+            var fetchedDetails = new ConcurrentDictionary<long, SeriesDetailInfo>();
             var fetchSemaphore = new SemaphoreSlim(Math.Max(1, config.SyncParallelism));
             var fetchTasks = duplicateCandidates.Select(async candidate =>
             {
@@ -4633,7 +4631,7 @@ namespace Emby.Xtream.Plugin.Service
                     continue;
                 }
 
-                var pathsBySeries = new Dictionary<int, HashSet<string>>();
+                var pathsBySeries = new Dictionary<long, HashSet<string>>();
                 foreach (var candidate in resolved)
                 {
                     var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -4664,15 +4662,15 @@ namespace Emby.Xtream.Plugin.Service
                     .ToDictionary(x => x.SeriesId, x => x.Index);
                 plan.FolderOwners[group.Key] = rank.OrderBy(x => x.Value).First().Key;
 
-                var pathCandidates = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
+                var pathCandidates = new Dictionary<string, List<long>>(StringComparer.OrdinalIgnoreCase);
                 foreach (var pair in pathsBySeries)
                 {
                     foreach (var path in pair.Value)
                     {
-                        List<int> owners;
+                        List<long> owners;
                         if (!pathCandidates.TryGetValue(path, out owners))
                         {
-                            owners = new List<int>();
+                            owners = new List<long>();
                             pathCandidates[path] = owners;
                         }
                         owners.Add(pair.Key);
@@ -4797,7 +4795,7 @@ namespace Emby.Xtream.Plugin.Service
         }
 
         private async Task<SeriesDetailInfo> FetchSeriesDetailAsync(
-            int seriesId, PluginConfiguration config, CancellationToken cancellationToken)
+            long seriesId, PluginConfiguration config, CancellationToken cancellationToken)
         {
             await _providerDetailRequestPacer.WaitAsync(cancellationToken).ConfigureAwait(false);
             var url = string.Format(
@@ -4814,7 +4812,9 @@ namespace Emby.Xtream.Plugin.Service
             var trimmed = json == null ? string.Empty : json.TrimStart();
             if (trimmed.Length == 0 || trimmed[0] != '{')
                 return null;
-            return STJ.JsonSerializer.Deserialize<SeriesDetailInfo>(json, JsonOptions);
+            var detail = STJ.JsonSerializer.Deserialize<SeriesDetailInfo>(json, JsonOptions);
+            XtreamResponseParser.ValidateEpisodeIds(detail);
+            return detail;
         }
 
         private async Task<HashSet<string>> ValidateStaleEpisodePathsAsync(
@@ -5040,7 +5040,7 @@ namespace Emby.Xtream.Plugin.Service
         {
             var relativePath = GetRelativePath(contentRoot, fullPath);
             var playbackUrl = string.Empty;
-            var episodeId = 0;
+            long episodeId = 0;
             try
             {
                 playbackUrl = File.Exists(fullPath) ? File.ReadAllText(fullPath).Trim() : string.Empty;
@@ -5048,7 +5048,7 @@ namespace Emby.Xtream.Plugin.Service
                 if (TryParseStreamUrl(playbackUrl, out parts) &&
                     string.Equals(parts.Kind, "series", StringComparison.OrdinalIgnoreCase))
                 {
-                    int.TryParse(parts.StreamId, NumberStyles.None, CultureInfo.InvariantCulture, out episodeId);
+                    long.TryParse(parts.StreamId, NumberStyles.None, CultureInfo.InvariantCulture, out episodeId);
                 }
             }
             catch
@@ -5067,8 +5067,8 @@ namespace Emby.Xtream.Plugin.Service
         }
 
         private static void RegisterCurrentEpisodePath(
-            ConcurrentDictionary<int, ConcurrentDictionary<string, byte>> currentPathsByEpisodeId,
-            int episodeId,
+            ConcurrentDictionary<long, ConcurrentDictionary<string, byte>> currentPathsByEpisodeId,
+            long episodeId,
             string fullPath)
         {
             if (currentPathsByEpisodeId == null || episodeId <= 0 || string.IsNullOrWhiteSpace(fullPath))
@@ -5081,17 +5081,17 @@ namespace Emby.Xtream.Plugin.Service
         }
 
         private static void RegisterCurrentEpisodePathFromFile(
-            ConcurrentDictionary<int, ConcurrentDictionary<string, byte>> currentPathsByEpisodeId,
+            ConcurrentDictionary<long, ConcurrentDictionary<string, byte>> currentPathsByEpisodeId,
             string fullPath)
         {
-            int episodeId;
+            long episodeId;
             if (TryReadEpisodeStreamId(fullPath, out episodeId))
                 RegisterCurrentEpisodePath(currentPathsByEpisodeId, episodeId, fullPath);
         }
 
         internal static List<string> FindSupersededEpisodePaths(
             IEnumerable<string> orphanPaths,
-            ConcurrentDictionary<int, ConcurrentDictionary<string, byte>> currentPathsByEpisodeId)
+            ConcurrentDictionary<long, ConcurrentDictionary<string, byte>> currentPathsByEpisodeId)
         {
             var result = new List<string>();
             if (orphanPaths == null || currentPathsByEpisodeId == null)
@@ -5099,7 +5099,7 @@ namespace Emby.Xtream.Plugin.Service
 
             foreach (var orphanPath in orphanPaths)
             {
-                int episodeId;
+                long episodeId;
                 ConcurrentDictionary<string, byte> currentPaths;
                 if (!TryReadEpisodeStreamId(orphanPath, out episodeId) ||
                     !currentPathsByEpisodeId.TryGetValue(episodeId, out currentPaths) ||
@@ -5116,7 +5116,7 @@ namespace Emby.Xtream.Plugin.Service
             return result;
         }
 
-        private static bool TryReadEpisodeStreamId(string fullPath, out int episodeId)
+        private static bool TryReadEpisodeStreamId(string fullPath, out long episodeId)
         {
             episodeId = 0;
             try
@@ -5125,7 +5125,7 @@ namespace Emby.Xtream.Plugin.Service
                 StreamUrlParts parts;
                 return TryParseStreamUrl(File.ReadAllText(fullPath), out parts) &&
                     string.Equals(parts.Kind, "series", StringComparison.OrdinalIgnoreCase) &&
-                    int.TryParse(
+                    long.TryParse(
                         parts.StreamId,
                         NumberStyles.None,
                         CultureInfo.InvariantCulture,
@@ -5179,7 +5179,7 @@ namespace Emby.Xtream.Plugin.Service
             string seriesRootPath,
             SeriesCategorySnapshot snapshot,
             IEnumerable<int> currentSelectedCategoryIds,
-            IEnumerable<int> currentSeriesIds,
+            IEnumerable<long> currentSeriesIds,
             IDictionary<string, SeriesCategoryPathState> currentAssignments,
             HashSet<string> writtenPaths,
             HashSet<string> locallyFilteredPaths)
@@ -5188,8 +5188,8 @@ namespace Emby.Xtream.Plugin.Service
             snapshot = snapshot ?? new SeriesCategorySnapshot();
             var currentCategories = new HashSet<int>(
                 currentSelectedCategoryIds ?? Enumerable.Empty<int>());
-            var currentIds = new HashSet<int>(
-                currentSeriesIds ?? Enumerable.Empty<int>());
+            var currentIds = new HashSet<long>(
+                currentSeriesIds ?? Enumerable.Empty<long>());
             foreach (var categoryId in snapshot.SelectedCategoryIds ?? new int[0])
             {
                 if (!currentCategories.Contains(categoryId))

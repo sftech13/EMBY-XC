@@ -17,7 +17,7 @@ using Emby.Xtream.Plugin.Service;
 
 namespace Emby.Xtream.Plugin.Tests
 {
-    internal static class Program
+    internal static partial class Program
     {
         private static async Task<int> Main()
         {
@@ -64,6 +64,12 @@ namespace Emby.Xtream.Plugin.Tests
                 ("series category snapshot preserves cross-listed and missing shows", SeriesCategorySnapshotTracksExplicitRemovalAsync),
                 ("explicit series category removal is scoped and thresholded", ExplicitSeriesCategoryRemovalIsScopedAsync),
                 ("targeted library refresh defers for matching Emby work", TargetedRefreshDefersForMatchingEmbyWorkAsync),
+                ("provider catalogs retain large numeric and string IDs without collapsing", ProviderCatalogRetainsLargeIdsAsync),
+                ("invalid provider catalogs fail before file writes or orphan cleanup", InvalidProviderCatalogProtectsFilesAsync),
+                ("large series and episode IDs survive complete STRM synchronization", LargeProviderIdsSyncEndToEndAsync),
+                ("large VOD IDs survive complete STRM synchronization", LargeVodIdsSyncEndToEndAsync),
+                ("provider ID persistence remains compatible with old checkpoints", ProviderIdPersistenceIsCompatibleAsync),
+                ("invalid episode IDs preserve working existing episodes", InvalidEpisodeIdsPreserveExistingFilesAsync),
             };
 
             foreach (var test in tests)
@@ -374,7 +380,7 @@ namespace Emby.Xtream.Plugin.Tests
                 File.WriteAllText(oldPath, streamUrl);
                 File.WriteAllText(canonicalPath, streamUrl);
 
-                var currentPaths = new ConcurrentDictionary<int, ConcurrentDictionary<string, byte>>();
+                var currentPaths = new ConcurrentDictionary<long, ConcurrentDictionary<string, byte>>();
                 var oneCurrentPath = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
                 oneCurrentPath[canonicalPath] = 0;
                 currentPaths[42001] = oneCurrentPath;
@@ -629,7 +635,7 @@ namespace Emby.Xtream.Plugin.Tests
                     showsRoot,
                     snapshot,
                     new[] { 2 },
-                    new[] { 202, 203 },
+                    new long[] { 202, 203 },
                     currentAssignments,
                     written,
                     new HashSet<string>(StringComparer.OrdinalIgnoreCase));

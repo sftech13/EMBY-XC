@@ -5,8 +5,8 @@ namespace Emby.Xtream.Plugin.Client.Models
     public class SeriesInfo
     {
         [JsonPropertyName("series_id")]
-        [JsonConverter(typeof(FlexibleInt32Converter))]
-        public int SeriesId { get; set; }
+        [JsonConverter(typeof(ProviderIdConverter))]
+        public long SeriesId { get; set; }
 
         [JsonPropertyName("name")]
         public string Name { get; set; } = string.Empty;

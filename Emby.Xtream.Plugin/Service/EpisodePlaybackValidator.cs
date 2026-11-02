@@ -36,7 +36,7 @@ namespace Emby.Xtream.Plugin.Service
     /// </summary>
     internal sealed class EpisodePlaybackValidationState
     {
-        public int EpisodeId { get; set; }
+        public long EpisodeId { get; set; }
         public string RelativePath { get; set; } = string.Empty;
         public string LastResult { get; set; } = string.Empty;
         public int? LastStatusCode { get; set; }
