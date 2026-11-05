@@ -22,6 +22,17 @@ namespace Emby.Xtream.Plugin.Client.Models
         [JsonConverter(typeof(FlexibleNullableInt32Converter))]
         public int? CategoryId { get; set; }
 
+        [JsonPropertyName("category_ids")]
+        [JsonConverter(typeof(CategoryMembershipConverter))]
+        public int[] CategoryIds { get; set; }
+
+        internal VodStreamInfo WithCategory(int categoryId)
+        {
+            var copy = (VodStreamInfo)MemberwiseClone();
+            copy.CategoryId = categoryId;
+            return copy;
+        }
+
         [JsonPropertyName("container_extension")]
         public string ContainerExtension { get; set; } = "mp4";
 

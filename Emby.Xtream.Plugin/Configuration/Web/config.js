@@ -705,6 +705,7 @@ function (BaseView, loading) {
             refreshSubfolderHints(view);
             setChecked(view.querySelector('.chkSmartSkipExisting'), config.SmartSkipExisting !== false);
             setChecked(view.querySelector('.chkEnableGenreBasedLibraryRouting'), !!config.EnableGenreBasedLibraryRouting);
+            setChecked(view.querySelector('.chkPreferCompleteVodCatalog'), !!config.PreferCompleteVodCatalog);
             view.querySelector('.txtSyncParallelism').value = config.SyncParallelism || 3;
             setChecked(view.querySelector('.chkCleanupOrphans'), !!config.CleanupOrphans);
             view.querySelector('.txtOrphanSafetyThreshold').value = Math.round((config.OrphanSafetyThreshold || 0.20) * 100);
@@ -843,6 +844,7 @@ function (BaseView, loading) {
             config.DocuSeriesRootFolderName = (view.querySelector('.txtDocuSeriesRootFolderName').value || 'Docu Series').trim() || 'Docu Series';
             config.SmartSkipExisting = view.querySelector('.chkSmartSkipExisting').checked;
             config.EnableGenreBasedLibraryRouting = view.querySelector('.chkEnableGenreBasedLibraryRouting').checked;
+            config.PreferCompleteVodCatalog = view.querySelector('.chkPreferCompleteVodCatalog').checked;
             config.SyncParallelism = parseInt(view.querySelector('.txtSyncParallelism').value, 10) || 3;
             config.CleanupOrphans = view.querySelector('.chkCleanupOrphans').checked;
             config.OrphanSafetyThreshold = (parseInt(view.querySelector('.txtOrphanSafetyThreshold').value, 10) || 0) / 100;

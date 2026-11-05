@@ -105,6 +105,7 @@ namespace Emby.Xtream.Plugin.Service
                 EnableTmdbFallbackLookup = source.EnableTmdbFallbackLookup,
                 MovieTmdbCacheJson = source.MovieTmdbCacheJson,
                 EnableGenreBasedLibraryRouting = source.EnableGenreBasedLibraryRouting,
+                PreferCompleteVodCatalog = source.PreferCompleteVodCatalog,
                 VodGenreCacheJson = source.VodGenreCacheJson,
                 EnableNfoFiles = source.EnableNfoFiles,
                 SmartSkipExisting = source.SmartSkipExisting,

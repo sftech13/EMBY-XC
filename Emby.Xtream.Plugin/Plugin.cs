@@ -327,6 +327,7 @@ namespace Emby.Xtream.Plugin
             target.DocumentaryFolderMode = source.DocumentaryFolderMode;
             target.DocumentaryFolderMappings = source.DocumentaryFolderMappings;
             target.EnableGenreBasedLibraryRouting = source.EnableGenreBasedLibraryRouting;
+            target.PreferCompleteVodCatalog = source.PreferCompleteVodCatalog;
             target.VodGenreCacheJson = source.VodGenreCacheJson;
             target.SyncSeries = source.SyncSeries;
             target.SeriesRootFolderName = string.IsNullOrWhiteSpace(source.SeriesRootFolderName) ? target.SeriesRootFolderName : source.SeriesRootFolderName;

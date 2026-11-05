@@ -64,6 +64,10 @@ namespace Emby.Xtream.Plugin
         // decide which output library receives each item.
         public bool EnableGenreBasedLibraryRouting { get; set; }
 
+        // Opt-in for providers whose complete VOD response is faster than their
+        // category-specific endpoints. Category membership is validated locally.
+        public bool PreferCompleteVodCatalog { get; set; }
+
         // Persistent stream_id -> genre cache populated from get_vod_info. The main
         // VOD list commonly omits genre, so this avoids re-querying every title.
         public string VodGenreCacheJson { get; set; } = string.Empty;

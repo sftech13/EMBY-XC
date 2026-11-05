@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -3898,6 +3899,45 @@ namespace Emby.Xtream.Plugin.Service
         private async Task<List<VodStreamInfo>> FetchVodStreamsAsync(
             int[] categoryIds, PluginConfiguration config, CancellationToken cancellationToken)
         {
+            if (config.PreferCompleteVodCatalog)
+            {
+                var url = string.Format(
+                    CultureInfo.InvariantCulture,
+                    "{0}/player_api.php?username={1}&password={2}&action=get_vod_streams",
+                    config.BaseUrl, Uri.EscapeDataString(config.Username ?? string.Empty), Uri.EscapeDataString(config.Password ?? string.Empty));
+                string completeJson = null;
+                var watch = Stopwatch.StartNew();
+                try
+                {
+                    completeJson = await GetProviderStringWithRetryAsync(
+                        url, "Complete VOD catalog", cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (HttpRequestException)
+                {
+                    _logger.Warn("Complete VOD catalog request was unavailable; falling back to category requests with existing safeguards");
+                }
+
+                if (completeJson != null)
+                {
+                    // Parse/ID failures intentionally propagate: never treat an
+                    // invalid response as an authoritative empty selection.
+                    var complete = XtreamResponseParser.DeserializeVodList(completeJson, JsonOptions);
+                    List<VodStreamInfo> selected;
+                    string fallbackReason;
+                    if (CompleteVodCatalogFilter.TrySelect(complete, categoryIds, out selected, out fallbackReason))
+                    {
+                        _logger.Info("Complete VOD catalog: {0} records loaded and validated in {1} ms; {2} selected after category filtering; using one fresh catalog for this sync",
+                            complete.Count, watch.ElapsedMilliseconds, selected.Count);
+                        return selected;
+                    }
+                    _logger.Warn("Complete VOD catalog fallback: {0}; using category requests with existing safeguards", fallbackReason);
+                }
+            }
+
             var allStreams = new List<VodStreamInfo>();
 
             if (categoryIds == null || categoryIds.Length == 0)

@@ -4,6 +4,12 @@ All notable changes to XC2EMBY are listed here, newest first.
 
 ---
 
+## v1.1.148
+- Added optional **Prefer Complete VOD Catalog** under **Settings → Sync Behavior**. Movies and Documentaries can fetch one fresh `get_vod_streams` response without `category_id`, avoiding slow category-specific catalog generation on servers such as IPTVBoss. The option defaults off and is preserved by manual/scheduled documentary configuration and settings migration.
+- Added conservative local category filtering using numeric/string `category_ids` membership arrays. Unchecked categories remain excluded, cross-listed records retain the first selected category's folder ownership, and duplicate stream IDs are resolved using that same priority before existing genre routing runs.
+- Providers with unavailable complete-catalog endpoints, ambiguous membership, contradictory primary categories, or selected categories absent from the full response fall back to the existing per-category fetch path. Empty, malformed, and invalid-ID complete responses abort before file changes or cleanup; failed fallback requests also preserve the library.
+- Kept each complete catalog scoped to its current sync instead of retaining another large cache. Added count/timing diagnostics without provider URLs or credentials, plus regression coverage for fresh requests, genre separation, custom folder mapping, fallback behavior, invalid-response protection, cancellation, and configuration propagation. Existing orphan thresholds, TLS validation, playback behavior, and series synchronization are unchanged.
+
 ## v1.1.147
 - Fixed TV Shows and DocuSeries catalogs collapsing when provider series IDs exceed 2,147,483,647. Series, episode, and VOD movie IDs now retain their full positive 64-bit values through catalog parsing, detail requests, generated STRM URLs, duplicate-path ownership, failed-item retries, metadata population, and persistent orphan-validation/checkpoint state.
 - Replaced silent media-ID conversion to zero with protective validation. Missing, zero, negative, malformed, or out-of-range IDs and malformed catalog responses now fail before deduplication, catalog snapshot updates, file generation, or orphan cleanup. Invalid episode identifiers protect the affected series through the existing detail-failure handling.

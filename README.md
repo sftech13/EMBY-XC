@@ -45,7 +45,7 @@
 
 ## Features Overview
 
-> Current release: **v1.1.147** — see [CHANGELOG.md](CHANGELOG.md) for full version history.
+> Current release: **v1.1.148** — see [CHANGELOG.md](CHANGELOG.md) for full version history.
 
 ### Live TV
 - Registers as a native Emby tuner host — channels appear in Live TV just like any other tuner
@@ -72,6 +72,7 @@
 
 ### VOD Movies
 - Syncs Xtream VOD catalog into `.strm` files for Emby library scanning
+- Optional **Prefer Complete VOD Catalog** under **Settings → Sync Behavior** fetches one fresh VOD catalog per Movies/Documentaries sync and filters selected categories locally. This can avoid slow category endpoints on providers such as IPTVBoss. It defaults off, respects cross-listed `category_ids` membership and folder priority, and falls back to category requests when membership cannot be verified. Empty/invalid complete responses abort safely; downloads can be larger and no extra catalog cache is retained between syncs.
 - Two folder layout modes in the UI: single folder or custom multi-folder category mapping
 - Normalized URL change detection — existing `.strm` files are read and rewritten only when their effective URL changes
 - Optional **Skip Local Media** filter skips XC items already present in your Emby library

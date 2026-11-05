@@ -70,6 +70,14 @@ namespace Emby.Xtream.Plugin.Tests
                 ("large VOD IDs survive complete STRM synchronization", LargeVodIdsSyncEndToEndAsync),
                 ("provider ID persistence remains compatible with old checkpoints", ProviderIdPersistenceIsCompatibleAsync),
                 ("invalid episode IDs preserve working existing episodes", InvalidEpisodeIdsPreserveExistingFilesAsync),
+                ("complete VOD selection preserves cross-listing and category order", CompleteVodSelectionPreservesMembershipAsync),
+                ("complete VOD mode uses one fresh catalog for each sync", CompleteVodFetchIsFreshAsync),
+                ("complete VOD mode retains movie and documentary genre separation", CompleteVodGenreRoutingIsPreservedAsync),
+                ("complete VOD fallback preserves legacy category behavior", CompleteVodFallbackIsCompatibleAsync),
+                ("invalid complete VOD responses preserve files and timestamps", InvalidCompleteVodCatalogProtectsFilesAsync),
+                ("complete VOD category ownership preserves custom folder mapping", CompleteVodCustomFoldersArePreservedAsync),
+                ("complete VOD setting survives documentary configuration copies", CompleteVodSettingIsCopiedAsync),
+                ("canceling a complete VOD fetch never falls through into category requests", CompleteVodCancellationPreservesFilesAsync),
             };
 
             foreach (var test in tests)
