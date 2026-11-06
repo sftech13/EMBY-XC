@@ -45,7 +45,7 @@
 
 ## Features Overview
 
-> Current release: **v1.1.148** — see [CHANGELOG.md](CHANGELOG.md) for full version history.
+> Current release: **v1.1.149** — see [CHANGELOG.md](CHANGELOG.md) for full version history.
 
 ### Live TV
 - Registers as a native Emby tuner host — channels appear in Live TV just like any other tuner
@@ -375,7 +375,11 @@ Enables scheduled sync runs without manual intervention.
 
 Auto-sync uses Emby's built-in scheduled task system. Each content type — Movies, Documentaries, TV Shows, and Docu Series — is registered as a separate Emby scheduled task and appears under **Dashboard → Scheduled Tasks** in Emby. From there you can adjust the trigger time or run the task manually.
 
-At install, the tasks register default daily triggers staggered starting at 03:00 to avoid concurrent runs. If **Auto-Sync Enabled** is off, all scheduled task runs exit immediately without syncing — so disabling this toggle is the master switch even if Emby's scheduler fires the task.
+At install, the tasks register default daily triggers staggered starting at 03:00. Movies and Documentaries share one execution slot; TV Shows and Docu Series share another. If a paired sync is still running at the next task's scheduled time, the later task waits rather than being skipped. The two pairs remain independent, and waiting jobs do not increase the configured per-sync parallelism.
+
+While waiting, Emby's scheduled task remains running at 0%, and the server log records that the job is queued. Canceling that scheduled task cancels only its wait, not the active paired sync. Emby's task time limit includes the waiting period. Queued work is in memory only: a server restart or task cancellation does not persist a backlog for replay.
+
+If **Auto-Sync Enabled** is off, scheduled task runs exit without syncing. After a wait, each job reads the latest configuration and checks its enable flags and provider-health status again before fetching content. Existing category, genre-routing, smart-skip, and orphan-deletion safeguards still apply.
 
 ### Modes
 

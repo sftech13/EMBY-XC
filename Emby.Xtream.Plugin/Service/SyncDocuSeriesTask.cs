@@ -30,23 +30,53 @@ namespace Emby.Xtream.Plugin.Service
 
         public async Task Execute(CancellationToken cancellationToken, IProgress<double> progress)
         {
+            if (GetConfigurationForRun() == null) return;
+
+            PluginConfiguration config = null;
+            PluginConfiguration docConfig = null;
+            Action saveConfig = () =>
+            {
+                config.LastDocuSeriesSyncTimestamp = docConfig.LastSeriesSyncTimestamp;
+                config.DocuSeriesEpisodeHashesJson = docConfig.SeriesEpisodeHashesJson;
+                config.DocuSeriesCategorySnapshotJson = docConfig.SeriesCategorySnapshotJson;
+                config.DocuSeriesFastPathSettingsHash = docConfig.SeriesFastPathSettingsHash;
+                config.LastDocuSeriesFullVerificationUtcTicks = docConfig.LastSeriesFullVerificationUtcTicks;
+                config.DocuSeriesPlaybackValidationJson = docConfig.SeriesPlaybackValidationJson;
+                config.DocuSeriesCatalogObservationJson = docConfig.SeriesCatalogObservationJson;
+                config.PendingOrphansJson = docConfig.PendingOrphansJson;
+                config.StrmNamingVersion = docConfig.StrmNamingVersion;
+                Plugin.Instance.SaveConfiguration();
+            };
+            progress.Report(0);
+            await Plugin.Instance.StrmSyncService.SyncSeriesWhenReadyAsync(
+                () =>
+                {
+                    config = GetConfigurationForRun();
+                    docConfig = config == null ? null : BuildDocuSeriesConfig(config);
+                    return docConfig;
+                },
+                cancellationToken,
+                saveConfig,
+                progress,
+                isDocuSeries: true,
+                onCompleted: saveConfig).ConfigureAwait(false);
+
+            if (docConfig == null) return;
+            progress.Report(100);
+        }
+
+        private PluginConfiguration GetConfigurationForRun()
+        {
             var config = Plugin.Instance.Configuration;
             if (!config.AutoSyncEnabled)
             {
                 _logger.Info("Automatic sync disabled — skipping scheduled docu-series sync.");
-                return;
+                return null;
             }
             if (!config.SyncDocuSeries)
             {
                 _logger.Info("Docu Series sync disabled - skipping.");
-                return;
-            }
-
-            var svc = Plugin.Instance.StrmSyncService;
-            if (svc.DocuSeriesProgress.IsRunning || svc.SeriesProgress.IsRunning)
-            {
-                _logger.Info("TV show/docu series sync already running - skipping scheduled run.");
-                return;
+                return null;
             }
 
             var health = Plugin.Instance.ProviderHealth;
@@ -56,41 +86,9 @@ namespace Emby.Xtream.Plugin.Service
                 !health.IsReachable)
             {
                 _logger.Warn("Skipping scheduled docu-series sync — provider is unreachable (last error: {0}). Will retry at next scheduled time.", health.LastError ?? "unknown");
-                return;
+                return null;
             }
-
-            var docConfig = BuildDocuSeriesConfig(config);
-            progress.Report(0);
-            await svc.SyncSeriesAsync(
-                docConfig,
-                cancellationToken,
-                () =>
-                {
-                    config.LastDocuSeriesSyncTimestamp = docConfig.LastSeriesSyncTimestamp;
-                    config.DocuSeriesEpisodeHashesJson = docConfig.SeriesEpisodeHashesJson;
-                    config.DocuSeriesCategorySnapshotJson = docConfig.SeriesCategorySnapshotJson;
-                    config.DocuSeriesFastPathSettingsHash = docConfig.SeriesFastPathSettingsHash;
-                    config.LastDocuSeriesFullVerificationUtcTicks = docConfig.LastSeriesFullVerificationUtcTicks;
-                    config.DocuSeriesPlaybackValidationJson = docConfig.SeriesPlaybackValidationJson;
-                    config.DocuSeriesCatalogObservationJson = docConfig.SeriesCatalogObservationJson;
-                    config.PendingOrphansJson = docConfig.PendingOrphansJson;
-                    config.StrmNamingVersion = docConfig.StrmNamingVersion;
-                    Plugin.Instance.SaveConfiguration();
-                },
-                progress,
-                isDocuSeries: true).ConfigureAwait(false);
-
-            config.LastDocuSeriesSyncTimestamp = docConfig.LastSeriesSyncTimestamp;
-            config.DocuSeriesEpisodeHashesJson = docConfig.SeriesEpisodeHashesJson;
-            config.DocuSeriesCategorySnapshotJson = docConfig.SeriesCategorySnapshotJson;
-            config.DocuSeriesFastPathSettingsHash = docConfig.SeriesFastPathSettingsHash;
-            config.LastDocuSeriesFullVerificationUtcTicks = docConfig.LastSeriesFullVerificationUtcTicks;
-            config.DocuSeriesPlaybackValidationJson = docConfig.SeriesPlaybackValidationJson;
-            config.DocuSeriesCatalogObservationJson = docConfig.SeriesCatalogObservationJson;
-            config.PendingOrphansJson = docConfig.PendingOrphansJson;
-            config.StrmNamingVersion = docConfig.StrmNamingVersion;
-            Plugin.Instance.SaveConfiguration();
-            progress.Report(100);
+            return config;
         }
 
         private static PluginConfiguration BuildDocuSeriesConfig(PluginConfiguration source)

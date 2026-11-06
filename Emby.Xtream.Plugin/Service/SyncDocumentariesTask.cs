@@ -30,23 +30,48 @@ namespace Emby.Xtream.Plugin.Service
 
         public async Task Execute(CancellationToken cancellationToken, IProgress<double> progress)
         {
+            if (GetConfigurationForRun() == null) return;
+
+            PluginConfiguration config = null;
+            PluginConfiguration docConfig = null;
+            Action saveConfig = () =>
+            {
+                config.LastDocumentarySyncTimestamp = docConfig.LastMovieSyncTimestamp;
+                config.StrmNamingVersion = docConfig.StrmNamingVersion;
+                config.MovieTmdbCacheJson = docConfig.MovieTmdbCacheJson;
+                config.VodGenreCacheJson = docConfig.VodGenreCacheJson;
+                Plugin.Instance.SaveConfiguration();
+            };
+            progress.Report(0);
+            await Plugin.Instance.StrmSyncService.SyncMoviesWhenReadyAsync(
+                () =>
+                {
+                    config = GetConfigurationForRun();
+                    docConfig = config == null ? null : BuildDocumentaryConfig(config);
+                    return docConfig;
+                },
+                cancellationToken,
+                saveConfig,
+                progress,
+                isDocumentaries: true,
+                onCompleted: saveConfig).ConfigureAwait(false);
+
+            if (docConfig == null) return;
+            progress.Report(100);
+        }
+
+        private PluginConfiguration GetConfigurationForRun()
+        {
             var config = Plugin.Instance.Configuration;
             if (!config.AutoSyncEnabled)
             {
                 _logger.Info("Automatic sync disabled — skipping scheduled documentary sync.");
-                return;
+                return null;
             }
             if (!config.SyncDocumentaries)
             {
                 _logger.Info("Documentary sync disabled - skipping.");
-                return;
-            }
-
-            var svc = Plugin.Instance.StrmSyncService;
-            if (svc.DocumentariesProgress.IsRunning || svc.MovieProgress.IsRunning)
-            {
-                _logger.Info("Movie/documentary sync already running - skipping scheduled run.");
-                return;
+                return null;
             }
 
             var health = Plugin.Instance.ProviderHealth;
@@ -56,31 +81,9 @@ namespace Emby.Xtream.Plugin.Service
                 !health.IsReachable)
             {
                 _logger.Warn("Skipping scheduled documentary sync — provider is unreachable (last error: {0}). Will retry at next scheduled time.", health.LastError ?? "unknown");
-                return;
+                return null;
             }
-
-            var docConfig = BuildDocumentaryConfig(config);
-            progress.Report(0);
-            await svc.SyncMoviesAsync(
-                docConfig,
-                cancellationToken,
-                () =>
-                {
-                    config.LastDocumentarySyncTimestamp = docConfig.LastMovieSyncTimestamp;
-                    config.StrmNamingVersion = docConfig.StrmNamingVersion;
-                    config.MovieTmdbCacheJson = docConfig.MovieTmdbCacheJson;
-                    config.VodGenreCacheJson = docConfig.VodGenreCacheJson;
-                    Plugin.Instance.SaveConfiguration();
-                },
-                progress,
-                isDocumentaries: true).ConfigureAwait(false);
-
-            config.LastDocumentarySyncTimestamp = docConfig.LastMovieSyncTimestamp;
-            config.StrmNamingVersion = docConfig.StrmNamingVersion;
-            config.MovieTmdbCacheJson = docConfig.MovieTmdbCacheJson;
-            config.VodGenreCacheJson = docConfig.VodGenreCacheJson;
-            Plugin.Instance.SaveConfiguration();
-            progress.Report(100);
+            return config;
         }
 
         private static PluginConfiguration BuildDocumentaryConfig(PluginConfiguration source)

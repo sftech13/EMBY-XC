@@ -4,6 +4,11 @@ All notable changes to XC2EMBY are listed here, newest first.
 
 ---
 
+## v1.1.149
+- Fixed scheduled Documentaries and Docu-Series syncs being silently skipped when Movies or TV Shows runs past its scheduled offset. Each related library pair now shares a cancellation-aware execution slot; a waiting scheduled task remains active and runs after the paired sync releases it instead of being reported complete without syncing.
+- Read queued jobs' settings and documentary metadata/checkpoint copies after the wait, and recheck auto-sync, library enable flags, and provider health before starting. Public/manual syncs use the same per-pair protection, and failed-item retries retain their series-sync exclusion. Movie and series pairs remain independent; configured parallelism, Live TV, genre routing, schedules, and deletion safeguards are unchanged.
+- Added regression coverage for waiting instead of skipping, fresh checkpoint reads, queued cancellation, failed/canceled predecessor recovery, independent pairs, real documentary/Docu-Series file generation after a manual paired sync, and disabled queued work avoiding provider requests and false history entries.
+
 ## v1.1.148
 - Added optional **Prefer Complete VOD Catalog** under **Settings → Sync Behavior**. Movies and Documentaries can fetch one fresh `get_vod_streams` response without `category_id`, avoiding slow category-specific catalog generation on servers such as IPTVBoss. The option defaults off and is preserved by manual/scheduled documentary configuration and settings migration.
 - Added conservative local category filtering using numeric/string `category_ids` membership arrays. Unchecked categories remain excluded, cross-listed records retain the first selected category's folder ownership, and duplicate stream IDs are resolved using that same priority before existing genre routing runs.

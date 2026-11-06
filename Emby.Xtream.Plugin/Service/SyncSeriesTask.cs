@@ -31,22 +31,29 @@ namespace Emby.Xtream.Plugin.Service
 
         public async Task Execute(CancellationToken cancellationToken, IProgress<double> progress)
         {
+            if (GetConfigurationForRun() == null) return;
+
+            progress.Report(0);
+            await Plugin.Instance.StrmSyncService.SyncSeriesWhenReadyAsync(
+                GetConfigurationForRun,
+                cancellationToken,
+                () => Plugin.Instance.SaveConfiguration(),
+                progress).ConfigureAwait(false);
+            progress.Report(100);
+        }
+
+        private PluginConfiguration GetConfigurationForRun()
+        {
             var config = Plugin.Instance.Configuration;
             if (!config.AutoSyncEnabled)
             {
                 _logger.Info("Automatic sync disabled — skipping scheduled series sync.");
-                return;
+                return null;
             }
             if (!config.SyncSeries)
             {
                 _logger.Info("Series sync disabled — skipping.");
-                return;
-            }
-            var svc = Plugin.Instance.StrmSyncService;
-            if (svc.SeriesProgress.IsRunning)
-            {
-                _logger.Info("Series sync already running — skipping scheduled run.");
-                return;
+                return null;
             }
 
             var health = Plugin.Instance.ProviderHealth;
@@ -56,16 +63,9 @@ namespace Emby.Xtream.Plugin.Service
                 !health.IsReachable)
             {
                 _logger.Warn("Skipping scheduled series sync — provider is unreachable (last error: {0}). Will retry at next scheduled time.", health.LastError ?? "unknown");
-                return;
+                return null;
             }
-
-            progress.Report(0);
-            await svc.SyncSeriesAsync(
-                config,
-                cancellationToken,
-                () => Plugin.Instance.SaveConfiguration(),
-                progress).ConfigureAwait(false);
-            progress.Report(100);
+            return config;
         }
     }
 }

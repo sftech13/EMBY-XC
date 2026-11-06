@@ -23,6 +23,14 @@ namespace Emby.Xtream.Plugin.Tests
         {
             var tests = new List<(string Name, Func<Task> Run)>
             {
+                ("paired sync waits instead of skipping and reads the finished checkpoint", SyncQueueWaitsInsteadOfSkippingAsync),
+                ("canceling a queued sync leaves the active job and execution slot intact", SyncQueueCancellationDoesNotStartWorkAsync),
+                ("pre-canceled sync never starts configuration or file work", SyncQueuePreCanceledWorkNeverStartsAsync),
+                ("failed or canceled active sync releases its waiting job", SyncQueueFailureReleasesWaitingRunAsync),
+                ("movie and series execution queues remain independent", SyncQueuePairsRemainIndependentAsync),
+                ("documentary sync waits behind a manual movie sync and generates its files", MovieAndDocumentaryRunsShareQueueAsync),
+                ("docu-series sync waits behind TV shows and generates its files", SeriesAndDocuSeriesRunsShareQueueAsync),
+                ("queued sync rechecks eligibility and canceled waiters never fetch", QueuedSyncCanBeDisabledBeforeStartingAsync),
                 ("empty series detail + HTTP 206 preserves every STRM", EmptyDetailAndWorkingEpisodesPreserveAllAsync),
                 ("HTTP 200 media is alive", Http200MediaIsAliveAsync),
                 ("HTTP 405 from Range GET is inconclusive", Http405RangeGetIsInconclusiveAsync),

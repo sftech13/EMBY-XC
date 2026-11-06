@@ -457,7 +457,8 @@ namespace Emby.Xtream.Plugin.Service
         private readonly object _historyLock = new object();
         private readonly List<FailedSyncItem> _failedItems = new List<FailedSyncItem>();
         private readonly object _failedItemsLock = new object();
-        private readonly SemaphoreSlim _seriesWriteGate = new SemaphoreSlim(1, 1);
+        private readonly SyncRunQueue _movieSyncQueue = new SyncRunQueue();
+        private readonly SyncRunQueue _seriesSyncQueue = new SyncRunQueue();
         private readonly object _activeSyncLock = new object();
         private CancellationTokenSource _activeSyncCancellation;
         private readonly object _libraryScanLock = new object();
@@ -1726,7 +1727,28 @@ namespace Emby.Xtream.Plugin.Service
             return true;
         }
 
-        public async Task SyncMoviesAsync(PluginConfiguration config, CancellationToken cancellationToken, Action saveConfig = null, IProgress<double> taskProgress = null, bool isDocumentaries = false)
+        public Task SyncMoviesAsync(PluginConfiguration config, CancellationToken cancellationToken, Action saveConfig = null, IProgress<double> taskProgress = null, bool isDocumentaries = false)
+        {
+            return SyncMoviesWhenReadyAsync(() => config, cancellationToken, saveConfig, taskProgress, isDocumentaries);
+        }
+
+        internal Task SyncMoviesWhenReadyAsync(Func<PluginConfiguration> getConfig, CancellationToken cancellationToken, Action saveConfig = null, IProgress<double> taskProgress = null, bool isDocumentaries = false, Action onCompleted = null)
+        {
+            var name = isDocumentaries ? "Documentaries" : "Movies";
+            return _movieSyncQueue.RunAsync(async () =>
+            {
+                var config = getConfig();
+                if (config != null)
+                {
+                    await SyncMoviesCoreAsync(config, cancellationToken, saveConfig, taskProgress, isDocumentaries).ConfigureAwait(false);
+                    onCompleted?.Invoke();
+                }
+            }, cancellationToken,
+                () => _logger.Info("{0} sync queued; waiting for the active movie/documentary sync to finish (not skipped).", name),
+                () => _logger.Info("{0} sync wait finished; preparing the run configuration.", name));
+        }
+
+        private async Task SyncMoviesCoreAsync(PluginConfiguration config, CancellationToken cancellationToken, Action saveConfig, IProgress<double> taskProgress, bool isDocumentaries)
         {
             ApplyUserAgentToSharedClient();
             CheckAndUpgradeNamingVersion(config, saveConfig);
@@ -2398,22 +2420,25 @@ namespace Emby.Xtream.Plugin.Service
             }
         }
 
-        public async Task SyncSeriesAsync(PluginConfiguration config, CancellationToken cancellationToken, Action saveConfig = null, IProgress<double> taskProgress = null, bool isDocuSeries = false)
+        public Task SyncSeriesAsync(PluginConfiguration config, CancellationToken cancellationToken, Action saveConfig = null, IProgress<double> taskProgress = null, bool isDocuSeries = false)
         {
-            await _seriesWriteGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-            try
+            return SyncSeriesWhenReadyAsync(() => config, cancellationToken, saveConfig, taskProgress, isDocuSeries);
+        }
+
+        internal Task SyncSeriesWhenReadyAsync(Func<PluginConfiguration> getConfig, CancellationToken cancellationToken, Action saveConfig = null, IProgress<double> taskProgress = null, bool isDocuSeries = false, Action onCompleted = null)
+        {
+            var name = isDocuSeries ? "Docu-Series" : "TV Shows";
+            return _seriesSyncQueue.RunAsync(async () =>
             {
-                await SyncSeriesCoreAsync(
-                    config,
-                    cancellationToken,
-                    saveConfig,
-                    taskProgress,
-                    isDocuSeries).ConfigureAwait(false);
-            }
-            finally
-            {
-                _seriesWriteGate.Release();
-            }
+                var config = getConfig();
+                if (config != null)
+                {
+                    await SyncSeriesCoreAsync(config, cancellationToken, saveConfig, taskProgress, isDocuSeries).ConfigureAwait(false);
+                    onCompleted?.Invoke();
+                }
+            }, cancellationToken,
+                () => _logger.Info("{0} sync queued; waiting for the active TV show/docu-series sync to finish (not skipped).", name),
+                () => _logger.Info("{0} sync wait finished; preparing the run configuration.", name));
         }
 
         private async Task SyncSeriesCoreAsync(PluginConfiguration config, CancellationToken cancellationToken, Action saveConfig, IProgress<double> taskProgress, bool isDocuSeries)
@@ -3448,17 +3473,11 @@ namespace Emby.Xtream.Plugin.Service
             }
         }
 
-        public async Task RetryFailedAsync(CancellationToken cancellationToken)
+        public Task RetryFailedAsync(CancellationToken cancellationToken)
         {
-            await _seriesWriteGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-            try
-            {
-                await RetryFailedCoreAsync(cancellationToken).ConfigureAwait(false);
-            }
-            finally
-            {
-                _seriesWriteGate.Release();
-            }
+            return _seriesSyncQueue.RunAsync(
+                () => RetryFailedCoreAsync(cancellationToken), cancellationToken,
+                () => _logger.Info("Failed-item retry queued; waiting for the active TV show/docu-series sync to finish."));
         }
 
         private async Task RetryFailedCoreAsync(CancellationToken cancellationToken)
