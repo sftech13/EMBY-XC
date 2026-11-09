@@ -36,7 +36,9 @@ namespace Emby.Xtream.Plugin
             _instance = this;
             _applicationHost = applicationHost;
             _liveTvService = new LiveTvService(logManager.GetLogger("XtreamTuner.LiveTv"));
-            _strmSyncService = new StrmSyncService(logManager.GetLogger("XtreamTuner.StrmSync"));
+            _strmSyncService = new StrmSyncService(logManager.GetLogger("XtreamTuner.StrmSync"),
+                seriesDetailCachePath: string.IsNullOrWhiteSpace(applicationPaths.DataPath)
+                    ? null : Path.Combine(applicationPaths.DataPath, "xc2emby", "series-details-v1"));
             _providerHealth = new ProviderHealthMonitor(logManager.GetLogger("XtreamTuner.ProviderHealth"));
             _providerHealth.ReachabilityChanged += isReachable =>
             {

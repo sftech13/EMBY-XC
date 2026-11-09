@@ -361,11 +361,30 @@ namespace Emby.Xtream.Plugin.Api
     public class SyncProgressInfo
     {
         public string Phase { get; set; }
+        public bool IsPreparing { get; set; }
+        public int Prepared { get; set; }
+        public int PreparationTotal { get; set; }
         public int Total { get; set; }
         public int Completed { get; set; }
         public int Skipped { get; set; }
         public int Failed { get; set; }
         public bool IsRunning { get; set; }
+
+        internal static SyncProgressInfo FromProgress(SyncProgress progress)
+        {
+            return new SyncProgressInfo
+            {
+                Phase = progress.Phase,
+                IsPreparing = progress.IsPreparing,
+                Prepared = progress.Prepared,
+                PreparationTotal = progress.PreparationTotal,
+                Total = progress.Total,
+                Completed = progress.Completed,
+                Skipped = progress.Skipped,
+                Failed = progress.Failed,
+                IsRunning = progress.IsRunning,
+            };
+        }
     }
 
     public class DashboardResult
@@ -958,42 +977,10 @@ namespace Emby.Xtream.Plugin.Api
 
             return new SyncStatusResult
             {
-                Movies = new SyncProgressInfo
-                {
-                    Phase = movieProg.Phase,
-                    Total = movieProg.Total,
-                    Completed = movieProg.Completed,
-                    Skipped = movieProg.Skipped,
-                    Failed = movieProg.Failed,
-                    IsRunning = movieProg.IsRunning,
-                },
-                Documentaries = new SyncProgressInfo
-                {
-                    Phase = docProg.Phase,
-                    Total = docProg.Total,
-                    Completed = docProg.Completed,
-                    Skipped = docProg.Skipped,
-                    Failed = docProg.Failed,
-                    IsRunning = docProg.IsRunning,
-                },
-                Series = new SyncProgressInfo
-                {
-                    Phase = seriesProg.Phase,
-                    Total = seriesProg.Total,
-                    Completed = seriesProg.Completed,
-                    Skipped = seriesProg.Skipped,
-                    Failed = seriesProg.Failed,
-                    IsRunning = seriesProg.IsRunning,
-                },
-                DocuSeries = new SyncProgressInfo
-                {
-                    Phase = docuProg.Phase,
-                    Total = docuProg.Total,
-                    Completed = docuProg.Completed,
-                    Skipped = docuProg.Skipped,
-                    Failed = docuProg.Failed,
-                    IsRunning = docuProg.IsRunning,
-                },
+                Movies = SyncProgressInfo.FromProgress(movieProg),
+                Documentaries = SyncProgressInfo.FromProgress(docProg),
+                Series = SyncProgressInfo.FromProgress(seriesProg),
+                DocuSeries = SyncProgressInfo.FromProgress(docuProg),
             };
         }
 

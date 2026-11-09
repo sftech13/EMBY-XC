@@ -25,6 +25,7 @@ jobs:
       - name: Test plugin and optional monitoring
         run: |
           dotnet run --project Emby.Xtream.Plugin.Tests/Emby.Xtream.Plugin.Tests.csproj -c Release
+          node Emby.Xtream.Plugin.Tests/dashboard-tests.cjs
           bash -n contrib/monitoring/boss-resync.sh
           bash -n contrib/monitoring/emby-iptv-stream-monitor.sh
           python3 contrib/monitoring/test_monitoring.py -v

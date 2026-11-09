@@ -29,7 +29,7 @@ namespace Emby.Xtream.Plugin.Service
         private readonly HashSet<string> _episodeTmdbKeys;
         private readonly HashSet<string> _episodeTitleKeys;
 
-        private LocalMediaFilter(
+        internal LocalMediaFilter(
             HashSet<string> movieTmdbIds, HashSet<string> movieImdbIds, HashSet<string> movieTitles,
             HashSet<string> episodeTmdbKeys, HashSet<string> episodeTitleKeys)
         {

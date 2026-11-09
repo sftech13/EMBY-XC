@@ -24,3 +24,6 @@ jobs:
 
       - name: Run playback-validation tests
         run: dotnet run --project Emby.Xtream.Plugin.Tests/Emby.Xtream.Plugin.Tests.csproj -c Release
+
+      - name: Test dashboard progress and failure history
+        run: node Emby.Xtream.Plugin.Tests/dashboard-tests.cjs

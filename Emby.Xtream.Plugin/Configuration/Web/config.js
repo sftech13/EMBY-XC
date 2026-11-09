@@ -2275,13 +2275,23 @@ function (BaseView, loading) {
 
     // ---- Sync operations ----
 
+    function getSyncProgressDisplay(progress) {
+        var preparing = !!progress.IsPreparing;
+        var total = (preparing ? progress.PreparationTotal : progress.Total) || 0;
+        var completed = (preparing ? progress.Prepared : progress.Completed) || 0;
+        var pct = total > 0 ? Math.max(0, Math.min(100, Math.round((completed / total) * 100))) : 0;
+        return {
+            percent: pct,
+            detail: preparing
+                ? completed + ' / ' + total + ' prepared (' + (progress.Failed || 0) + ' failed) \u2014 ' + pct + '%'
+                : completed + ' / ' + total + ' (' + (progress.Skipped || 0) + ' skipped, ' + (progress.Failed || 0) + ' failed) \u2014 ' + pct + '%'
+        };
+    }
+
     function renderProgressBar(resultEl, progress) {
-        var total = progress.Total || 0;
-        var completed = progress.Completed || 0;
-        var skipped = progress.Skipped || 0;
-        var failed = progress.Failed || 0;
+        var display = getSyncProgressDisplay(progress);
         var phase = progress.Phase || 'Working';
-        var pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+        var pct = display.percent;
 
         resultEl.innerHTML =
             '<div style="margin:0.5em 0;">' +
@@ -2289,8 +2299,7 @@ function (BaseView, loading) {
                     '<div style="background:' + accentColor + '; height:100%; width:' + pct + '%; transition:width 0.3s ease; border-radius:4px;"></div>' +
                 '</div>' +
                 '<div style="opacity:0.7; margin-top:0.4em; font-size:0.9em;">' +
-                    escapeHtml(phase) + ' \u2014 ' + completed + ' / ' + total +
-                    ' (' + skipped + ' skipped, ' + failed + ' failed) \u2014 ' + pct + '%' +
+                    escapeHtml(phase) + ' \u2014 ' + escapeHtml(display.detail) +
                 '</div>' +
             '</div>';
     }
@@ -3131,6 +3140,16 @@ function (BaseView, loading) {
             html += '<td>' + durationText + '</td>';
             html += '<td>' + statsCol + '</td>';
             html += '</tr>';
+            if (!entry.Success) {
+                var reason = entry.FailureReason || 'No failure reason was recorded by this older plugin version. Check the server log for details.';
+                var preview = reason.length > 160 ? reason.slice(0, 160) + '...' : reason;
+                var itemFailures = (entry.MoviesFailed || 0) + (entry.SeriesFailed || entry.EpisodeFailed || 0);
+                html += '<tr class="sync-failure-reason"><td colspan="5" style="white-space:normal; overflow-wrap:anywhere;">' +
+                    '<details><summary style="cursor:pointer; color:#e74c3c;">' + escapeHtml(preview) + '</summary>' +
+                    '<div style="white-space:pre-wrap; margin:0.5em 0;">' + escapeHtml(reason) + '</div>' +
+                    (itemFailures === 0 ? '<div style="opacity:0.7; margin-bottom:0.5em;">Sync-level failure; no individual item failures were recorded.</div>' : '') +
+                    '</details></td></tr>';
+            }
         }
 
         html += '</tbody></table>';
@@ -3165,14 +3184,11 @@ function (BaseView, loading) {
                              (docProg    && docProg.IsRunning)    ? docProg    :
                              (seriesProg && seriesProg.IsRunning) ? seriesProg :
                              docuProg;
-                var total = active.Total || 0;
-                var completed = active.Completed || 0;
-                var pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+                var display = getSyncProgressDisplay(active);
 
                 view.querySelector('.dashboardProgressPhase').textContent = active.Phase || 'Working...';
-                view.querySelector('.dashboardProgressBarFill').style.width = pct + '%';
-                view.querySelector('.dashboardProgressDetail').textContent =
-                    completed + ' / ' + total + ' (' + active.Skipped + ' skipped, ' + active.Failed + ' failed) \u2014 ' + pct + '%';
+                view.querySelector('.dashboardProgressBarFill').style.width = display.percent + '%';
+                view.querySelector('.dashboardProgressDetail').textContent = display.detail;
             }).catch(function () { });
         }, 500);
     }

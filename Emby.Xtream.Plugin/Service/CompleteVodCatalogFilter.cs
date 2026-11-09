@@ -13,7 +13,24 @@ namespace Emby.Xtream.Plugin.Service
             out List<VodStreamInfo> selected,
             out string fallbackReason)
         {
+            int[] missing;
+            if (!TrySelectWithMissingCategories(catalog, selectedCategoryIds, out selected, out missing, out fallbackReason))
+                return false;
+            if (missing.Length == 0) return true;
             selected = null;
+            fallbackReason = "one or more selected categories are absent from the complete response";
+            return false;
+        }
+
+        internal static bool TrySelectWithMissingCategories(
+            List<VodStreamInfo> catalog,
+            int[] selectedCategoryIds,
+            out List<VodStreamInfo> selected,
+            out int[] missingCategoryIds,
+            out string fallbackReason)
+        {
+            selected = null;
+            missingCategoryIds = new int[0];
             fallbackReason = string.Empty;
             if (catalog == null || catalog.Count == 0)
                 throw new InvalidOperationException("Complete VOD catalog was empty; sync aborted to preserve the existing library.");
@@ -64,14 +81,9 @@ namespace Emby.Xtream.Plugin.Service
                     owners[item.StreamId] = item.WithCategory(bestCategory);
             }
 
-            // An omitted category may be empty, but cannot be assumed complete
-            // here. Let the legacy endpoint confirm it before cleanup proceeds.
-            if (rank.Keys.Any(id => !represented.Contains(id)))
-            {
-                fallbackReason = "one or more selected categories are absent from the complete response";
-                return false;
-            }
-
+            // Missing categories still require authoritative endpoint checks. Keep
+            // the valid part of this snapshot instead of re-fetching every category.
+            missingCategoryIds = categories.Distinct().Where(id => !represented.Contains(id)).ToArray();
             selected = owners.Values.OrderBy(item => rank[item.CategoryId.Value]).ToList();
             return true;
         }

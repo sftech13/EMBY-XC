@@ -45,7 +45,7 @@
 
 ## Features Overview
 
-> Current release: **v1.1.149** — see [CHANGELOG.md](CHANGELOG.md) for full version history.
+> Current release: **v1.1.150** — see [CHANGELOG.md](CHANGELOG.md) for full version history.
 
 ### Live TV
 - Registers as a native Emby tuner host — channels appear in Live TV just like any other tuner
@@ -72,7 +72,7 @@
 
 ### VOD Movies
 - Syncs Xtream VOD catalog into `.strm` files for Emby library scanning
-- Optional **Prefer Complete VOD Catalog** under **Settings → Sync Behavior** fetches one fresh VOD catalog per Movies/Documentaries sync and filters selected categories locally. This can avoid slow category endpoints on providers such as IPTVBoss. It defaults off, respects cross-listed `category_ids` membership and folder priority, and falls back to category requests when membership cannot be verified. Empty/invalid complete responses abort safely; downloads can be larger and no extra catalog cache is retained between syncs.
+- Optional **Prefer Complete VOD Catalog** under **Settings → Sync Behavior** fetches one fresh VOD catalog per Movies/Documentaries sync and filters selected categories locally. This can avoid slow category endpoints on providers such as IPTVBoss. It defaults off and respects cross-listed `category_ids` membership and folder priority. When selected categories are absent from an otherwise valid catalog, only those categories are queried separately; an explicit empty array confirms an empty category, while failed or invalid verification aborts before any file changes. Ambiguous membership still falls back to category requests. Empty/invalid complete responses abort safely; downloads can be larger and no extra VOD catalog cache is retained between syncs.
 - Two folder layout modes in the UI: single folder or custom multi-folder category mapping
 - Normalized URL change detection — existing `.strm` files are read and rewritten only when their effective URL changes
 - Optional **Skip Local Media** filter skips XC items already present in your Emby library
@@ -351,6 +351,12 @@ Live counts fetched from the filesystem:
 - Series folders, season folders, and total episode `.strm` files
 - Live TV channel count (from the channel cache)
 
+### Sync Progress and History
+
+During Movies/Documentaries syncs, **Preparing movie/documentary metadata** reports how many provider records have been prepared before the writing pass. This counter is separate from completed STRM writes, so metadata preparation can show useful progress without reporting files as already written. **Scanning Emby library** is shown only while collecting the local-media lookup data. Emby's overall task percentage reserves progress for each stage; the plugin's progress bar shows the current stage's progress.
+
+Failed rows in **Sync History** include expandable, redacted failure details. A catalog timeout can fail a sync before any item writes begin, so **0 item failures** does not mean the sync succeeded. Older records without saved reasons are identified explicitly rather than guessing their cause.
+
 ### Auto-Sync Status
 
 Shows whether auto-sync is enabled and when the next run is scheduled. See [Auto-Sync](#auto-sync).
@@ -616,7 +622,15 @@ Years are preserved during matching to reduce false positives between remakes or
 
 Items already under the plugin's own STRM library path are automatically excluded from the lookup set, so the filter only matches against non-STRM library content.
 
-Skipped local matches are counted as `Skipped` in sync progress. For series, the local-media check happens before fetching per-series episode details, reducing provider API calls.
+Skipped local matches are counted as `Skipped` in sync progress. Series episodes are checked individually against the current local library, including when their provider metadata comes from the series-detail cache.
+
+### Series Detail Cache
+
+With **Smart Skip Existing** enabled, TV Shows and Docu-Series can reuse valid details for unchanged catalog records without disabling **Skip Local Media**. Cached episode IDs, titles, metadata and codecs go through the normal writer and local-media checks, so newly local duplicates are removed and missing STRMs/NFOs can be restored without requesting unchanged series details again.
+
+The first sync fills the cache. Changed catalog metadata, unreliable/missing `last_modified` timestamps, expired/corrupt entries, and the periodic full-verification run require fresh details. A failed or empty fresh response invalidates old cached details and invokes the existing file-protection behavior; the cache never authorizes deletion or substitutes for playback validation.
+
+The cache lives under Emby's application data directory in `xc2emby/series-details-v1`, outside STRM libraries. Provider/account keys are hashed. Entries expire after seven days; maintenance after series runs removes old or excess files to a 2 GiB disk budget, with a 16 MiB per-entry limit. Entries are loaded individually, not retained as a complete in-memory episode catalog. Cache I/O failures fall back to normal requests. Logs report cache hits, fresh detail fetches and stores; weekly verification and cold-cache runs will still take longer.
 
 ---
 
@@ -672,6 +686,18 @@ Generated build files are kept out of the source tree:
 | Release publish output | `artifacts/publish/` |
 
 GitHub Actions compile-checks pushes to `main` and pull requests. A separate workflow builds releases when a version tag is pushed:
+
+Local regression checks (test sources are not included in the plugin DLL):
+
+```bash
+dotnet run --project Emby.Xtream.Plugin.Tests/Emby.Xtream.Plugin.Tests.csproj -c Release
+node Emby.Xtream.Plugin.Tests/dashboard-tests.cjs
+python3 contrib/monitoring/test_monitoring.py
+```
+
+The dashboard tests also run with `deno run --allow-read Emby.Xtream.Plugin.Tests/dashboard-tests.cjs` on hosts without Node.js.
+
+Release tags:
 
 ```bash
 git tag v1.1.0-beta.1

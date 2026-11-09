@@ -224,6 +224,8 @@ namespace Emby.Xtream.Plugin.Tests
                     catch (OperationCanceledException) { canceled = true; }
                     Assert(canceled && handler.Requests == 1 && File.ReadAllText(path) == "existing playback URL",
                         "canceling the active complete request must stop immediately without fallback or orphan cleanup");
+                    Assert(service.GetSyncHistory().Single().FailureReason.Contains("cancel"),
+                        "canceled jobs must persist an explanation rather than an unexplained Failed badge");
                 }
             }
             finally { Directory.Delete(root, true); }
