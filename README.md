@@ -45,7 +45,7 @@
 
 ## Features Overview
 
-> Current release: **v1.1.150** — see [CHANGELOG.md](CHANGELOG.md) for full version history.
+> Current release: **v1.1.151** — see [CHANGELOG.md](CHANGELOG.md) for full version history.
 
 ### Live TV
 - Registers as a native Emby tuner host — channels appear in Live TV just like any other tuner
@@ -628,11 +628,23 @@ Skipped local matches are counted as `Skipped` in sync progress. Series episodes
 
 With **Smart Skip Existing** enabled, TV Shows and Docu-Series can reuse valid details for unchanged catalog records without disabling **Skip Local Media**. Cached episode IDs, titles, metadata and codecs go through the normal writer and local-media checks, so newly local duplicates are removed and missing STRMs/NFOs can be restored without requesting unchanged series details again.
 
-The first sync fills the cache. Changed catalog metadata, unreliable/missing `last_modified` timestamps, expired/corrupt entries, and the periodic full-verification run require fresh details. A failed or empty fresh response invalidates old cached details and invokes the existing file-protection behavior; the cache never authorizes deletion or substitutes for playback validation.
+The first sync fills the cache. Changed catalog metadata, unreliable/missing `last_modified` timestamps, and expired/corrupt entries require fresh details. A due weekly file/catalog check can still reuse recently fetched, valid entries; it does not discard the cache just because the library-wide marker is old. A failed or empty fresh response invalidates old cached details and invokes the existing file-protection behavior; the cache never authorizes deletion or substitutes for playback validation.
+
+A fully covered successful run anchors its verification checkpoint to the oldest actual detail-fetch time, including a cold-cache population completed before the old deadline was due. Reading a cached entry does not renew its timestamp or extend the original seven-day limit. Filename-only skips and partial detail coverage do not falsely mark a whole catalog newly verified. Existing cache files are compatible; no rebuild or cache reset is needed for this correction.
 
 The cache lives under Emby's application data directory in `xc2emby/series-details-v1`, outside STRM libraries. Provider/account keys are hashed. Entries expire after seven days; maintenance after series runs removes old or excess files to a 2 GiB disk budget, with a 16 MiB per-entry limit. Entries are loaded individually, not retained as a complete in-memory episode catalog. Cache I/O failures fall back to normal requests. Logs report cache hits, fresh detail fetches and stores; weekly verification and cold-cache runs will still take longer.
 
 ---
+
+### Movies and Documentaries Detail Cache
+
+With **Smart Skip Existing** enabled, Movies and Documentaries share an on-demand provider-metadata cache under Emby's application data directory at `xc2emby/vod-details-v1`. It retains descriptions, IDs, genres and optional codec fields—not movie streams. The first run stores only details it already needs; it does not fetch full metadata for every movie just to populate a cache. Later runs can avoid repeated lookups for cross-listed records, missing NFOs and useful responses without genre.
+
+VOD entries have a fixed **24-hour** freshness limit because the catalog's `added` field is not a reliable metadata-modification timestamp. Catalog identity changes (ID, title, added value, extension, artwork, rating or supplied TMDB ID), provider/account changes, corruption and expiry prevent reuse. A cached entry's original fetch time is never renewed on a hit. Expired/invalid entries are refreshed when consulted; already-known genre data can still serve records with no full cache entry and no other metadata lookup requirement.
+
+The cache has an independent **1 GiB disk budget** and **2 MiB entry limit**, with old/excess files pruned after VOD syncs. Files are read individually, and cached classification metadata is not retained as a complete in-memory catalog. Disk errors fall back to ordinary provider requests. Empty or failed fresh responses are not cached; known same-title genre routing is preserved when a refresh is inconclusive. New valid genre information still updates routing normally.
+
+Local-library checks, duplicate-path ownership and deletion thresholds still run. Unchanged STRM/NFO files are not rewritten, and existing series cache files are neither cleared nor migrated. Logs report VOD disk-cache hits, fresh detail fetches and entries stored. Fresh provider requests keep the configured sync parallelism and existing pacing.
 
 ## Orphan Cleanup
 

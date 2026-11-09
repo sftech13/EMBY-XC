@@ -74,7 +74,15 @@ namespace Emby.Xtream.Plugin.Service
 
         internal bool TryRead(PluginConfiguration config, SeriesInfo series, DateTime utcNow, out SeriesDetailInfo detail)
         {
+            long fetchedUtcTicks;
+            return TryRead(config, series, utcNow, out detail, out fetchedUtcTicks);
+        }
+
+        internal bool TryRead(PluginConfiguration config, SeriesInfo series, DateTime utcNow,
+            out SeriesDetailInfo detail, out long fetchedUtcTicks)
+        {
             detail = null;
+            fetchedUtcTicks = 0;
             if (!HasReliableTimestamp(series)) return false;
             try
             {
@@ -88,6 +96,7 @@ namespace Emby.Xtream.Plugin.Service
                         utcNow.Ticks - entry.FetchedUtcTicks >= MaximumAge.Ticks || !IsUsable(entry.Detail))
                         return false;
                     detail = entry.Detail;
+                    fetchedUtcTicks = entry.FetchedUtcTicks;
                     return true;
                 }
             }

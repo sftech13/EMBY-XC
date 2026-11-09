@@ -23,6 +23,22 @@ namespace Emby.Xtream.Plugin.Tests
         {
             var tests = new List<(string Name, Func<Task> Run)>
             {
+                ("VOD metadata cache survives restart and preserves local checks and canonical STRM ownership", VodCacheSurvivesRestartAndKeepsLocalChecksAsync),
+                ("Movies and Documentaries share disk metadata without mixing genre routing", VodCacheIsSharedBetweenMoviesAndDocumentariesAsync),
+                ("useful VOD metadata without genre avoids repeated provider requests", UsefulUnknownGenreMetadataIsCachedAsync),
+                ("VOD cache validates account, catalog identity and fixed 24-hour freshness", VodCacheIdentityAndFreshnessAsync),
+                ("fresh VOD metadata failures preserve known documentary routing and existing files", ExpiredVodMetadataRefreshesAndPreservesRoutingOnFailureAsync),
+                ("VOD cache corruption, size limits and disk failures are isolated and safe", InvalidVodCacheAndBudgetAreSafeAsync),
+                ("VOD cache population is on demand rather than a full metadata crawl", VodCacheDoesNotEagerlyPopulateKnownCatalogAsync),
+                ("changed VOD catalogs and unavailable cache I/O still fetch fresh metadata", VodCatalogChangesAndCacheIoStillUseFreshMetadataAsync),
+                ("cached VOD metadata restoration retains the orphan safety threshold", VodCacheRetainsOrphanThresholdAsync),
+                ("canceling VOD cache population cannot write files or delete orphans", VodCacheCancellationPreservesFilesAsync),
+                ("due weekly checks reuse the existing TV and documentary caches without rewriting them", WeeklyVerificationReusesExistingCacheAsync),
+                ("cache reuse never extends the original seven-day verification deadline", CacheHitsNeverExtendVerificationDeadlineAsync),
+                ("a successful cold cache population counts as full verification", FullColdRunCountsAsVerificationAsync),
+                ("filename-only fast skips cannot renew provider verification", FilenameFastSkipDoesNotRenewVerificationAsync),
+                ("incomplete detail coverage leaves the verification checkpoint unchanged", IncompleteCoverageKeepsVerificationCheckpointAsync),
+                ("weekly checks fetch only expired entries while retaining fresh data", VerificationFetchesOnlyExpiredEntriesAsync),
                 ("movie preparation reports progress without fabricating completed writes", MoviePreparationProgressIsSeparateAsync),
                 ("series progress leaves the local-library-scan phase", SeriesPhaseLeavesLocalScanAsync),
                 ("fatal catalog failures persist reasons without inventing failed items", FatalSyncFailureHistoryHasReasonAsync),

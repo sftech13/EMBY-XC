@@ -105,6 +105,7 @@ namespace Emby.Xtream.Plugin.Service
 
     internal sealed class VodDetailInfo
     {
+        public VodDetailInfo() { }
         public string Name { get; set; }
         public string TmdbId { get; set; }
         public string ImdbId { get; set; }
@@ -457,6 +458,14 @@ namespace Emby.Xtream.Plugin.Service
         private readonly TmdbLookupService _tmdbLookupService;
         private readonly HttpClient _httpClient;
         private readonly SeriesDetailDiskCache _seriesDetailCache;
+        private readonly VodDetailDiskCache _vodDetailCache;
+
+        private sealed class VodDetailFetchContext
+        {
+            public int Hits;
+            public int Fetches;
+            public int Stored;
+        }
         internal Func<ILogger, string, LocalMediaFilter> LocalMediaFilterFactory { get; set; } = LocalMediaFilter.Build;
 
         private sealed class SeriesDetailFetchContext
@@ -465,6 +474,25 @@ namespace Emby.Xtream.Plugin.Service
             public int Hits;
             public int Requests;
             public int Stored;
+            private readonly ConcurrentDictionary<long, long> _verifiedSeries = new ConcurrentDictionary<long, long>();
+
+            public void RecordVerification(long seriesId, long fetchedUtcTicks)
+            {
+                _verifiedSeries.AddOrUpdate(seriesId, fetchedUtcTicks, (id, previous) => Math.Min(previous, fetchedUtcTicks));
+            }
+
+            public long GetCompleteVerificationTicks(List<SeriesInfo> series)
+            {
+                if (series.Count == 0) return 0;
+                var oldest = long.MaxValue;
+                foreach (var item in series)
+                {
+                    long fetched;
+                    if (!_verifiedSeries.TryGetValue(item.SeriesId, out fetched) || fetched <= 0) return 0;
+                    oldest = Math.Min(oldest, fetched);
+                }
+                return oldest;
+            }
         }
         private readonly RequestStartPacer _providerDetailRequestPacer =
             new RequestStartPacer(TimeSpan.FromMilliseconds(250));
@@ -1099,13 +1127,15 @@ namespace Emby.Xtream.Plugin.Service
             }
         }
 
-        public StrmSyncService(ILogger logger, HttpClient httpClient = null, string seriesDetailCachePath = null)
+        public StrmSyncService(ILogger logger, HttpClient httpClient = null, string seriesDetailCachePath = null, string vodDetailCachePath = null)
         {
             _logger = logger;
             _tmdbLookupService = new TmdbLookupService(logger);
             _httpClient = httpClient ?? SharedHttpClient;
             if (!string.IsNullOrWhiteSpace(seriesDetailCachePath))
                 _seriesDetailCache = new SeriesDetailDiskCache(seriesDetailCachePath);
+            if (!string.IsNullOrWhiteSpace(vodDetailCachePath))
+                _vodDetailCache = new VodDetailDiskCache(vodDetailCachePath);
         }
 
         /// <summary>
@@ -1811,6 +1841,7 @@ namespace Emby.Xtream.Plugin.Service
                 var movieTmdbCache = DeserializeMovieTmdbCache(config.MovieTmdbCacheJson);
                 var vodGenreCache = DeserializeVodGenreCache(config.VodGenreCacheJson);
                 var fetchedVodDetails = new ConcurrentDictionary<long, VodDetailInfo>();
+                var vodDetailFetch = new VodDetailFetchContext();
                 if (config.EnableGenreBasedLibraryRouting)
                 {
                     mp.Phase = "Classifying VOD genres";
@@ -1821,6 +1852,7 @@ namespace Emby.Xtream.Plugin.Service
                         movieTmdbCache,
                         vodGenreCache,
                         fetchedVodDetails,
+                        vodDetailFetch,
                         saveConfig,
                         mp,
                         taskProgress,
@@ -1931,7 +1963,7 @@ namespace Emby.Xtream.Plugin.Service
                             {
                                 if (vodDetail == null)
                                 {
-                                    vodDetail = await FetchVodDetailAsync(movie.StreamId, config, cancellationToken).ConfigureAwait(false);
+                                    vodDetail = await GetVodDetailForSyncAsync(movie, config, vodDetailFetch, cancellationToken).ConfigureAwait(false);
                                     if (vodDetail != null)
                                         fetchedVodDetails[movie.StreamId] = vodDetail;
                                 }
@@ -2029,7 +2061,7 @@ namespace Emby.Xtream.Plugin.Service
                              !IsExistingStrmUrlCurrent(strmPath, streamUrl));
                         if (needsNfoDetail && vodDetail == null)
                         {
-                            vodDetail = await FetchVodDetailAsync(movie.StreamId, config, cancellationToken).ConfigureAwait(false);
+                            vodDetail = await GetVodDetailForSyncAsync(movie, config, vodDetailFetch, cancellationToken).ConfigureAwait(false);
                             if (vodDetail != null)
                             {
                                 fetchedVodDetails[movie.StreamId] = vodDetail;
@@ -2328,6 +2360,14 @@ namespace Emby.Xtream.Plugin.Service
 
                 await Task.WhenAll(writeTasks).ConfigureAwait(false);
 
+                _logger.Info("VOD detail cache ({0}): {1} disk cache hits, {2} fresh detail fetches, {3} entries stored",
+                    isDocumentaries ? "Documentaries" : "Movies", vodDetailFetch.Hits, vodDetailFetch.Fetches, vodDetailFetch.Stored);
+                if (_vodDetailCache != null)
+                {
+                    var trimmed = _vodDetailCache.Trim(DateTime.UtcNow, cancellationToken);
+                    if (trimmed > 0) _logger.Info("VOD detail cache: pruned {0} expired or excess files", trimmed);
+                }
+
                 var movieProviderComplete = Volatile.Read(ref mp.Failed) == 0;
                 if (!movieProviderComplete)
                 {
@@ -2558,8 +2598,10 @@ namespace Emby.Xtream.Plugin.Service
 
                 var detailFetch = new SeriesDetailFetchContext
                 {
-                    AllowCacheReuse = config.SmartSkipExisting &&
-                        !IsSeriesFullVerificationDue(config.LastSeriesFullVerificationUtcTicks, DateTime.UtcNow),
+                    // A library-wide verification deadline must not discard useful
+                    // detail fetched recently. The disk entry independently enforces
+                    // matching metadata/account and its original seven-day lifetime.
+                    AllowCacheReuse = config.SmartSkipExisting,
                 };
 
                 // When metadata-ID folder naming is disabled, separate provider records can
@@ -2670,7 +2712,7 @@ namespace Emby.Xtream.Plugin.Service
                         "Series delta fast path is disabled for this run: {0}",
                         !fastPathSettingsMatch
                             ? "sync settings changed or have not been checkpointed"
-                            : "the seven-day full verification is due");
+                            : "the seven-day file/catalog verification is due; fresh detail-cache entries remain eligible");
                 }
 
                 var tasks = allSeries.Select(async series =>
@@ -3420,8 +3462,19 @@ namespace Emby.Xtream.Plugin.Service
                 if (seriesFullyValidated)
                 {
                     config.SeriesFastPathSettingsHash = fastPathSettingsHash;
-                    if (forceFullVerification || legacyFastPathBaseline)
-                        config.LastSeriesFullVerificationUtcTicks = DateTime.UtcNow.Ticks;
+                    var verifiedUtcTicks = detailFetch.GetCompleteVerificationTicks(allSeries);
+                    if (verifiedUtcTicks > 0)
+                    {
+                        // Anchor to the oldest actual detail fetch, not this run's
+                        // completion. Repeated cache hits must never postpone expiry.
+                        config.LastSeriesFullVerificationUtcTicks = verifiedUtcTicks;
+                        _logger.Info("Series verification checkpoint: all {0} records covered; oldest detail fetch {1:O}",
+                            allSeries.Count, new DateTime(verifiedUtcTicks, DateTimeKind.Utc));
+                    }
+                    else if (fullVerificationDue)
+                    {
+                        _logger.Info("Series verification checkpoint unchanged: not every catalog record had usable validated detail; fresh cached records remain reusable");
+                    }
                 }
                 config.SeriesEpisodeHashesJson = SerializeEpisodeHashes(updatedHashes);
                 saveConfig?.Invoke();
@@ -4113,6 +4166,7 @@ namespace Emby.Xtream.Plugin.Service
             ConcurrentDictionary<string, string> movieTmdbCache,
             ConcurrentDictionary<string, VodGenreCacheEntry> genreCache,
             ConcurrentDictionary<long, VodDetailInfo> fetchedDetails,
+            VodDetailFetchContext detailFetch,
             Action saveConfig,
             SyncProgress progress,
             IProgress<double> taskProgress,
@@ -4128,6 +4182,51 @@ namespace Emby.Xtream.Plugin.Service
             var cacheChanged = 0;
             var lookupFailures = 0;
 
+            void ResolveDetail(VodStreamInfo stream, VodDetailInfo detail)
+            {
+                var key = stream.StreamId.ToString(CultureInfo.InvariantCulture);
+                VodGenreCacheEntry previous;
+                var knownGenre = genreCache.TryGetValue(key, out previous) && previous != null &&
+                    string.Equals(previous.Name ?? string.Empty, stream.Name ?? string.Empty, StringComparison.Ordinal) &&
+                    !string.IsNullOrWhiteSpace(previous.Genre) ? previous.Genre : null;
+                var genre = string.IsNullOrWhiteSpace(detail?.Genre) ? knownGenre : detail.Genre.Trim();
+                if (string.IsNullOrWhiteSpace(genre)) Interlocked.Increment(ref lookupFailures);
+                else resolvedGenres[stream.StreamId] = genre;
+
+                var changed = false;
+                if (!string.IsNullOrWhiteSpace(detail?.Genre) &&
+                    (previous == null || previous.Name != stream.Name || previous.Genre != genre))
+                {
+                    genreCache[key] = new VodGenreCacheEntry { Name = stream.Name ?? string.Empty, Genre = genre };
+                    changed = true;
+                }
+                if (IsValidTmdbId(detail?.TmdbId))
+                {
+                    string oldId;
+                    if (!movieTmdbCache.TryGetValue(key, out oldId) || oldId != detail.TmdbId.Trim())
+                    {
+                        movieTmdbCache[key] = detail.TmdbId.Trim();
+                        changed = true;
+                    }
+                }
+                if (!changed) return;
+                Interlocked.Exchange(ref cacheChanged, 1);
+                if (Interlocked.Increment(ref unsavedEntries) >= 500)
+                {
+                    lock (saveLock)
+                    {
+                        if (Volatile.Read(ref unsavedEntries) >= 500)
+                        {
+                            config.VodGenreCacheJson = SerializeVodGenreCache(genreCache);
+                            config.MovieTmdbCacheJson = SerializeMovieTmdbCache(movieTmdbCache);
+                            saveConfig?.Invoke();
+                            Interlocked.Exchange(ref unsavedEntries, 0);
+                            _logger.Info("VOD genre cache checkpoint: {0} entries", genreCache.Count);
+                        }
+                    }
+                }
+            }
+
             progress.Total = streams.Count;
             progress.Completed = 0;
             progress.Skipped = 0;
@@ -4136,9 +4235,22 @@ namespace Emby.Xtream.Plugin.Service
 
             var tasks = streams.Select(async stream =>
             {
+                cancellationToken.ThrowIfCancellationRequested();
+                VodDetailInfo cachedDetail;
+                if (TryReadVodDetail(stream, config, detailFetch, out cachedDetail))
+                {
+                    // Only extract routing/ID data here. Do not retain a complete
+                    // disk cache in the per-run dictionary. Preparation can re-read
+                    // the selected entries if NFO/local-media work needs them.
+                    ResolveDetail(stream, cachedDetail);
+                    Interlocked.Increment(ref progress.Completed);
+                    ReportTaskProgress(progress, taskProgress);
+                    return;
+                }
+                var refreshStoredDetail = _vodDetailCache != null && _vodDetailCache.HasEntry(config, stream.StreamId);
                 var cacheKey = stream.StreamId.ToString(CultureInfo.InvariantCulture);
                 VodGenreCacheEntry cached;
-                if (genreCache.TryGetValue(cacheKey, out cached) &&
+                if (!refreshStoredDetail && genreCache.TryGetValue(cacheKey, out cached) &&
                     cached != null &&
                     string.Equals(cached.Name ?? string.Empty, stream.Name ?? string.Empty, StringComparison.Ordinal) &&
                     !string.IsNullOrWhiteSpace(cached.Genre))
@@ -4153,40 +4265,12 @@ namespace Emby.Xtream.Plugin.Service
                 try
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    var detail = await FetchVodDetailAsync(stream.StreamId, config, cancellationToken).ConfigureAwait(false);
+                    var detail = await GetVodDetailForSyncAsync(stream, config, detailFetch, cancellationToken).ConfigureAwait(false);
                     if (detail != null)
                         fetchedDetails[stream.StreamId] = detail;
-                    if (detail == null || string.IsNullOrWhiteSpace(detail.Genre))
-                    {
-                        Interlocked.Increment(ref lookupFailures);
-                        return;
-                    }
-
-                    var genre = detail.Genre.Trim();
-                    resolvedGenres[stream.StreamId] = genre;
-                    genreCache[cacheKey] = new VodGenreCacheEntry
-                    {
-                        Name = stream.Name ?? string.Empty,
-                        Genre = genre,
-                    };
-                    if (IsValidTmdbId(detail.TmdbId))
-                        movieTmdbCache[cacheKey] = detail.TmdbId.Trim();
-
-                    Interlocked.Exchange(ref cacheChanged, 1);
-                    if (Interlocked.Increment(ref unsavedEntries) >= 500)
-                    {
-                        lock (saveLock)
-                        {
-                            if (Volatile.Read(ref unsavedEntries) >= 500)
-                            {
-                                config.VodGenreCacheJson = SerializeVodGenreCache(genreCache);
-                                config.MovieTmdbCacheJson = SerializeMovieTmdbCache(movieTmdbCache);
-                                saveConfig?.Invoke();
-                                Interlocked.Exchange(ref unsavedEntries, 0);
-                                _logger.Info("VOD genre cache checkpoint: {0} entries", genreCache.Count);
-                            }
-                        }
-                    }
+                    // A failed/partial detail lookup cannot reclassify a known
+                    // documentary as unknown and orphan its existing library files.
+                    ResolveDetail(stream, detail);
                 }
                 finally
                 {
@@ -4238,6 +4322,39 @@ namespace Emby.Xtream.Plugin.Service
             progress.Failed = 0;
 
             return filtered;
+        }
+
+        private bool TryReadVodDetail(VodStreamInfo stream, PluginConfiguration config, VodDetailFetchContext context, out VodDetailInfo detail)
+        {
+            detail = null;
+            if (!config.SmartSkipExisting || _vodDetailCache == null ||
+                !_vodDetailCache.TryRead(config, stream, DateTime.UtcNow, out detail)) return false;
+            Interlocked.Increment(ref context.Hits);
+            return true;
+        }
+
+        private async Task<VodDetailInfo> GetVodDetailForSyncAsync(
+            VodStreamInfo stream, PluginConfiguration config, VodDetailFetchContext context, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            VodDetailInfo detail;
+            if (TryReadVodDetail(stream, config, context, out detail)) return detail;
+            Interlocked.Increment(ref context.Fetches);
+            try
+            {
+                detail = await FetchVodDetailAsync(stream.StreamId, config, cancellationToken).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (_vodDetailCache != null && _vodDetailCache.TryWrite(config, stream, detail, DateTime.UtcNow))
+                    Interlocked.Increment(ref context.Stored);
+                else
+                    _vodDetailCache?.Invalidate(config, stream.StreamId);
+                return detail;
+            }
+            catch
+            {
+                _vodDetailCache?.Invalidate(config, stream.StreamId);
+                throw;
+            }
         }
 
         private async Task<VodDetailInfo> FetchVodDetailAsync(
@@ -4938,10 +5055,12 @@ namespace Emby.Xtream.Plugin.Service
         {
             cancellationToken.ThrowIfCancellationRequested();
             SeriesDetailInfo detail;
+            long fetchedUtcTicks;
             if (context.AllowCacheReuse && _seriesDetailCache != null &&
-                _seriesDetailCache.TryRead(config, series, DateTime.UtcNow, out detail))
+                _seriesDetailCache.TryRead(config, series, DateTime.UtcNow, out detail, out fetchedUtcTicks))
             {
                 Interlocked.Increment(ref context.Hits);
+                context.RecordVerification(series.SeriesId, fetchedUtcTicks);
                 return detail;
             }
             Interlocked.Increment(ref context.Requests);
@@ -4949,12 +5068,17 @@ namespace Emby.Xtream.Plugin.Service
             {
                 detail = await FetchSeriesDetailAsync(series.SeriesId, config, cancellationToken).ConfigureAwait(false);
                 cancellationToken.ThrowIfCancellationRequested();
+                var fetchedAt = DateTime.UtcNow;
                 if (detail?.Episodes == null || !detail.Episodes.Values.Any(season => season != null && season.Count > 0))
                     _seriesDetailCache?.Invalidate(config, series.SeriesId);
-                else if (_seriesDetailCache != null && _seriesDetailCache.TryWrite(config, series, detail, DateTime.UtcNow))
-                    Interlocked.Increment(ref context.Stored);
                 else
-                    _seriesDetailCache?.Invalidate(config, series.SeriesId);
+                {
+                    context.RecordVerification(series.SeriesId, fetchedAt.Ticks);
+                    if (_seriesDetailCache != null && _seriesDetailCache.TryWrite(config, series, detail, fetchedAt))
+                        Interlocked.Increment(ref context.Stored);
+                    else
+                        _seriesDetailCache?.Invalidate(config, series.SeriesId);
+                }
                 return detail;
             }
             catch

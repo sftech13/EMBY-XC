@@ -18,6 +18,14 @@ namespace Emby.Xtream.Plugin.Tests
         private const string CacheSeriesDetail = "{\"info\":{\"name\":\"Cache Show\",\"tmdb_id\":\"123\",\"plot\":\"Provider plot\"},\"episodes\":{\"1\":[{\"id\":3000000002,\"season\":1,\"episode_num\":1,\"title\":\"One\",\"container_extension\":\"mkv\"},{\"id\":3000000003,\"season\":1,\"episode_num\":2,\"title\":\"Two\",\"container_extension\":\"mkv\"}]}}";
         private const string PartialVodCatalog = "[{\"stream_id\":1,\"name\":\"Included\",\"category_id\":83,\"category_ids\":[83]}]";
 
+        private static void ExpireFixtureSeriesCache(string root, PluginConfiguration config)
+        {
+            Assert(new SeriesDetailDiskCache(root).TryWrite(config,
+                XtreamResponseParser.DeserializeSeriesList(CacheSeriesCatalog, null).Single(),
+                JsonSerializer.Deserialize<SeriesDetailInfo>(CacheSeriesDetail), DateTime.UtcNow.AddDays(-8)),
+                "the test must begin with an expired, structurally valid detail-cache entry");
+        }
+
         private static LocalMediaFilter CachedTestLocalFilter(bool episodeOneLocal) => new LocalMediaFilter(
             new HashSet<string>(), new HashSet<string>(), new HashSet<string>(),
             new HashSet<string>(episodeOneLocal ? new[] {"123|S1|E1"} : new string[0]), new HashSet<string>());
@@ -207,7 +215,7 @@ namespace Emby.Xtream.Plugin.Tests
             var root = CreateCompleteVodTestRoot();
             try
             {
-                foreach (var reason in new[] {"timestamp", "metadata", "weekly", "corrupt", "no-timestamp", "disabled", "account", "disk-unavailable"})
+                foreach (var reason in new[] {"timestamp", "metadata", "expired", "corrupt", "no-timestamp", "disabled", "account", "disk-unavailable"})
                 {
                     var folder = Path.Combine(root, reason);
                     var cacheRoot = Path.Combine(folder, "Cache");
@@ -220,7 +228,11 @@ namespace Emby.Xtream.Plugin.Tests
                     var catalog = CacheSeriesCatalog;
                     if (reason == "timestamp") catalog = catalog.Replace("modified\":100", "modified\":101");
                     if (reason == "metadata") catalog = catalog.Replace("\"last_modified\"", "\"plot\":\"new plot\",\"last_modified\"");
-                    if (reason == "weekly") config.LastSeriesFullVerificationUtcTicks = DateTime.UtcNow.AddDays(-8).Ticks;
+                    if (reason == "expired")
+                    {
+                        config.LastSeriesFullVerificationUtcTicks = DateTime.UtcNow.AddDays(-8).Ticks;
+                        ExpireFixtureSeriesCache(cacheRoot, config);
+                    }
                     if (reason == "corrupt") File.WriteAllText(new SeriesDetailDiskCache(cacheRoot).GetPath(config, 3000000001), "{");
                     if (reason == "no-timestamp") catalog = catalog.Replace("modified\":100", "modified\":0");
                     if (reason == "disabled") config.SmartSkipExisting = false;
@@ -262,6 +274,7 @@ namespace Emby.Xtream.Plugin.Tests
                     first.LocalMediaFilterFactory = (logger, path) => CachedTestLocalFilter(false);
                     await first.SyncSeriesAsync(config, CancellationToken.None);
                     config.LastSeriesFullVerificationUtcTicks = DateTime.UtcNow.AddDays(-8).Ticks;
+                    ExpireFixtureSeriesCache(cacheRoot, config);
                     var response = failure == "404" ? new HttpResponseMessage(HttpStatusCode.NotFound) :
                         failure == "403" ? new HttpResponseMessage(HttpStatusCode.Forbidden) :
                         JsonResponse(failure == "empty" ? "{\"episodes\":[]}" : CacheSeriesDetail.Replace("3000000002", "0"));
