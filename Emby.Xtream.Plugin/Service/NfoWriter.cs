@@ -3,8 +3,11 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Xml;
+using System.Xml.Linq;
 using Emby.Xtream.Plugin.Client.Models;
 
 namespace Emby.Xtream.Plugin.Service
@@ -15,7 +18,8 @@ namespace Emby.Xtream.Plugin.Service
             string nfoPath,
             string title,
             VodDetailInfo detail,
-            int? titleYear)
+            int? titleYear,
+            NfoOwnershipState ownership = null)
         {
             detail = detail ?? new VodDetailInfo();
             var displayTitle = First(title, detail.Name);
@@ -39,7 +43,7 @@ namespace Emby.Xtream.Plugin.Service
             AppendElement(sb, "trailer", detail.Trailer);
             AppendFileInfo(sb, detail.MediaInfo);
             EndDocument(sb, "movie");
-            return WriteIfChanged(nfoPath, sb.ToString());
+            return WriteIfChanged(nfoPath, sb.ToString(), ownership);
         }
 
         // Retained for failed-item retry paths and compatibility with older callers.
@@ -51,7 +55,8 @@ namespace Emby.Xtream.Plugin.Service
             string title,
             SeriesInfo info,
             string tvdbId,
-            string tmdbId)
+            string tmdbId,
+            NfoOwnershipState ownership = null)
         {
             info = info ?? new SeriesInfo();
             var displayTitle = First(title, info.Name);
@@ -79,7 +84,7 @@ namespace Emby.Xtream.Plugin.Service
             AppendElement(sb, "thumb", info.Cover);
             AppendElement(sb, "trailer", info.YoutubeTrailer);
             EndDocument(sb, "tvshow");
-            return WriteIfChanged(nfoPath, sb.ToString());
+            return WriteIfChanged(nfoPath, sb.ToString(), ownership);
         }
 
         public static bool WriteShowNfo(string nfoPath, string title, string tvdbId, string tmdbId)
@@ -90,9 +95,12 @@ namespace Emby.Xtream.Plugin.Service
             string title,
             int season,
             int episodeNum,
-            EpisodeInfo episode)
+            EpisodeInfo episode,
+            NfoOwnershipState ownership = null)
         {
             episode = episode ?? new EpisodeInfo();
+            var fingerprint = EpisodeMetadataFingerprint(title, season, episodeNum, episode);
+            if (ownership?.MatchesEpisode(nfoPath, fingerprint) == true && File.Exists(nfoPath)) return false;
             var info = episode.Info;
             var displayTitle = First(title, episode.Title);
             var plot = First(info?.Plot, episode.Plot);
@@ -115,7 +123,7 @@ namespace Emby.Xtream.Plugin.Service
             AppendElement(sb, "trailer", info?.YoutubeTrailer);
             AppendFileInfo(sb, info);
             EndDocument(sb, "episodedetails");
-            return WriteIfChanged(nfoPath, sb.ToString());
+            return WriteIfChanged(nfoPath, sb.ToString(), ownership, fingerprint);
         }
 
         // Compatibility overload used by older retry/test callers.
@@ -331,18 +339,208 @@ namespace Emby.Xtream.Plugin.Service
         private static string First(params string[] values)
             => values?.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
 
-        private static bool WriteIfChanged(string path, string content)
+        internal static string EpisodeMetadataFingerprint(string title, int season, int number, EpisodeInfo episode)
         {
-            if (File.Exists(path) && string.Equals(File.ReadAllText(path, Encoding.UTF8), content, StringComparison.Ordinal))
-                return false;
+            // Use the same rendered fields as the writer, including codec details,
+            // cast/director, artwork and actual normalized season/episode identity.
+            // This deliberately excludes STRM connection settings and sibling episodes.
+            var info = episode?.Info;
+            var value = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                Title = First(title, episode?.Title)?.Trim(), season, number,
+                Plot = First(info?.Plot, episode?.Plot),
+                Aired = NormalizeDate(info?.ReleaseDate),
+                Runtime = GetRuntimeMinutes(info?.DurationSecs, First(info?.Duration, episode?.Duration)),
+                Rating = First(info?.Rating, episode?.Rating),
+                Director = info?.Director, Cast = info?.Cast,
+                Thumb = info?.MovieImage, Trailer = info?.YoutubeTrailer,
+                Streams = BuildStreamDetailsXml(info),
+            });
+            using (var sha = SHA256.Create())
+                return BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(value))).Replace("-", string.Empty);
+        }
+
+        private static XElement ParseMetadata(string content)
+        {
+            using (var reader = XmlReader.Create(new StringReader(content), new XmlReaderSettings
+            {
+                DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null,
+                MaxCharactersInDocument = 8 * 1024 * 1024,
+            }))
+                return XElement.Load(reader, LoadOptions.PreserveWhitespace);
+        }
+
+        private static string SemanticValue(XElement element)
+        {
+            // Compare meaningful XML, not pretty printing, attribute order or
+            // element ordering. Text within leaf elements remains significant.
+            return new XElement(element.Name,
+                element.Attributes().OrderBy(a => a.Name.ToString(), StringComparer.Ordinal)
+                    .Select(a => new XAttribute(a.Name, a.Value)),
+                element.HasElements
+                    ? (object)element.Elements().Select(SemanticValue).OrderBy(v => v, StringComparer.Ordinal)
+                        .Select(v => XElement.Parse(v))
+                    : element.Value.Trim()).ToString(SaveOptions.DisableFormatting);
+        }
+
+        private static string Identity(XElement element)
+        {
+            var name = element.Name.LocalName;
+            if (name == "uniqueid") return (string)element.Attribute("type") ?? string.Empty;
+            if (name == "actor") return element.Element("name")?.Value.Trim() ?? string.Empty;
+            if (name == "thumb") return ((string)element.Attribute("aspect") ?? string.Empty) + "|" + element.Value.Trim();
+            if (name == "genre" || name == "director") return element.Value.Trim();
+            return string.Empty;
+        }
+
+        private static void MergeMetadata(XElement current, XElement previous, XElement desired)
+        {
+            foreach (var group in desired.Elements().GroupBy(e => e.Name))
+            {
+                var root = current.AncestorsAndSelf().Last();
+                var locks = (root.Element("lockedfields")?.Value ?? string.Empty)
+                    .Split(new[] { '|', ',', ';' }, StringSplitOptions.RemoveEmptyEntries);
+                var field = group.Key.LocalName;
+                var property = field == "title" ? "Name" : field == "plot" ? "Overview" :
+                    field == "rating" ? "CommunityRating" : field == "year" ? "ProductionYear" :
+                    field == "aired" || field == "premiered" ? "PremiereDate" :
+                    field == "genre" ? "Genres" : field == "actor" || field == "director" ? "People" :
+                    field == "thumb" || field == "fanart" ? "Images" : field;
+                if (locks.Any(value => string.Equals(value.Trim(), property, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(value.Trim(), field, StringComparison.OrdinalIgnoreCase))) continue;
+                var incoming = group.ToList();
+                var existing = current.Elements(group.Key).ToList();
+                var old = previous?.Elements(group.Key).ToList() ?? new List<XElement>();
+                // An enriched/probed media block belongs to Emby in its entirety.
+                // A still-exact provider block may accept a real provider update.
+                if (group.Key.LocalName == "lockdata" && existing.Count > 0) continue;
+                if (group.Key.LocalName == "fileinfo" && existing.Count > 0 &&
+                    (existing.Count != 1 || old.Count != 1 || SemanticValue(existing[0]) != SemanticValue(old[0]))) continue;
+                foreach (var next in incoming)
+                {
+                    var identity = Identity(next);
+                    var candidates = existing.Where(e => Identity(e) == identity).ToList();
+                    var prior = old.FirstOrDefault(e => Identity(e) == identity);
+                    if (candidates.Count == 0)
+                    {
+                        // Do not undo an external deletion of a formerly generated
+                        // field. New provider fields/IDs may be added, never remove
+                        // an external ID, artwork entry, actor or genre.
+                        if (prior == null)
+                        {
+                            var addition = new XElement(next);
+                            if (addition.Name.LocalName == "uniqueid" &&
+                                current.Elements("uniqueid").Any(e => string.Equals((string)e.Attribute("default"), "true", StringComparison.OrdinalIgnoreCase)))
+                                addition.Attribute("default")?.Remove();
+                            current.Add(addition);
+                        }
+                        continue;
+                    }
+                    if (candidates.Count != 1 || prior == null) continue;
+                    var target = candidates[0];
+                    if (SemanticValue(prior) == SemanticValue(next)) continue;
+                    if (next.HasElements && target.HasElements && prior.HasElements)
+                    {
+                        MergeMetadata(target, prior, next);
+                    }
+                    else if (!target.HasElements && !prior.HasElements &&
+                        target.Value.Trim() == prior.Value.Trim())
+                    {
+                        // Change only a scalar still holding our old value. Leave
+                        // attributes added by Emby untouched, even on owned fields.
+                        target.Value = next.Value;
+                        foreach (var attribute in next.Attributes())
+                            if ((string)target.Attribute(attribute.Name) == (string)prior.Attribute(attribute.Name))
+                                target.SetAttributeValue(attribute.Name, attribute.Value);
+                    }
+                }
+            }
+        }
+
+        private static bool WriteIfChanged(string path, string content, NfoOwnershipState ownership, string episodeFingerprint = null)
+        {
+            var desired = ParseMetadata(content);
+            var generated = SemanticValue(desired);
+            var previous = ownership?.GetPrevious(path);
+            string expectedOriginal = null;
+            if (File.Exists(path))
+            {
+                // The baseline is per file/episode. An unchanged provider result
+                // must not even read an Emby-enriched file, much less rewrite it.
+                if (string.Equals(previous, generated, StringComparison.Ordinal))
+                {
+                    ownership?.Record(path, generated, episodeFingerprint);
+                    return false;
+                }
+                if (new FileInfo(path).Length > 8 * 1024 * 1024)
+                {
+                    ownership?.Warn("Oversized existing NFO preserved without replacement");
+                    return false;
+                }
+                var original = File.ReadAllText(path, Encoding.UTF8);
+                XElement current;
+                try { current = ParseMetadata(original); }
+                catch (XmlException)
+                {
+                    ownership?.Warn("Malformed existing NFO preserved; manual repair required");
+                    return false;
+                }
+                if (current.Name != desired.Name)
+                {
+                    ownership?.Warn("Existing NFO with unexpected root preserved without replacement");
+                    return false;
+                }
+                var locked = current.Element("lockdata")?.Value.Trim();
+                if (string.Equals(locked, "true", StringComparison.OrdinalIgnoreCase) || locked == "1")
+                    return false;
+                // Upgrade/first encounter: no evidence of field ownership exists.
+                // Adopt the provider baseline without touching the library file.
+                if (previous == null)
+                {
+                    ownership?.Record(path, generated, episodeFingerprint);
+                    return false;
+                }
+                XElement baseline;
+                try { baseline = ParseMetadata(previous); }
+                catch (XmlException)
+                {
+                    ownership?.Record(path, generated, episodeFingerprint);
+                    return false;
+                }
+                if (baseline.Name != desired.Name)
+                {
+                    ownership?.Record(path, generated, episodeFingerprint);
+                    return false;
+                }
+                var before = SemanticValue(current);
+                MergeMetadata(current, baseline, desired);
+                if (before == SemanticValue(current))
+                {
+                    ownership?.Record(path, generated, episodeFingerprint);
+                    return false;
+                }
+                // Don't overwrite a concurrent save detected during our merge.
+                if (original != File.ReadAllText(path, Encoding.UTF8))
+                {
+                    ownership?.Warn("Concurrent NFO save detected; metadata update deferred");
+                    return false;
+                }
+                content = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" + Environment.NewLine + current;
+                expectedOriginal = original;
+            }
 
             var directory = Path.GetDirectoryName(path);
             if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
-            WriteAtomically(path, content, directory);
+            if (!WriteAtomically(path, content, directory, expectedOriginal))
+            {
+                ownership?.Warn("Concurrent NFO save detected at commit; metadata update deferred");
+                return false;
+            }
+            ownership?.Record(path, generated, episodeFingerprint);
             return true;
         }
 
-        private static void WriteAtomically(string path, string content, string directory)
+        internal static bool WriteAtomically(string path, string content, string directory, string expectedOriginal)
         {
             // Keep the temporary file beside the destination so the final rename is
             // atomic even when library roots are mounted on another filesystem.
@@ -357,16 +555,17 @@ namespace Emby.Xtream.Plugin.Service
             {
                 File.WriteAllText(tempPath, content, Encoding.UTF8);
 
-                if (File.Exists(path))
+                if (expectedOriginal != null)
                 {
+                    if (!File.Exists(path) || File.ReadAllText(path, Encoding.UTF8) != expectedOriginal) return false;
                     try
                     {
                         File.Replace(tempPath, path, null);
                     }
                     catch (FileNotFoundException) when (!File.Exists(path))
                     {
-                        // The destination disappeared after the existence check.
-                        File.Move(tempPath, path);
+                        // A concurrent removal is not permission to replace it.
+                        return false;
                     }
                 }
                 else
@@ -377,10 +576,12 @@ namespace Emby.Xtream.Plugin.Service
                     }
                     catch (IOException) when (File.Exists(path))
                     {
-                        // Another writer created the destination before our move.
-                        File.Replace(tempPath, path, null);
+                        // Never replace a file created by another writer while
+                        // this was meant to be a missing-NFO restoration.
+                        return false;
                     }
                 }
+                return true;
             }
             finally
             {

@@ -45,7 +45,7 @@
 
 ## Features Overview
 
-> Current release: **v1.1.151** — see [CHANGELOG.md](CHANGELOG.md) for full version history.
+> Current release: **v1.1.152** — see [CHANGELOG.md](CHANGELOG.md) for full version history.
 
 ### Live TV
 - Registers as a native Emby tuner host — channels appear in Live TV just like any other tuner
@@ -579,7 +579,11 @@ These take priority over all automatic lookups.
 
 When **Write NFO Files** is enabled, XC2EMBY creates Kodi-compatible XML sidecars from the provider metadata. A metadata ID is helpful but no longer required: movies, shows, and episodes still receive descriptive NFOs when the provider omits an external ID.
 
-Missing NFOs are backfilled on the next applicable sync without rewriting an unchanged STRM. XC2EMBY compares generated content with an existing NFO and leaves its modification time untouched when the content is identical. These are plugin-managed files; a manual edit can be replaced if a later provider metadata change causes XC2EMBY to regenerate that sidecar.
+Missing NFOs are backfilled on the next applicable sync without rewriting an unchanged STRM. XC2EMBY tracks its own last-generated metadata per NFO, independently of Emby's saved file. Changing one episode or adding a new sibling does not regenerate every episode NFO. Formatting changes, reordered XML, and metadata added by Emby do not count as provider changes.
+
+On the first encounter after upgrading, an existing valid NFO is **adopted without rewriting it**. Thereafter, a three-way merge updates a provider field only when its current value still matches XC2EMBY's previous value. Emby/manual edits win conflicts; additional IDs, artwork, custom XML, measured media streams, locked fields, and intentional field removals are preserved. Collections are additive and missing provider values never erase existing metadata. Missing NFOs are created normally. Malformed, oversized, wrong-root and locked files are preserved rather than replaced; repair malformed files manually.
+
+Ownership journals live under Emby's application data directory at `xc2emby/nfo-ownership-v1`, **not alongside media**. A bounded journal is loaded only for the active movie/series and atomically saved once after changes; unchanged runs do not rewrite it. Journals are scoped to the provider/account and destination, are separate from expiring provider-detail caches, and must not be cleared to force a metadata refresh. Lost/corrupt/unwritable journals fall back to conservative adoption, not bulk NFO replacement. This change does not disable Emby's NFO saver or change orphan cleanup.
 
 Provider video/audio fields are written as Kodi `streamdetails` when present. Both nested `video`/`audio` objects and common flattened codec fields are accepted. Codec data is optional and XC2EMBY does not probe every remote VOD stream merely to populate it.
 

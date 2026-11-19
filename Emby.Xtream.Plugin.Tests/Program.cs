@@ -23,6 +23,16 @@ namespace Emby.Xtream.Plugin.Tests
         {
             var tests = new List<(string Name, Func<Task> Run)>
             {
+                ("existing enriched NFOs are adopted without changing bytes or timestamps", NfoAdoptionPreservesExistingFilesAsync),
+                ("owned NFO fields merge real changes and preserve Emby enrichment", NfoThreeWayMergePreservesEnrichmentAsync),
+                ("provider codec updates apply only to unmodified provider stream metadata", NfoOwnedCodecChangesAreNotLostAsync),
+                ("atomic NFO commits defer concurrent saves rather than replacing them", NfoCommitPreservesConcurrentSavesAsync),
+                ("formatting, ordering and external edits cannot cause NFO churn", NfoExternalChangesNeverCauseChurnAsync),
+                ("locked and malformed NFOs are preserved and missing files restored", NfoLocksMalformedAndMissingAsync),
+                ("ownership journal corruption and I/O failure preserve enriched NFOs", NfoJournalFailuresAreConservativeAsync),
+                ("series metadata changes update one episode without rewriting siblings", SeriesNfoChangesArePerEpisodeAsync),
+                ("adopting enriched series NFOs cannot queue an Emby refresh", SeriesNfoAdoptionDoesNotScheduleScanAsync),
+                ("series fingerprint includes all emitted episode metadata fields", EpisodeFingerprintCoversWrittenFieldsAsync),
                 ("VOD metadata cache survives restart and preserves local checks and canonical STRM ownership", VodCacheSurvivesRestartAndKeepsLocalChecksAsync),
                 ("Movies and Documentaries share disk metadata without mixing genre routing", VodCacheIsSharedBetweenMoviesAndDocumentariesAsync),
                 ("useful VOD metadata without genre avoids repeated provider requests", UsefulUnknownGenreMetadataIsCachedAsync),
@@ -98,7 +108,7 @@ namespace Emby.Xtream.Plugin.Tests
                 ("episode NFO does not require codec data", EpisodeNfoWithoutCodecAsync),
                 ("provider episode detail shape retains metadata and generic codecs", ProviderEpisodeMetadataDeserializesAsync),
                 ("NFO metadata changes invalidate series smart skip", NfoMetadataChangesInvalidateSmartSkipAsync),
-                ("NFO updates use a complete replacement and clean temporary files", NfoReplacementIsCompleteAsync),
+                ("owned NFO updates remain atomic and clean temporary files", NfoReplacementIsCompleteAsync),
                 ("metadata-only series do not create show NFO folders", MetadataOnlySeriesDoesNotCreateShowNfoAsync),
                 ("series delta fast path requires every safety guard", SeriesDeltaFastPathRequiresSafeguardsAsync),
                 ("series delta fast path performs weekly full verification", SeriesDeltaFastPathExpiresAsync),
@@ -913,26 +923,29 @@ namespace Emby.Xtream.Plugin.Tests
             var path = Path.Combine(directory, "Movie.nfo");
             try
             {
-                Assert(NfoWriter.WriteMovieNfo(
-                    path,
-                    "First title",
-                    new VodDetailInfo { Plot = "First plot" },
-                    1955),
-                    "the first NFO must be created");
-                Assert(NfoWriter.WriteMovieNfo(
-                    path,
-                    "Replacement title",
-                    new VodDetailInfo { Plot = "Replacement plot" },
-                    1956),
-                    "changed NFO content must replace the prior file");
+                using (var ownership = new NfoOwnershipState(Path.Combine(directory, "State"), directory, "test"))
+                {
+                    Assert(NfoWriter.WriteMovieNfo(
+                        path,
+                        "First title",
+                        new VodDetailInfo { Plot = "First plot" },
+                        1955, ownership),
+                        "the first NFO must be created");
+                    Assert(NfoWriter.WriteMovieNfo(
+                        path,
+                        "Replacement title",
+                        new VodDetailInfo { Plot = "Replacement plot" },
+                        1956, ownership),
+                        "changed owned metadata must update the prior file");
 
-                var document = new XmlDocument();
-                document.Load(path);
-                Assert(document.DocumentElement?.Name == "movie", "the replacement must remain one complete XML document");
-                Assert(document.SelectSingleNode("/movie/title")?.InnerText == "Replacement title",
-                    "the final path must contain only the replacement content");
-                Assert(!Directory.EnumerateFiles(directory, "*.xc2emby-*.tmp").Any(),
-                    "atomic NFO writes must not leave temporary files behind");
+                    var document = new XmlDocument();
+                    document.Load(path);
+                    Assert(document.DocumentElement?.Name == "movie", "the replacement must remain one complete XML document");
+                    Assert(document.SelectSingleNode("/movie/title")?.InnerText == "Replacement title",
+                        "the final path must contain the updated owned title");
+                    Assert(!Directory.EnumerateFiles(directory, "*.xc2emby-*.tmp").Any(),
+                        "atomic NFO writes must not leave temporary files behind");
+                }
             }
             finally
             {

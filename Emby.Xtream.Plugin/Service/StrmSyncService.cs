@@ -459,6 +459,7 @@ namespace Emby.Xtream.Plugin.Service
         private readonly HttpClient _httpClient;
         private readonly SeriesDetailDiskCache _seriesDetailCache;
         private readonly VodDetailDiskCache _vodDetailCache;
+        private readonly string _nfoOwnershipRoot;
 
         private sealed class VodDetailFetchContext
         {
@@ -1127,16 +1128,22 @@ namespace Emby.Xtream.Plugin.Service
             }
         }
 
-        public StrmSyncService(ILogger logger, HttpClient httpClient = null, string seriesDetailCachePath = null, string vodDetailCachePath = null)
+        public StrmSyncService(ILogger logger, HttpClient httpClient = null, string seriesDetailCachePath = null, string vodDetailCachePath = null, string nfoOwnershipPath = null)
         {
             _logger = logger;
             _tmdbLookupService = new TmdbLookupService(logger);
             _httpClient = httpClient ?? SharedHttpClient;
+            _nfoOwnershipRoot = nfoOwnershipPath;
             if (!string.IsNullOrWhiteSpace(seriesDetailCachePath))
                 _seriesDetailCache = new SeriesDetailDiskCache(seriesDetailCachePath);
             if (!string.IsNullOrWhiteSpace(vodDetailCachePath))
                 _vodDetailCache = new VodDetailDiskCache(vodDetailCachePath);
         }
+
+        private NfoOwnershipState OpenNfoOwnership(PluginConfiguration config, string folder, string itemScope)
+            => new NfoOwnershipState(_nfoOwnershipRoot, folder,
+                STJ.JsonSerializer.Serialize(new[] { config.BaseUrl, config.Username, config.Password, itemScope }),
+                message => _logger.Warn("{0}", message));
 
         /// <summary>
         /// Computes a stable hash of a series' episode URLs for change detection.
@@ -1368,22 +1375,10 @@ namespace Emby.Xtream.Plugin.Service
                     .OrderBy(value => value.Season)
                     .ThenBy(value => value.EpisodeNum))
                 {
-                    var info = episode.Info;
                     AppendFingerprintValue(sb, episode.Id.ToString(CultureInfo.InvariantCulture));
-                    AppendFingerprintValue(sb, episode.Title);
-                    AppendFingerprintValue(sb, episode.Plot);
-                    AppendFingerprintValue(sb, episode.Duration);
-                    AppendFingerprintValue(sb, episode.Rating);
-                    AppendFingerprintValue(sb, info?.Plot);
-                    AppendFingerprintValue(sb, info?.ReleaseDate);
-                    AppendFingerprintValue(sb, info?.Duration);
-                    AppendFingerprintValue(sb, info?.DurationSecs?.ToString(CultureInfo.InvariantCulture));
-                    AppendFingerprintValue(sb, info?.Rating);
-                    AppendFingerprintValue(sb, info?.MovieImage);
-                    AppendFingerprintValue(sb, info?.Video?.CodecName);
-                    AppendFingerprintValue(sb, info?.Audio?.CodecName);
-                    AppendFingerprintValue(sb, info?.VideoCodec);
-                    AppendFingerprintValue(sb, info?.AudioCodec);
+                    AppendFingerprintValue(sb, NfoWriter.EpisodeMetadataFingerprint(
+                        episode.Title, episode.Season > 0 ? episode.Season : 1,
+                        episode.EpisodeNum > 0 ? episode.EpisodeNum : 1, episode));
                 }
             }
 
@@ -2299,11 +2294,12 @@ namespace Emby.Xtream.Plugin.Service
                             try
                             {
                                 var nfoExisted = File.Exists(nfoPath);
+                                using (var ownership = OpenNfoOwnership(config, owner.MovieDirectory, "movie"))
                                 if (NfoWriter.WriteMovieNfo(
                                     nfoPath,
                                     owner.CleanedName,
                                     owner.Detail ?? new VodDetailInfo { TmdbId = owner.TmdbId },
-                                    nfoYear))
+                                    nfoYear, ownership))
                                     RecordNfoWrite(mp, nfoExisted);
                             }
                             catch (Exception ex)
@@ -2718,6 +2714,7 @@ namespace Emby.Xtream.Plugin.Service
                 var tasks = allSeries.Select(async series =>
                 {
                     await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+                    NfoOwnershipState ownership = null;
                     try
                     {
                         cancellationToken.ThrowIfCancellationRequested();
@@ -2980,6 +2977,8 @@ namespace Emby.Xtream.Plugin.Service
                         }
 
                         var seriesDir = Path.Combine(config.StrmLibraryPath, subFolder, folderName);
+                        if (config.EnableNfoFiles)
+                            ownership = OpenNfoOwnership(config, seriesDir, "series:" + series.SeriesId.ToString(CultureInfo.InvariantCulture));
                         var isNewSeries = !Directory.Exists(seriesDir);
                         var hasMaterializedEpisode = false;
 
@@ -3104,7 +3103,7 @@ namespace Emby.Xtream.Plugin.Service
                                     try
                                     {
                                         var nfoExisted = File.Exists(nfoPath);
-                                        if (NfoWriter.WriteEpisodeNfo(nfoPath, rawEpisodeTitle, seasonNum, episodeNum, episode))
+                                        if (NfoWriter.WriteEpisodeNfo(nfoPath, rawEpisodeTitle, seasonNum, episodeNum, episode, ownership))
                                             RecordNfoWrite(ep, nfoExisted);
                                     }
                                     catch (Exception ex) { _logger.Warn("WriteEpisodeNfo failed for '{0}': {1}", nfoPath, ex.Message); }
@@ -3153,7 +3152,7 @@ namespace Emby.Xtream.Plugin.Service
                                     seriesName,
                                     detail?.Info ?? series,
                                     showTvdbId,
-                                    showTmdbId))
+                                    showTmdbId, ownership))
                                     RecordNfoWrite(sp, nfoExisted);
                             }
                             catch (Exception ex) { _logger.Debug("Show NFO write failed for '{0}': {1}", seriesName, ex.Message); }
@@ -3207,6 +3206,7 @@ namespace Emby.Xtream.Plugin.Service
                     }
                     finally
                     {
+                        ownership?.Dispose();
                         semaphore.Release();
                     }
                 });
@@ -3697,11 +3697,12 @@ namespace Emby.Xtream.Plugin.Service
                 try
                 {
                     var nfoExisted = File.Exists(nfoPath);
+                    using (var ownership = OpenNfoOwnership(config, movieDir, "movie"))
                     if (NfoWriter.WriteMovieNfo(
                         nfoPath,
                         cleanedName,
                         new VodDetailInfo { Name = cleanedName, TmdbId = item.TmdbId },
-                        nfoYear))
+                        nfoYear, ownership))
                         RecordNfoWrite(_retryProgress, nfoExisted);
                 }
                 catch (Exception ex) { _logger.Debug("NFO write failed on retry for '{0}': {1}", item.Name, ex.Message); }
@@ -3726,6 +3727,7 @@ namespace Emby.Xtream.Plugin.Service
             var seriesDir = Path.Combine(config.StrmLibraryPath, GetSeriesRootFolderName(config), seriesName);
             Directory.CreateDirectory(seriesDir);
 
+            using (var ownership = OpenNfoOwnership(config, seriesDir, "series:" + item.StreamId.ToString(CultureInfo.InvariantCulture)))
             foreach (var kvp in detail.Episodes)
             {
                 int seasonNum;
@@ -3767,7 +3769,7 @@ namespace Emby.Xtream.Plugin.Service
                         try
                         {
                             var nfoExisted = File.Exists(nfoPath);
-                            if (NfoWriter.WriteEpisodeNfo(nfoPath, rawTitle, seasonNum, episodeNum, ep))
+                            if (NfoWriter.WriteEpisodeNfo(nfoPath, rawTitle, seasonNum, episodeNum, ep, ownership))
                                 RecordNfoWrite(_retryProgress, nfoExisted);
                         }
                         catch { }

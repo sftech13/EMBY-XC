@@ -4,6 +4,12 @@ All notable changes to XC2EMBY are listed here, newest first.
 
 ---
 
+## v1.1.152
+- Replaced whole-file NFO replacement with per-episode provider fingerprints and persistent metadata-ownership journals outside watched libraries. An unchanged episode skips NFO parsing/writing even when another episode changes; all emitted provider metadata participates in series change detection.
+- Adopt existing NFOs without rewriting them on upgrade. Genuine changes use a semantic three-way XML merge: update only still-owned values, preserve Emby/manual edits, IDs, artwork, unknown XML, measured stream details, metadata locks and intentional field removals. Collections are additive; missing provider values do not erase known metadata. Formatting and XML ordering alone never trigger a write.
+- Keep ownership state separate from expiring provider caches, scoped by provider/account, destination and series, saved atomically once per active movie/series with a 32 MiB journal limit. Missing/corrupt/unavailable state adopts conservatively; malformed/oversized/wrong-root NFOs are preserved, missing NFOs are still restored, and detected concurrent saves defer the update. State-only changes do not count as library changes or schedule an Emby refresh.
+- Added regression coverage for enriched-file adoption, restart reuse, metadata conflicts and locks, unchanged file/journal timestamps, missing-file restoration, journal failure, provider isolation, complete episode fingerprints and changed/new episodes leaving siblings and STRMs untouched in TV/Docu-Series syncs.
+
 ## v1.1.151
 - Added a shared, on-demand VOD detail cache for Movies and Documentaries. Provider descriptions, IDs, genres and optional codecs persist across restarts, avoiding repeated metadata requests during genre routing and duplicate-path/NFO preparation. Existing ID/genre caches can still satisfy records that do not need a full lookup; this does not launch a full-catalog metadata crawl just to fill the new cache.
 - Scoped VOD entries by hashed provider/account and stream ID, with catalog-identity validation and a fixed 24-hour lifetime because VOD `added` is not a dependable metadata-modification timestamp. Reads do not extend freshness. Atomic writes, a 2 MiB entry limit and independent 1 GiB age/size-pruned disk budget keep this separate from the existing series cache and plugin configuration JSON; no media files are cached.

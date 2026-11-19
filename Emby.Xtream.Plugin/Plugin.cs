@@ -40,7 +40,9 @@ namespace Emby.Xtream.Plugin
                 seriesDetailCachePath: string.IsNullOrWhiteSpace(applicationPaths.DataPath)
                     ? null : Path.Combine(applicationPaths.DataPath, "xc2emby", "series-details-v1"),
                 vodDetailCachePath: string.IsNullOrWhiteSpace(applicationPaths.DataPath)
-                    ? null : Path.Combine(applicationPaths.DataPath, "xc2emby", "vod-details-v1"));
+                    ? null : Path.Combine(applicationPaths.DataPath, "xc2emby", "vod-details-v1"),
+                nfoOwnershipPath: string.IsNullOrWhiteSpace(applicationPaths.DataPath)
+                    ? null : Path.Combine(applicationPaths.DataPath, "xc2emby", "nfo-ownership-v1"));
             _providerHealth = new ProviderHealthMonitor(logManager.GetLogger("XtreamTuner.ProviderHealth"));
             _providerHealth.ReachabilityChanged += isReachable =>
             {
