@@ -15,13 +15,16 @@ namespace Emby.Xtream.Plugin.Client.Models
 
     public class EpisodeInfo
     {
+        private int _episodeNum = 1;
+        [JsonIgnore] public bool EpisodeNumberWasSpecified { get; private set; }
         [JsonPropertyName("id")]
         [JsonConverter(typeof(ProviderIdConverter))]
         public long Id { get; set; }
 
         [JsonPropertyName("episode_num")]
-        [JsonConverter(typeof(FlexibleInt32Converter))]
-        public int EpisodeNum { get; set; }
+        [JsonConverter(typeof(EpisodeNumberConverter))]
+        [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+        public int EpisodeNum { get => _episodeNum; set { _episodeNum = value; EpisodeNumberWasSpecified = true; } }
 
         [JsonPropertyName("title")]
         public string Title { get; set; } = string.Empty;

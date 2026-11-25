@@ -100,7 +100,7 @@ namespace Emby.Xtream.Plugin.Service
         {
             episode = episode ?? new EpisodeInfo();
             var fingerprint = EpisodeMetadataFingerprint(title, season, episodeNum, episode);
-            if (ownership?.MatchesEpisode(nfoPath, fingerprint) == true && File.Exists(nfoPath)) return false;
+            if (ownership?.MatchesEpisode(nfoPath, fingerprint, NfoMetadataDocument.EpisodeIdentity(season, episodeNum)) == true && File.Exists(nfoPath)) return false;
             var info = episode.Info;
             var displayTitle = First(title, episode.Title);
             var plot = First(info?.Plot, episode.Plot);
@@ -461,7 +461,9 @@ namespace Emby.Xtream.Plugin.Service
         {
             var desired = ParseMetadata(content);
             var generated = SemanticValue(desired);
-            var previous = ownership?.GetPrevious(path);
+            var episodeIdentity = desired.Name == "episodedetails"
+                ? NfoMetadataDocument.EpisodeIdentity((int)desired.Element("season"), (int)desired.Element("episode")) : null;
+            var previous = ownership?.GetPrevious(path, episodeIdentity);
             string expectedOriginal = null;
             if (File.Exists(path))
             {
@@ -469,7 +471,7 @@ namespace Emby.Xtream.Plugin.Service
                 // must not even read an Emby-enriched file, much less rewrite it.
                 if (string.Equals(previous, generated, StringComparison.Ordinal))
                 {
-                    ownership?.Record(path, generated, episodeFingerprint);
+                    ownership?.Record(path, generated, episodeFingerprint, episodeIdentity);
                     return false;
                 }
                 if (new FileInfo(path).Length > 8 * 1024 * 1024)
@@ -478,16 +480,21 @@ namespace Emby.Xtream.Plugin.Service
                     return false;
                 }
                 var original = File.ReadAllText(path, Encoding.UTF8);
+                NfoMetadataDocument document;
                 XElement current;
-                try { current = ParseMetadata(original); }
+                try
+                {
+                    document = NfoMetadataDocument.Parse(original);
+                    current = document.Select(desired);
+                }
                 catch (XmlException)
                 {
                     ownership?.Warn("Malformed existing NFO preserved; manual repair required");
                     return false;
                 }
-                if (current.Name != desired.Name)
+                if (current == null)
                 {
-                    ownership?.Warn("Existing NFO with unexpected root preserved without replacement");
+                    ownership?.Warn("Existing NFO with unexpected root or ambiguous/missing episode identity preserved without replacement");
                     return false;
                 }
                 var locked = current.Element("lockdata")?.Value.Trim();
@@ -497,26 +504,26 @@ namespace Emby.Xtream.Plugin.Service
                 // Adopt the provider baseline without touching the library file.
                 if (previous == null)
                 {
-                    ownership?.Record(path, generated, episodeFingerprint);
+                    ownership?.Record(path, generated, episodeFingerprint, episodeIdentity);
                     return false;
                 }
                 XElement baseline;
                 try { baseline = ParseMetadata(previous); }
                 catch (XmlException)
                 {
-                    ownership?.Record(path, generated, episodeFingerprint);
+                    ownership?.Record(path, generated, episodeFingerprint, episodeIdentity);
                     return false;
                 }
-                if (baseline.Name != desired.Name)
+                if (baseline.Name != desired.Name || (episodeIdentity != null && !NfoMetadataDocument.SameEpisode(baseline, desired)))
                 {
-                    ownership?.Record(path, generated, episodeFingerprint);
+                    ownership?.Record(path, generated, episodeFingerprint, episodeIdentity);
                     return false;
                 }
                 var before = SemanticValue(current);
                 MergeMetadata(current, baseline, desired);
                 if (before == SemanticValue(current))
                 {
-                    ownership?.Record(path, generated, episodeFingerprint);
+                    ownership?.Record(path, generated, episodeFingerprint, episodeIdentity);
                     return false;
                 }
                 // Don't overwrite a concurrent save detected during our merge.
@@ -525,7 +532,7 @@ namespace Emby.Xtream.Plugin.Service
                     ownership?.Warn("Concurrent NFO save detected; metadata update deferred");
                     return false;
                 }
-                content = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" + Environment.NewLine + current;
+                content = document.Replace(current);
                 expectedOriginal = original;
             }
 
@@ -536,7 +543,7 @@ namespace Emby.Xtream.Plugin.Service
                 ownership?.Warn("Concurrent NFO save detected at commit; metadata update deferred");
                 return false;
             }
-            ownership?.Record(path, generated, episodeFingerprint);
+            ownership?.Record(path, generated, episodeFingerprint, episodeIdentity);
             return true;
         }
 
@@ -549,7 +556,9 @@ namespace Emby.Xtream.Plugin.Service
                 : directory;
             var tempPath = Path.Combine(
                 tempDirectory,
-                "." + Path.GetFileName(path) + ".xc2emby-" + Guid.NewGuid().ToString("N") + ".tmp");
+                // A valid near-NAME_MAX destination must not become an invalid
+                // temporary component by appending the entire destination name.
+                ".xc2emby-" + Guid.NewGuid().ToString("N") + ".tmp");
 
             try
             {
@@ -596,5 +605,21 @@ namespace Emby.Xtream.Plugin.Service
                 .Replace(">", "&gt;")
                 .Replace("\"", "&quot;")
                 .Replace("'", "&apos;");
+
+        internal static bool CopyForEpisodeLayoutChange(string source, string destination, int season, int episode)
+        {
+            if (!File.Exists(source) || File.Exists(destination) || new FileInfo(source).Length > 8 * 1024 * 1024) return false;
+            XElement metadata;
+            try { metadata = ParseMetadata(File.ReadAllText(source, Encoding.UTF8)); }
+            catch (XmlException) { return false; }
+            if (metadata.Name != "episodedetails") return false;
+            // Copy enrichment to the corrected identity, never edit the old file.
+            // Ownership journals at the new path adopt this without regeneration.
+            metadata.SetElementValue("season", season.ToString(CultureInfo.InvariantCulture));
+            metadata.SetElementValue("episode", episode.ToString(CultureInfo.InvariantCulture));
+            var directory = Path.GetDirectoryName(destination);
+            Directory.CreateDirectory(directory);
+            return WriteAtomically(destination, metadata.ToString(), directory, null);
+        }
     }
 }

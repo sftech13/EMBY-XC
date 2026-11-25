@@ -231,6 +231,9 @@ function (BaseView, loading) {
         view.querySelector('.btnClearCodecCache').addEventListener('click', function () {
             clearCodecCache(view);
         });
+        ['.chkSharedLiveTvRelay', '.selOutputFormat', '.chkAdaptiveHlsFallback'].forEach(function (selector) {
+            view.querySelector(selector).addEventListener('change', function () { updateLiveRoutingControls(view); });
+        });
 
         // VOD category buttons (single mode)
         view.querySelector('.btnLoadVodCategories').addEventListener('click', function () {
@@ -628,8 +631,10 @@ function (BaseView, loading) {
             view.querySelector('.selOutputFormat').value = config.LiveTvOutputFormat || 'ts';
             view.querySelector('.txtTunerCount').value = config.TunerCount > 0 ? config.TunerCount : 1;
             setChecked(view.querySelector('.chkLiveTvDirectPlay'), config.EnableLiveTvDirectPlay !== false);
+            setChecked(view.querySelector('.chkSharedLiveTvRelay'), config.EnableSharedLiveTvRelay !== false);
             setChecked(view.querySelector('.chkAdaptiveHlsFallback'), !!config.EnableAdaptiveHlsFallback);
             view.querySelector('.txtAdaptiveHlsOverrideMinutes').value = config.AdaptiveHlsOverrideMinutes || 60;
+            updateLiveRoutingControls(view);
             setChecked(view.querySelector('.chkClearLiveTvLogoCacheOnRefresh'), !!config.ClearLiveTvLogoCacheOnRefresh);
             setChecked(view.querySelector('.chkIncludeGroupTitle'), config.IncludeGroupTitleInM3U !== false);
 
@@ -780,6 +785,7 @@ function (BaseView, loading) {
             config.TunerCount = Math.max(1, parseInt(view.querySelector('.txtTunerCount').value, 10) || 1);
             config.IncludeAdultChannels = false;
             config.EnableLiveTvDirectPlay = view.querySelector('.chkLiveTvDirectPlay').checked;
+            config.EnableSharedLiveTvRelay = view.querySelector('.chkSharedLiveTvRelay').checked;
             config.EnableAdaptiveHlsFallback = view.querySelector('.chkAdaptiveHlsFallback').checked;
             config.AdaptiveHlsOverrideMinutes = Math.max(5, Math.min(1440,
                 parseInt(view.querySelector('.txtAdaptiveHlsOverrideMinutes').value, 10) || 60));
@@ -914,6 +920,7 @@ function (BaseView, loading) {
             outputFormat: config.LiveTvOutputFormat || 'ts',
             tunerCount: config.TunerCount || 1,
             directPlay: config.EnableLiveTvDirectPlay !== false,
+            sharedRelay: config.EnableSharedLiveTvRelay !== false,
             includeGroupTitle: config.IncludeGroupTitleInM3U !== false,
             epgSource: normalizeEpgSource(config.EpgSource),
             customEpgUrl: config.CustomEpgUrl || '',
@@ -3554,6 +3561,15 @@ function (BaseView, loading) {
         for (var i = 0; i < cards.length; i++) {
             cards[i].classList.toggle('active', cards[i].getAttribute('data-mode') === val);
         }
+    }
+
+    function updateLiveRoutingControls(view) {
+        var shared = view.querySelector('.chkSharedLiveTvRelay').checked;
+        var ts = view.querySelector('.selOutputFormat').value === 'ts';
+        view.querySelector('.chkLiveTvDirectPlay').disabled = shared && ts;
+        view.querySelector('.chkAdaptiveHlsFallback').disabled = shared || !ts;
+        view.querySelector('.txtAdaptiveHlsOverrideMinutes').disabled = shared || !ts ||
+            !view.querySelector('.chkAdaptiveHlsFallback').checked;
     }
 
     return View;

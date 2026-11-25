@@ -38,16 +38,16 @@ namespace Emby.Xtream.Plugin.Service
 
         public static List<SeriesInfo> DeserializeSeriesList(string json, STJ.JsonSerializerOptions options)
         {
-            return DeserializeMediaCatalog<SeriesInfo>(json, options, s => s.SeriesId);
+            return DeserializeMediaCatalog<SeriesInfo>(json, options, s => s.SeriesId, s => s.Name);
         }
 
         public static List<VodStreamInfo> DeserializeVodList(string json, STJ.JsonSerializerOptions options)
         {
-            return DeserializeMediaCatalog<VodStreamInfo>(json, options, s => s.StreamId);
+            return DeserializeMediaCatalog<VodStreamInfo>(json, options, s => s.StreamId, s => s.Name);
         }
 
         private static List<T> DeserializeMediaCatalog<T>(
-            string json, STJ.JsonSerializerOptions options, Func<T, long> getId) where T : class
+            string json, STJ.JsonSerializerOptions options, Func<T, long> getId, Func<T, string> getName) where T : class
         {
             // Do not swallow conversion/shape failures into an empty catalog.
             // Callers must abort before publishing snapshots or deleting orphans.
@@ -66,6 +66,10 @@ namespace Emby.Xtream.Plugin.Service
 
             if (records == null || records.Any(record => record == null || getId(record) <= 0))
                 throw new STJ.JsonException("Provider catalog contains a missing or invalid media ID; sync aborted to protect existing files.");
+            // Catalog identity must be complete; the same model's optional name
+            // inside get_series_info is not a catalog record and may be absent.
+            if (records.Any(record => string.IsNullOrWhiteSpace(getName(record))))
+                throw new STJ.JsonException("Provider catalog contains a missing or invalid media name; sync aborted to protect existing files.");
             return records;
         }
 

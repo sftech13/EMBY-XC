@@ -19,10 +19,38 @@ namespace Emby.Xtream.Plugin.Tests
 {
     internal static partial class Program
     {
-        private static async Task<int> Main()
+        private static async Task<int> Main(string[] args)
         {
             var tests = new List<(string Name, Func<Task> Run)>
             {
+                ("near-limit ASCII and UTF-8 NFO filenames use short atomic temporary names", NfoTemporaryNamesStayShortAsync),
+                ("second response preserves a recovering full single-viewer queue", SharedViewerJoinPreservesRecoveringQueueAsync),
+                ("real response subscriptions wake a full queue without expanding its memory cap", LiveResponseSubscriptionHandoffAsync),
+                ("handoff expires within a fixed budget and isolates a persistently stalled response", LiveHandoffExpiryIsBoundedAsync),
+                ("a departing peer restores sole-viewer backpressure during handoff", LiveHandoffPeerDepartureAsync),
+                ("handoff cancellation and disposal release pending chunk ownership", LiveHandoffCancellationAndDisposalAsync),
+                ("rapid joins cannot renew the handoff budget until the backlog drains", LiveHandoffBudgetDoesNotRenewAsync),
+                ("repeated response handoffs cannot postpone a full older queue's deadline", LiveHandoffChurnCannotExtendAsync),
+                ("queue diagnostics distinguish dequeue from completed writes", LiveQueueDiagnosticsTrackDrainAsync),
+                ("steady shared overflow remains bounded and drained queues are not failed", LiveSharedOverflowAndDrainRaceAsync),
+                ("specials keep season zero, map seasons and explicit episode zero", EpisodeNumberingKeepsSpecialsAsync),
+                ("selective layout correction retains caches, enrichment and unchanged paths", SelectiveSpecialsMigrationAsync),
+                ("specials migration respects orphan thresholds and preview before removing old paths", SpecialsMigrationHonorsDeletionGuardsAsync),
+                ("only legacy caches with omitted episode numbers need a selective refresh", AmbiguousLegacyEpisodeCacheIsRefreshedAsync),
+                ("optional malformed metadata is tolerated without weakening media identity", TolerantOptionalProviderMetadataAsync),
+                ("retry uses normal series paths and fresh details without clearing other libraries", RetryUsesNormalSeriesWriterAsync),
+                ("failed series retries bypass a valid warm detail cache", RetryRefreshesOnlyFailedSeriesAsync),
+                ("retry waits for an active sync in the same library pair", RetryWaitsForActiveSyncAsync),
+                ("retry handles documentary libraries with normal routing and cache copyback", RetryKeepsDocumentaryRoutingAsync),
+                ("failed, disabled and absent retry items remain failed and cancellation propagates", RetryFailureAndCancellationStaySafeAsync),
+                ("safety: playback ownership requires exact provider, account and media path", OwnedPlaybackUrlIsStrictAsync),
+                ("safety: deletion preserves unrelated content and metadata in mixed folders", OwnedDeletionPreservesForeignFilesAsync),
+                ("safety: root boundaries and symbolic links are never deletion authority", OwnedDeletionRejectsEscapesAsync),
+                ("safety: automatic orphan cleanup preserves foreign STRMs and standalone NFOs", AutomaticCleanupKeepsForeignFilesAsync),
+                ("multi-episode NFO adoption preserves bytes, timestamps and independent fingerprints", NfoMultiEpisodeAdoptionAsync),
+                ("multi-episode provider merges preserve exact sibling blocks", NfoMultiEpisodeMergesAreIsolatedAsync),
+                ("ambiguous, truncated and unsafe multi-episode NFOs remain protected", NfoMultiEpisodeUnsafeInputsAsync),
+                ("multi-episode NFOs preserve legacy baselines, enrichment and locks", NfoMultiEpisodeLegacyAndLocksAsync),
                 ("existing enriched NFOs are adopted without changing bytes or timestamps", NfoAdoptionPreservesExistingFilesAsync),
                 ("owned NFO fields merge real changes and preserve Emby enrichment", NfoThreeWayMergePreservesEnrichmentAsync),
                 ("provider codec updates apply only to unmodified provider stream metadata", NfoOwnedCodecChangesAreNotLostAsync),
@@ -90,8 +118,11 @@ namespace Emby.Xtream.Plugin.Tests
                 ("shared live viewer remains bounded when its queue fills", SharedViewerBufferRemainsBoundedAsync),
                 ("legacy Emby mixed consumers keep the shared stream alive", LegacyMixedLiveConsumersRemainCountedAsync),
                 ("Emby 4.10 first consumer closes without leaking a tuner slot", ModernLiveConsumerClosesCleanlyAsync),
-                ("repeated short playback stops activate a temporary per-channel HLS override", AdaptiveHlsActivatesAndExpiresAsync),
-                ("adaptive HLS evidence remains isolated by device and channel", AdaptiveHlsEvidenceIsIsolatedAsync),
+                ("shared relay defaults and policy preserve original codecs and explicit HLS", SharedRelayDefaultsAndPolicyAsync),
+                ("ordinary playback stops cannot trigger global transport overrides", SharedRelayFallbackIsConservativeAsync),
+                ("shared relay uses configured loopback URLs and rejects unsafe destinations", SharedRelayUrlsAreLocalAsync),
+                ("opening shared streams defers HTTP and separates upstream from relay paths", SharedRelayOpenIsDeferredAsync),
+                ("native copier and transcoder relay consumer share one provider HTTP request", SharedRelayMixedConsumersUseOneUpstreamAsync),
                 ("confirmed upstream stalls activate isolated HLS without client stops", UpstreamStallsActivateIsolatedHlsAsync),
                 ("upstream stall fallback ignores idle, disabled and expired evidence", UpstreamStallSafeguardsAsync),
                 ("live read watchdog distinguishes stalls from shutdown and unrelated cancellation", ReadStallCancellationIsExplicitAsync),
@@ -132,6 +163,12 @@ namespace Emby.Xtream.Plugin.Tests
                 ("canceling a complete VOD fetch never falls through into category requests", CompleteVodCancellationPreservesFilesAsync),
             };
 
+            if (args.Length > 0)
+            {
+                if (args.Length != 1 || args[0] != "--safety-only") throw new ArgumentException("Unknown test selection");
+                tests = tests.Where(test => test.Name.StartsWith("safety:", StringComparison.Ordinal)).ToList();
+                if (tests.Count == 0) throw new InvalidOperationException("No safety tests selected");
+            }
             foreach (var test in tests)
             {
                 try
@@ -169,94 +206,6 @@ namespace Emby.Xtream.Plugin.Tests
             return Task.CompletedTask;
         }
 
-        private static Task AdaptiveHlsActivatesAndExpiresAsync()
-        {
-            var manager = AdaptiveHlsFallbackManager.Instance;
-            manager.ResetForTests();
-            var config = new PluginConfiguration
-            {
-                LiveTvOutputFormat = "ts",
-                EnableAdaptiveHlsFallback = true,
-                AdaptiveHlsOverrideMinutes = 60,
-            };
-            var start = new DateTime(2026, 10, 6, 12, 0, 0, DateTimeKind.Utc);
-
-            manager.RecordPlaybackStarted("samsung", "session-1", "xtream_live_44360005", false, start);
-            Assert(!manager.RecordPlaybackStopped(
-                    "samsung", "session-1", "xtream_live_44360005", false,
-                    config, null, start.AddMinutes(10)),
-                "the first short stop must not activate HLS");
-
-            manager.RecordPlaybackStarted(
-                "samsung", "session-2", "xtream_live_44360005", false, start.AddMinutes(11));
-            Assert(manager.RecordPlaybackStopped(
-                    "samsung", "session-2", "xtream_live_44360005", false,
-                    config, null, start.AddMinutes(17)),
-                "the second short stop on the same device and channel must activate HLS");
-
-            bool adaptive;
-            var activeFormat = manager.GetEffectiveOutputFormat(
-                44360005, config, null, start.AddMinutes(18), out adaptive);
-            Assert(adaptive && activeFormat == "m3u8",
-                "the affected channel must use provider HLS while the override is active");
-
-            var otherFormat = manager.GetEffectiveOutputFormat(
-                44350005, config, null, start.AddMinutes(18), out adaptive);
-            Assert(!adaptive && otherFormat == "ts",
-                "an unrelated channel must remain MPEG-TS");
-
-            var expiredFormat = manager.GetEffectiveOutputFormat(
-                44360005, config, null, start.AddMinutes(78), out adaptive);
-            Assert(!adaptive && expiredFormat == "ts",
-                "the channel must return to MPEG-TS after the configured duration");
-            manager.ResetForTests();
-            return Task.CompletedTask;
-        }
-
-        private static Task AdaptiveHlsEvidenceIsIsolatedAsync()
-        {
-            var manager = AdaptiveHlsFallbackManager.Instance;
-            manager.ResetForTests();
-            var config = new PluginConfiguration
-            {
-                LiveTvOutputFormat = "ts",
-                EnableAdaptiveHlsFallback = true,
-                AdaptiveHlsOverrideMinutes = 60,
-            };
-            var start = new DateTime(2026, 10, 6, 13, 0, 0, DateTimeKind.Utc);
-
-            manager.RecordPlaybackStarted("device-a", "a1", "xtream_live_44360005", false, start);
-            manager.RecordPlaybackStopped(
-                "device-a", "a1", "xtream_live_44360005", false,
-                config, null, start.AddMinutes(5));
-            manager.RecordPlaybackStarted("device-b", "b1", "xtream_live_44360005", false, start);
-            Assert(!manager.RecordPlaybackStopped(
-                    "device-b", "b1", "xtream_live_44360005", false,
-                    config, null, start.AddMinutes(6)),
-                "stops from two devices must not be combined");
-
-            manager.RecordPlaybackStarted("device-a", "a2", "xtream_live_44350005", false, start.AddMinutes(7));
-            Assert(!manager.RecordPlaybackStopped(
-                    "device-a", "a2", "xtream_live_44350005", false,
-                    config, null, start.AddMinutes(12)),
-                "stops from two channels must not be combined");
-
-            manager.RecordPlaybackStarted("device-a", "a3", "xtream_live_44360005", false, start.AddMinutes(13));
-            Assert(!manager.RecordPlaybackStopped(
-                    "device-a", "a3", "xtream_live_44360005", false,
-                    config, null, start.AddSeconds(13 * 60 + 20)),
-                "a session shorter than 45 seconds must not count");
-
-            bool adaptive;
-            Assert(manager.GetEffectiveOutputFormat(
-                    44360005, config, null, start.AddMinutes(14), out adaptive) == "ts" && !adaptive,
-                "isolated or too-short stops must leave MPEG-TS selected");
-            Assert(AdaptiveHlsFallbackManager.TryParseStreamId(
-                    "xtream_live_44360005_adaptive_hls", out var parsed) && parsed == 44360005,
-                "adaptive media-source IDs must retain a parseable Xtream stream ID");
-            manager.ResetForTests();
-            return Task.CompletedTask;
-        }
 
         private static Task UpstreamStallsActivateIsolatedHlsAsync()
         {
@@ -265,6 +214,7 @@ namespace Emby.Xtream.Plugin.Tests
             var config = new PluginConfiguration
             {
                 LiveTvOutputFormat = "ts", EnableAdaptiveHlsFallback = true,
+                EnableSharedLiveTvRelay = false,
                 AdaptiveHlsOverrideMinutes = 60,
             };
             var now = new DateTime(2026, 10, 19, 16, 0, 0, DateTimeKind.Utc);
@@ -296,6 +246,7 @@ namespace Emby.Xtream.Plugin.Tests
             var config = new PluginConfiguration
             {
                 LiveTvOutputFormat = "ts", EnableAdaptiveHlsFallback = true,
+                EnableSharedLiveTvRelay = false,
                 AdaptiveHlsOverrideMinutes = 60,
             };
             var now = new DateTime(2026, 10, 19, 17, 0, 0, DateTimeKind.Utc);

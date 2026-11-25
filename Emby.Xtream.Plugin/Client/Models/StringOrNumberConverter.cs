@@ -28,6 +28,7 @@ namespace Emby.Xtream.Plugin.Client.Models
                 case JsonTokenType.Null:
                     return string.Empty;
                 default:
+                    reader.Skip();
                     return string.Empty;
             }
         }

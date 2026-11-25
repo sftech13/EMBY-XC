@@ -9,7 +9,7 @@ const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, '../Emby.Xtream.Plugin/Configuration/Web/config.js'), 'utf8').replace(/\r\n/g, '\n');
 assert.ok(source.includes('    return View;\n});'), 'module export seam changed');
 const instrumented = source.replace('    return View;\n});',
-    '    return { getSyncProgressDisplay, renderProgressBar, renderDashboardHistory };\n});');
+    '    return { getSyncProgressDisplay, renderProgressBar, renderDashboardHistory, updateLiveRoutingControls };\n});');
 const htmlEscape = text => String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;')
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 let renderers;
@@ -37,6 +37,33 @@ function historyHtml(entry) {
 }
 
 const tests = [
+    ['shared relay controls show effective behavior without erasing advanced preferences', () => {
+        const nodes = {
+            '.chkSharedLiveTvRelay': { checked: true }, '.selOutputFormat': { value: 'ts' },
+            '.chkLiveTvDirectPlay': { checked: true }, '.chkAdaptiveHlsFallback': { checked: true },
+            '.txtAdaptiveHlsOverrideMinutes': {}
+        };
+        const view = { querySelector: selector => nodes[selector] };
+        renderers.updateLiveRoutingControls(view);
+        assert.equal(nodes['.chkLiveTvDirectPlay'].disabled, true);
+        assert.equal(nodes['.chkAdaptiveHlsFallback'].disabled, true);
+        assert.equal(nodes['.txtAdaptiveHlsOverrideMinutes'].disabled, true);
+        assert.equal(nodes['.chkAdaptiveHlsFallback'].checked, true);
+        nodes['.selOutputFormat'].value = 'm3u8';
+        renderers.updateLiveRoutingControls(view);
+        assert.equal(nodes['.chkLiveTvDirectPlay'].disabled, false);
+        assert.equal(nodes['.chkAdaptiveHlsFallback'].disabled, true);
+        nodes['.chkSharedLiveTvRelay'].checked = false;
+        nodes['.selOutputFormat'].value = 'ts';
+        renderers.updateLiveRoutingControls(view);
+        assert.equal(nodes['.chkLiveTvDirectPlay'].disabled, false);
+        assert.equal(nodes['.chkAdaptiveHlsFallback'].disabled, false);
+        assert.equal(nodes['.txtAdaptiveHlsOverrideMinutes'].disabled, false);
+        assert.ok(source.includes('config.EnableSharedLiveTvRelay !== false'));
+        assert.ok(source.includes("config.EnableSharedLiveTvRelay = view.querySelector('.chkSharedLiveTvRelay').checked"));
+        const html = fs.readFileSync(path.join(__dirname, '../Emby.Xtream.Plugin/Configuration/Web/config.html'), 'utf8');
+        assert.ok(html.includes('class="chkSharedLiveTvRelay"'));
+    }],
     ['preparation uses its own counter instead of completed writes', () => {
         const display = renderers.getSyncProgressDisplay({ IsPreparing: true, Prepared: 50, PreparationTotal: 100, Completed: 0, Total: 92580 });
         assert.equal(display.percent, 50);

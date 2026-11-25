@@ -561,6 +561,7 @@ namespace Emby.Xtream.Plugin.Api
             {
                 NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString,
                 PropertyNameCaseInsensitive = true,
+                Converters = { new ProviderMetadataStringConverter(), new FlexibleNullableInt32Converter() },
             };
             var categories = XtreamResponseParser.DeserializeCategories(json, jsonOptions);
             var sorted = categories.OrderBy(c => c.CategoryName).ToList();
@@ -610,6 +611,7 @@ namespace Emby.Xtream.Plugin.Api
             {
                 NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString,
                 PropertyNameCaseInsensitive = true,
+                Converters = { new ProviderMetadataStringConverter(), new FlexibleNullableInt32Converter() },
             };
 
             var httpClient2 = Plugin.CreateHttpClient();
@@ -1420,8 +1422,8 @@ namespace Emby.Xtream.Plugin.Api
 
                     if (Directory.Exists(target))
                     {
-                        Directory.Delete(target, true);
-                        deleted++;
+                        OwnedContentFiles.DeleteOwnedTree(target, root, Plugin.Instance.Configuration);
+                        if (!Directory.Exists(target)) deleted++;
                     }
                 }
 
@@ -1539,13 +1541,11 @@ namespace Emby.Xtream.Plugin.Api
                 }
 
                 var dirs = Directory.GetDirectories(root, "*", SearchOption.TopDirectoryOnly);
-                result.DeletedFolders = dirs.Length;
-
-                Directory.Delete(root, true);
-                Directory.CreateDirectory(root);
+                OwnedContentFiles.DeleteOwnedTree(root, root, config);
+                result.DeletedFolders = dirs.Count(path => !Directory.Exists(path));
 
                 result.Success = true;
-                result.Message = string.Format("Deleted {0} folders from {1}.", dirs.Length, folderName);
+                result.Message = string.Format("Removed owned content from {0}; {1} empty folder(s) removed. Unrelated files were preserved.", folderName, result.DeletedFolders);
             }
             catch (Exception ex)
             {

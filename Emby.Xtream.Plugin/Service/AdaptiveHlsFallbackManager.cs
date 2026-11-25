@@ -6,17 +6,12 @@ using MediaBrowser.Model.Logging;
 namespace Emby.Xtream.Plugin.Service
 {
     /// <summary>
-    /// Detects repeated short Live TV sessions from one device and temporarily changes
-    /// only the affected Xtream channel from MPEG-TS to provider HLS. State is deliberately
-    /// in memory: overrides expire automatically and an Emby restart returns every channel
-    /// to the configured default.
+    /// Optional provider-direct HLS fallback, driven only by confirmed upstream read
+    /// stalls. Shared MPEG-TS relay mode never silently changes transport. Playback
+    /// stops are not evidence of stream failure and are deliberately not monitored.
     /// </summary>
     internal sealed class AdaptiveHlsFallbackManager
     {
-        internal const int QualifyingStopThreshold = 2;
-        internal static readonly TimeSpan DetectionWindow = TimeSpan.FromMinutes(30);
-        internal static readonly TimeSpan MinimumSessionLength = TimeSpan.FromSeconds(45);
-        internal static readonly TimeSpan MaximumSessionLength = TimeSpan.FromMinutes(30);
         internal const int UpstreamStallThreshold = 3;
         internal static readonly TimeSpan UpstreamStallWindow = TimeSpan.FromMinutes(5);
 
@@ -24,10 +19,6 @@ namespace Emby.Xtream.Plugin.Service
             new AdaptiveHlsFallbackManager();
 
         private readonly object _sync = new object();
-        private readonly Dictionary<string, PlaybackStart> _activePlaybacks =
-            new Dictionary<string, PlaybackStart>(StringComparer.Ordinal);
-        private readonly Dictionary<string, List<DateTime>> _qualifyingStops =
-            new Dictionary<string, List<DateTime>>(StringComparer.Ordinal);
         private readonly Dictionary<int, DateTime> _hlsOverrides =
             new Dictionary<int, DateTime>();
         private readonly Dictionary<int, List<DateTime>> _upstreamStalls =
@@ -40,7 +31,7 @@ namespace Emby.Xtream.Plugin.Service
             ILogger logger, DateTime utcNow)
         {
             int streamId;
-            if (activeViewers <= 0 || config == null || !config.EnableAdaptiveHlsFallback ||
+            if (activeViewers <= 0 || config == null || config.EnableSharedLiveTvRelay || !config.EnableAdaptiveHlsFallback ||
                 !IsMpegTs(config.LiveTvOutputFormat) ||
                 !TryParseStreamId(mediaSourceId, out streamId) ||
                 mediaSourceId.EndsWith("_adaptive_hls", StringComparison.OrdinalIgnoreCase))
@@ -80,99 +71,6 @@ namespace Emby.Xtream.Plugin.Service
             return true;
         }
 
-        internal void RecordPlaybackStarted(
-            string deviceId,
-            string playSessionId,
-            string mediaSourceId,
-            bool isAutomated,
-            DateTime utcNow)
-        {
-            int streamId;
-            if (isAutomated || !TryParseStreamId(mediaSourceId, out streamId))
-                return;
-
-            var normalizedDeviceId = NormalizeDeviceId(deviceId);
-            var playbackKey = BuildPlaybackKey(normalizedDeviceId, playSessionId, streamId);
-            lock (_sync)
-            {
-                PrunePlaybackEvidenceLocked(EnsureUtc(utcNow));
-                _activePlaybacks[playbackKey] = new PlaybackStart
-                {
-                    DeviceId = normalizedDeviceId,
-                    StreamId = streamId,
-                    StartedUtc = EnsureUtc(utcNow),
-                };
-            }
-        }
-
-        internal bool RecordPlaybackStopped(
-            string deviceId,
-            string playSessionId,
-            string mediaSourceId,
-            bool isAutomated,
-            PluginConfiguration config,
-            ILogger logger,
-            DateTime utcNow)
-        {
-            int streamId;
-            if (isAutomated || !TryParseStreamId(mediaSourceId, out streamId))
-            {
-                return false;
-            }
-
-            var now = EnsureUtc(utcNow);
-            var normalizedDeviceId = NormalizeDeviceId(deviceId);
-            var playbackKey = BuildPlaybackKey(normalizedDeviceId, playSessionId, streamId);
-            DateTime overrideUntil = DateTime.MinValue;
-
-            lock (_sync)
-            {
-                PrunePlaybackEvidenceLocked(now);
-                PlaybackStart started;
-                if (!_activePlaybacks.TryGetValue(playbackKey, out started))
-                    return false;
-
-                _activePlaybacks.Remove(playbackKey);
-                if (started.StreamId != streamId)
-                    return false;
-                if (config == null || !config.EnableAdaptiveHlsFallback ||
-                    !IsMpegTs(config.LiveTvOutputFormat))
-                {
-                    return false;
-                }
-
-                var duration = now - started.StartedUtc;
-                if (duration < MinimumSessionLength || duration > MaximumSessionLength)
-                    return false;
-
-                var stopKey = started.DeviceId + "\n" + streamId.ToString(CultureInfo.InvariantCulture);
-                List<DateTime> stops;
-                if (!_qualifyingStops.TryGetValue(stopKey, out stops))
-                {
-                    stops = new List<DateTime>();
-                    _qualifyingStops[stopKey] = stops;
-                }
-
-                stops.RemoveAll(value => now - value > DetectionWindow || value > now);
-                stops.Add(now);
-                if (stops.Count < QualifyingStopThreshold)
-                    return false;
-
-                var overrideMinutes = Clamp(config.AdaptiveHlsOverrideMinutes, 5, 1440);
-                overrideUntil = now.AddMinutes(overrideMinutes);
-                _hlsOverrides[streamId] = overrideUntil;
-                stops.Clear();
-            }
-
-            logger?.Warn(
-                "[adaptive-hls] Stream {0} stopped {1} times on one device within {2} minutes; using HLS until {3:u}",
-                streamId,
-                QualifyingStopThreshold,
-                (int)DetectionWindow.TotalMinutes,
-                overrideUntil);
-            return true;
-        }
-
         internal string GetEffectiveOutputFormat(
             int streamId,
             PluginConfiguration config,
@@ -182,7 +80,7 @@ namespace Emby.Xtream.Plugin.Service
         {
             adaptiveOverride = false;
             var configuredFormat = NormalizeOutputFormat(config?.LiveTvOutputFormat);
-            if (config == null || !config.EnableAdaptiveHlsFallback || !IsMpegTs(configuredFormat))
+            if (config == null || config.EnableSharedLiveTvRelay || !config.EnableAdaptiveHlsFallback || !IsMpegTs(configuredFormat))
                 return configuredFormat;
 
             var now = EnsureUtc(utcNow);
@@ -236,23 +134,9 @@ namespace Emby.Xtream.Plugin.Service
         {
             lock (_sync)
             {
-                _activePlaybacks.Clear();
-                _qualifyingStops.Clear();
                 _hlsOverrides.Clear();
                 _upstreamStalls.Clear();
             }
-        }
-
-        private static string BuildPlaybackKey(string deviceId, string playSessionId, int streamId)
-        {
-            if (!string.IsNullOrWhiteSpace(playSessionId))
-                return "session:" + playSessionId;
-            return "device:" + deviceId + ":stream:" + streamId.ToString(CultureInfo.InvariantCulture);
-        }
-
-        private static string NormalizeDeviceId(string deviceId)
-        {
-            return string.IsNullOrWhiteSpace(deviceId) ? "unknown-device" : deviceId.Trim();
         }
 
         private static string NormalizeOutputFormat(string value)
@@ -279,34 +163,5 @@ namespace Emby.Xtream.Plugin.Service
             return value;
         }
 
-        private void PrunePlaybackEvidenceLocked(DateTime now)
-        {
-            var oldestActive = now - MaximumSessionLength - DetectionWindow;
-            var stalePlaybackKeys = new List<string>();
-            foreach (var pair in _activePlaybacks)
-            {
-                if (pair.Value.StartedUtc < oldestActive || pair.Value.StartedUtc > now)
-                    stalePlaybackKeys.Add(pair.Key);
-            }
-            foreach (var key in stalePlaybackKeys)
-                _activePlaybacks.Remove(key);
-
-            var emptyStopKeys = new List<string>();
-            foreach (var pair in _qualifyingStops)
-            {
-                pair.Value.RemoveAll(value => now - value > DetectionWindow || value > now);
-                if (pair.Value.Count == 0)
-                    emptyStopKeys.Add(pair.Key);
-            }
-            foreach (var key in emptyStopKeys)
-                _qualifyingStops.Remove(key);
-        }
-
-        private sealed class PlaybackStart
-        {
-            public string DeviceId { get; set; }
-            public int StreamId { get; set; }
-            public DateTime StartedUtc { get; set; }
-        }
     }
 }

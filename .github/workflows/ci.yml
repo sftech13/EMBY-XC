@@ -22,8 +22,33 @@ jobs:
       - name: Build plugin
         run: dotnet build Emby.Xtream.Plugin/Emby.Xtream.Plugin.csproj -c Release
 
+      - name: Guard library delete call sites
+        run: python3 contrib/safety/check_delete_sites.py
+
       - name: Run playback-validation tests
+        # Includes catalog, migration, retry, NFO and file-deletion safeguards.
         run: dotnet run --project Emby.Xtream.Plugin.Tests/Emby.Xtream.Plugin.Tests.csproj -c Release
 
       - name: Test dashboard progress and failure history
         run: node Emby.Xtream.Plugin.Tests/dashboard-tests.cjs
+
+      - name: Verify deletion protections with isolated mutations
+        run: python3 contrib/safety/test_delete_mutations.py
+
+  sdk-compatibility:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        sdk: ['4.9.1.90', '4.10.0.24-beta2']
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '8.0.x'
+      - name: Publish the shipping SDK build
+        run: dotnet publish Emby.Xtream.Plugin/Emby.Xtream.Plugin.csproj -c Release --no-self-contained -o artifacts/compat/shipping
+      - name: Compile against the target Emby SDK
+        run: dotnet publish Emby.Xtream.Plugin/Emby.Xtream.Plugin.csproj -c Release --no-self-contained -p:EmbySdkVersion=${{ matrix.sdk }} -o artifacts/compat/sdk
+      - name: Load the same shipping DLL against the target SDK
+        run: dotnet run --project contrib/sdk-compat/EmbySdkCompatibility.csproj -c Release -- artifacts/compat/shipping/XC2EMBY.Plugin.dll artifacts/compat/sdk

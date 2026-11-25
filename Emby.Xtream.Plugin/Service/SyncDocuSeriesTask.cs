@@ -91,7 +91,7 @@ namespace Emby.Xtream.Plugin.Service
             return config;
         }
 
-        private static PluginConfiguration BuildDocuSeriesConfig(PluginConfiguration source)
+        internal static PluginConfiguration BuildDocuSeriesConfig(PluginConfiguration source)
         {
             return new PluginConfiguration
             {

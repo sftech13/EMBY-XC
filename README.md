@@ -45,13 +45,16 @@
 
 ## Features Overview
 
-> Current release: **v1.1.152** — see [CHANGELOG.md](CHANGELOG.md) for full version history.
+> Current release: **v1.1.153** — see [CHANGELOG.md](CHANGELOG.md) for full version history.
 
 ### Live TV
 - Registers as a native Emby tuner host — channels appear in Live TV just like any other tuner
 - Fetches channel list from Xtream `get_live_streams` API with a 6-hour warm cache and background refresh
 - Supports `ts` (MPEG-TS) and `m3u8` (HLS) stream output formats
-- Optional per-channel adaptive HLS fallback after repeated short playback stops on one device
+- Shared MPEG-TS relay enabled by default, including server-side remux/transcode inputs through Emby's existing local-only LiveStreamFiles endpoint. One shared provider playback connection per channel; no extra listener, disk timeshift buffer or forced video encoding. Advanced provider-direct playback remains an opt-out.
+- Optional per-channel adaptive HLS fallback after confirmed upstream read stalls in provider-direct mode only. Ordinary playback stops never change transport, and recommended shared mode keeps MPEG-TS instead of silently selecting unshared provider HLS.
+- MPEG-TS fan-out shares one upstream connection with bounded 64 MiB response queues. A sole response naturally backpressures the upstream. If another response joins while the older queue is full, the new response receives the pending chunk first and the older queue gets a fixed two-second drain window; persistent shared slow writers are still disconnected. Repeated joins cannot renew that budget until the backlog drains to half capacity or less. Healthy viewers can briefly pause during this bounded handoff; this is not a larger buffer or a guarantee against an indefinitely stalled client.
+- Fan-out diagnostics correlate `responseConsumer`, stream `instance` and `sink` (`pipe` or `stream`), with queue age/bytes and separate dequeue/completed-write counters. A dequeue is not proof that the downstream writer finished. These IDs identify HTTP response writers, not devices or users. Handoff/drop/leave events include diagnostics, and suspect queues are sampled at most once per 30 seconds without logging playback URLs or credentials.
 - Optional **direct play** — clients connect straight to the Xtream URL, bypassing Emby's transcoder entirely
 - Filters channels by category and optionally excludes adult content
 - Optionally adds category names as M3U `group-title` tags
@@ -220,17 +223,21 @@ Master toggle for the Xtream tuner host. When disabled, no channels appear in Em
 - **ts** — MPEG-TS. Best hardware compatibility, recommended for most setups.
 - **m3u8** — HLS. Use if your client or network works better with adaptive streaming.
 
-#### Direct Play
+#### Shared MPEG-TS Relay (Recommended)
 
-When enabled, clients connect directly to the Xtream stream URL. No Emby transcoding process is started, which eliminates all transcoder overhead and startup delay. Clients fall back to direct-stream or transcode automatically if they cannot handle the format.
+Enabled by default for new and existing configurations. For MPEG-TS, native direct streaming and FFmpeg remux/transcode sessions consume the same bounded fan-out feed. FFmpeg receives Emby's local-only LiveStreamFiles URL on the server's configured HTTP port/base path; only the producer retains the provider URL. Opening the stream remains deferred, so cached codec data and first-tune probing behavior are unchanged. There is no new proxy listener or disk buffer.
 
-When disabled, all playback routes through Emby's ffmpeg pipeline.
+Compatible clients receive original codecs without forced video encoding, but all shared playback traverses Emby and uses its server bandwidth and normal streaming/remux permissions. Different channels still need separate provider playback connections; short metadata probes remain separate requests. Existing 64 MiB queues, the bounded two-second handoff and cancellation/recording safeguards remain in effect.
+
+#### Provider Direct Play
+
+Advanced option: disable shared MPEG-TS relay to allow compatible clients to connect directly to provider URLs. This can bypass server relay overhead but cannot guarantee shared provider connections. When direct play is disabled Emby relays, remuxes or transcodes according to client capabilities. Explicit HLS output keeps the existing HLS behavior and is not sent through the continuous-byte MPEG-TS relay.
 
 #### Adaptive HLS Fallback
 
-When enabled while the global format is MPEG-TS, two 45-second-to-30-minute sessions of the same channel ending on the same device within 30 minutes temporarily switch only that channel to provider HLS. The override defaults to 60 minutes, then the channel automatically returns to MPEG-TS. Anyone opening the affected channel during that window receives HLS; every other channel keeps the global format, and restarting Emby clears all active overrides.
+Advanced provider-direct mode only, default off. Three confirmed 15-second upstream read stalls on the same actively watched MPEG-TS channel within five minutes can activate an override. A confirmed stall means the read watchdog fired while the upstream producer was still active; normal playback stops, channel changes, backpressure and shutdown cancellation never count. Playback-stop monitoring and its per-device evidence stores have been removed.
 
-Three confirmed 15-second upstream read stalls on the same actively watched channel within five minutes can also activate this override without a client stop/start. A confirmed stall means the read watchdog fired while the upstream producer was still active; ordinary client disconnects and shutdown cancellation do not count. The override applies on the **next tune** and does not restart existing viewers. An already active override is not repeatedly extended by its old MPEG-TS session.
+The override applies on the **next tune**, defaults to 60 minutes, and does not restart current viewers or affect other channels. Because this is an upstream-channel failure it can affect new viewers of that channel; it is not a per-device preference. Provider HLS must actually work: FFmpeg's independent HLS requests/403s are not observed by the MPEG-TS copier. Recommended shared relay mode therefore ignores these overrides entirely rather than risking unshared, unsupported HLS. An explicit HLS format selection is still honored. Restarting clears in-memory overrides.
 
 Optional Linux journal forwarding and lock-aware BOSS recovery integrations are documented in [contrib/monitoring](contrib/monitoring/README.md). These companions are installed separately from the plugin and are not required for per-channel HLS fallback.
 
@@ -611,6 +618,18 @@ Provider video/audio fields are written as Kodi `streamdetails` when present. Bo
 
 Episode sidecars include title, season/episode number, air date, plot, runtime, rating, artwork, and any provider codec details. Missing codec fields omit only `streamdetails`; they do not suppress the NFO.
 
+### Specials and selective layout correction
+
+Specials retain **Season 00**, and an explicit episode number zero remains **E00**. A positive per-episode season takes priority; when it is missing or zero, the season-map key supplies the season, including zero. Missing/invalid episode numbers fall back to one instead of inventing specials.
+
+Upgrading performs a selective series-path check using the existing detail cache, without resetting sync watermarks or clearing caches. Ordinary episodes keep their filenames and timestamps. A corrected episode copies its existing NFO enrichment to the new path with corrected season/episode identity. Only ambiguous old cache entries that omitted an episode number need a fresh detail request. Old duplicate paths are removed only with **Cleanup Orphans**, within the safety threshold; **Preview** stages them instead. Deferred corrections remain tracked until a later eligible cleanup.
+
+### Retrying failed items
+
+**Retry Failed Items** uses the same catalog and file-writing pipelines as a normal sync, including documentary routing, configured folders, metadata IDs, local-media filtering and NFO ownership. It may revisit the selected catalog; it is not a second naming/layout implementation. Failed series IDs bypass cached-detail and filename-only skips individually, while unrelated cache entries stay reusable. The retry waits behind an active job in the same library pair and does **not** run automatic orphan deletion. Disabled libraries and failures that remain unavailable stay in the failed list.
+
+Optional provider metadata accepts inconsistent scalar types without weakening required media IDs. Invalid media IDs, malformed catalog shapes and invalid supplied identity names continue to fail safely rather than become deletion evidence.
+
 ---
 
 ## Local Media Filtering
@@ -664,6 +683,8 @@ To prevent accidental mass deletion (e.g., if a provider temporarily returns an 
 
 Empty parent directories are removed after file deletion.
 
+Deletion also verifies the STRM belongs to the configured provider/account and remains under the managed root. Manual delete actions remove owned streams and associated sidecars rather than recursively deleting an entire mixed-content tree. Local media, foreign STRMs, unrelated sidecars and symbolic links are preserved. Standalone NFO-only directories with no ownership evidence are retained; a filename or `.nfo` extension alone does not prove the plugin wrote it. After endpoint/account changes, old URLs that cannot be proven owned may remain for review.
+
 ### Local Media Filter Interaction
 
 When **Skip Local Media** is also enabled, STRMs for items matched against your local library are tracked separately. The orphan safety threshold only counts provider-missing orphans (items removed from the XC catalog) — locally-filtered STRMs are excluded from the ratio calculation and deleted independently. This prevents a first-run with a large local library from triggering the safety threshold.
@@ -709,9 +730,13 @@ Local regression checks (test sources are not included in the plugin DLL):
 dotnet run --project Emby.Xtream.Plugin.Tests/Emby.Xtream.Plugin.Tests.csproj -c Release
 node Emby.Xtream.Plugin.Tests/dashboard-tests.cjs
 python3 contrib/monitoring/test_monitoring.py
+python3 contrib/safety/check_delete_sites.py
+python3 contrib/safety/test_delete_mutations.py
 ```
 
 The dashboard tests also run with `deno run --allow-read Emby.Xtream.Plugin.Tests/dashboard-tests.cjs` on hosts without Node.js.
+
+CI and releases additionally compile against official Emby SDK packages **4.9.1.90** and **4.10.0.24-beta2**, then load the same shipping DLL against each SDK dependency set and verify interface implementations. The shipping SDK remains unchanged; the matrix is a compatibility check, not a requirement to run those exact server builds. Deletion mutation checks change only temporary source copies and require actual failing safety tests—not compile errors—to catch removed protections.
 
 Release tags:
 
@@ -746,8 +771,9 @@ Complete list of all configuration fields.
 |---|---|---|---|
 | `EnableLiveTv` | bool | `true` | Enable/disable the tuner host |
 | `LiveTvOutputFormat` | string | `"ts"` | `"ts"` or `"m3u8"` |
-| `EnableLiveTvDirectPlay` | bool | `true` | Allow client-side direct URL playback |
-| `EnableAdaptiveHlsFallback` | bool | `false` | Temporarily use HLS for a repeatedly stopped channel |
+| `EnableSharedLiveTvRelay` | bool | `true` | Share MPEG-TS server playback through the bounded relay, including FFmpeg input; takes priority over provider-direct playback and automatic HLS |
+| `EnableLiveTvDirectPlay` | bool | `true` | Allow provider-direct playback when shared MPEG-TS mode is off, or for explicit HLS |
+| `EnableAdaptiveHlsFallback` | bool | `false` | Provider-direct mode only: temporarily use HLS after three confirmed upstream read stalls |
 | `AdaptiveHlsOverrideMinutes` | int | `60` | Per-channel HLS override duration (5–1440 minutes) |
 | `TunerCount` | int | `1` | Number of tuner instances Emby can use |
 | `SelectedLiveCategoryIds` | int[] | `[]` | Live categories to include (empty = all) |

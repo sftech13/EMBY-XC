@@ -22,6 +22,7 @@ namespace Emby.Xtream.Plugin.Client.Models
                         ? parsed
                         : 0L;
                 default:
+                    reader.Skip();
                     return 0L;
             }
         }

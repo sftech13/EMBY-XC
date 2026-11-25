@@ -22,6 +22,7 @@ namespace Emby.Xtream.Plugin.Client.Models
                 case JsonTokenType.False:
                 case JsonTokenType.True:
                 default:
+                    reader.Skip();
                     return 0;
             }
         }

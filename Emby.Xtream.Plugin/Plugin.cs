@@ -304,6 +304,7 @@ namespace Emby.Xtream.Plugin
             target.EnableLiveTv = source.EnableLiveTv;
             target.LiveTvOutputFormat = source.LiveTvOutputFormat;
             target.EnableLiveTvDirectPlay = source.EnableLiveTvDirectPlay;
+            target.EnableSharedLiveTvRelay = source.EnableSharedLiveTvRelay;
             target.EnableAdaptiveHlsFallback = source.EnableAdaptiveHlsFallback;
             target.AdaptiveHlsOverrideMinutes = source.AdaptiveHlsOverrideMinutes > 0
                 ? source.AdaptiveHlsOverrideMinutes

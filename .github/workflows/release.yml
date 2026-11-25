@@ -29,6 +29,8 @@ jobs:
           bash -n contrib/monitoring/boss-resync.sh
           bash -n contrib/monitoring/emby-iptv-stream-monitor.sh
           python3 contrib/monitoring/test_monitoring.py -v
+          python3 contrib/safety/check_delete_sites.py
+          python3 contrib/safety/test_delete_mutations.py
 
       - name: Build plugin
         run: |
@@ -42,6 +44,15 @@ jobs:
             -p:VersionPrefix=$VERSION_PREFIX \
             -p:VersionSuffix=$VERSION_SUFFIX \
             -p:Version=$VERSION
+
+      - name: Verify Emby SDK compatibility before publishing
+        run: |
+          for SDK in 4.9.1.90 4.10.0.24-beta2; do
+            dotnet publish Emby.Xtream.Plugin/Emby.Xtream.Plugin.csproj -c Release --no-self-contained \
+              -p:EmbySdkVersion=$SDK -o artifacts/compat/$SDK
+            dotnet run --project contrib/sdk-compat/EmbySdkCompatibility.csproj -c Release -- \
+              artifacts/publish/XC2EMBY.Plugin.dll artifacts/compat/$SDK
+          done
 
       - name: Generate release notes
         id: notes

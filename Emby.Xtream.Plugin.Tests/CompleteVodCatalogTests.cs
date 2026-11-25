@@ -39,15 +39,15 @@ namespace Emby.Xtream.Plugin.Tests
             foreach (var members in new[] {"null", "[]", "true", "\"83\"", "[0]", "[83,null]", "[83,2147483648]", "[83,{}]"})
             {
                 var ambiguous = XtreamResponseParser.DeserializeVodList(
-                    "[{\"stream_id\":1,\"category_id\":83,\"category_ids\":" + members + "}]", null);
+                    "[{\"stream_id\":1,\"name\":\"Movie\",\"category_id\":83,\"category_ids\":" + members + "}]", null);
                 Assert(!CompleteVodCatalogFilter.TrySelect(ambiguous, new[] {83}, out selected, out reason),
                     "ambiguous category membership must require the original category endpoint: " + members);
             }
             var inconsistent = XtreamResponseParser.DeserializeVodList(
-                "[{\"stream_id\":1,\"category_id\":99,\"category_ids\":[83]}]", null);
+                "[{\"stream_id\":1,\"name\":\"Movie\",\"category_id\":99,\"category_ids\":[83]}]", null);
             Assert(!CompleteVodCatalogFilter.TrySelect(inconsistent, new[] {83}, out selected, out reason),
                 "contradictory primary/category-list membership must not be trusted");
-            var noMembership = XtreamResponseParser.DeserializeVodList("[{\"stream_id\":1}]", null);
+            var noMembership = XtreamResponseParser.DeserializeVodList("[{\"stream_id\":1,\"name\":\"Movie\"}]", null);
             Assert(CompleteVodCatalogFilter.TrySelect(noMembership, new int[0], out selected, out reason) && selected.Count == 1,
                 "the existing explicit all-catalog selection must remain supported");
             return Task.CompletedTask;
@@ -121,8 +121,8 @@ namespace Emby.Xtream.Plugin.Tests
                     config.LastMovieSyncTimestamp = 100;
                     var responses = new List<HttpResponseMessage>();
                     if (mode == "unsupported-endpoint") responses.Add(new HttpResponseMessage(HttpStatusCode.NotFound));
-                    else if (mode == "absent-selected-category") responses.Add(JsonResponse("[{\"stream_id\":1,\"category_id\":99,\"category_ids\":[99]}]"));
-                    else if (mode != "disabled") responses.Add(JsonResponse("[{\"stream_id\":1,\"category_id\":83}]"));
+                    else if (mode == "absent-selected-category") responses.Add(JsonResponse("[{\"stream_id\":1,\"name\":\"Existing\",\"category_id\":99,\"category_ids\":[99]}]"));
+                    else if (mode != "disabled") responses.Add(JsonResponse("[{\"stream_id\":1,\"name\":\"Existing\",\"category_id\":83}]"));
                     responses.Add(mode == "fallback-fails" ? new HttpResponseMessage(HttpStatusCode.Forbidden) :
                         JsonResponse("[{\"stream_id\":1,\"name\":\"Existing\",\"category_id\":99}]"));
                     var handler = new QueueHandler(responses.ToArray());

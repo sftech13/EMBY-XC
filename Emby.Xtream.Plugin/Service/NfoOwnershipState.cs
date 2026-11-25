@@ -70,22 +70,30 @@ namespace Emby.Xtream.Plugin.Service
             return full.Substring(_folder.Length).Replace(Path.DirectorySeparatorChar, '/');
         }
 
-        internal string GetPrevious(string nfoPath)
+        private string EntryKey(string nfoPath, string episodeIdentity)
+            => Key(nfoPath) + (episodeIdentity == null ? string.Empty : "\0" + episodeIdentity);
+
+        internal string GetPrevious(string nfoPath, string episodeIdentity = null)
         {
             string previous;
+            if (episodeIdentity != null && _generated.TryGetValue(EntryKey(nfoPath, episodeIdentity), out previous))
+                return previous;
+            // v1 journals used one entry per file. The writer verifies the old
+            // baseline's episode identity before using it for a merge.
             return _generated.TryGetValue(Key(nfoPath), out previous) ? previous : null;
         }
 
-        internal bool MatchesEpisode(string nfoPath, string fingerprint)
+        internal bool MatchesEpisode(string nfoPath, string fingerprint, string episodeIdentity = null)
         {
-            var key = Key(nfoPath);
+            var key = EntryKey(nfoPath, episodeIdentity);
+            if (episodeIdentity != null && !_generated.ContainsKey(key)) key = Key(nfoPath);
             string previous;
             return _generated.ContainsKey(key) && _episodeFingerprints.TryGetValue(key, out previous) && previous == fingerprint;
         }
 
-        internal void Record(string nfoPath, string generated, string episodeFingerprint = null)
+        internal void Record(string nfoPath, string generated, string episodeFingerprint = null, string episodeIdentity = null)
         {
-            var key = Key(nfoPath);
+            var key = EntryKey(nfoPath, episodeIdentity);
             string old;
             if (episodeFingerprint != null &&
                 (!_episodeFingerprints.TryGetValue(key, out old) || old != episodeFingerprint))

@@ -482,9 +482,12 @@ namespace Emby.Xtream.Plugin.Service
                 streamId, streamUrl, config.HttpUserAgent, null, outputFormat, adaptiveOverride);
 
             var httpClient = Plugin.CreateHttpClient();
+            var localApiUrl = LiveStreamRouting.UsesSharedRelay(config, outputFormat)
+                ? _applicationHost.GetLocalApiUrl(System.Net.IPAddress.Loopback)
+                : null;
             ILiveStream liveStream = new XtreamLiveStream(mediaSource, tuner.Id, httpClient, Logger,
                 (sourceId, viewers) => AdaptiveHlsFallbackManager.Instance.RecordUpstreamReadStall(
-                    sourceId, viewers, Plugin.InstanceOrNull?.Configuration, Logger, DateTime.UtcNow));
+                    sourceId, viewers, Plugin.InstanceOrNull?.Configuration, Logger, DateTime.UtcNow), localApiUrl);
 
             Logger.Info("Opening live stream for channel {0} (stream {1}, format {2}{3})",
                 tunerChannel?.Name ?? tunerChannel?.Id,
@@ -768,6 +771,7 @@ namespace Emby.Xtream.Plugin.Service
                 SupportsProbing = true,
                 MediaStreams = streams,
             };
+            LiveStreamRouting.ApplyPlaybackPolicy(mediaSource, config, isTsOutput ? "ts" : "m3u8");
 
             if (cached != null && !string.IsNullOrEmpty(cached.AudioCodec))
                 mediaSource.DefaultAudioStreamIndex = 1;

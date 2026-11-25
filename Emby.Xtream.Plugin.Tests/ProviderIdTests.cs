@@ -35,11 +35,11 @@ namespace Emby.Xtream.Plugin.Tests
             Assert(records[0].SeriesId == 2378700005L && records.All(s => s.SeriesId > 0),
                 "the real failing ID must survive parsing exactly");
             var dictionary = XtreamResponseParser.DeserializeSeriesList(
-                "{\"a\":{\"series_id\":2378700005},\"b\":{\"series_id\":\"2675190005\"}}", null);
+                "{\"a\":{\"series_id\":2378700005,\"name\":\"A\"},\"b\":{\"series_id\":\"2675190005\",\"name\":\"B\"}}", null);
             Assert(dictionary.Select(s => s.SeriesId).SequenceEqual(new[] {2378700005L, 2675190005L}),
                 "dictionary-shaped series catalogs must preserve oversized IDs too");
             var vod = XtreamResponseParser.DeserializeVodList(
-                "[{\"stream_id\":2147483647},{\"stream_id\":2147483648},{\"stream_id\":\"9223372036854775807\"}]", null);
+                "[{\"stream_id\":2147483647,\"name\":\"A\"},{\"stream_id\":2147483648,\"name\":\"B\"},{\"stream_id\":\"9223372036854775807\",\"name\":\"C\"}]", null);
             Assert(vod.Select(s => s.StreamId).SequenceEqual(new[] {2147483647L, 2147483648L, long.MaxValue}),
                 "movie identifiers must support the full positive signed 64-bit range");
             return Task.CompletedTask;

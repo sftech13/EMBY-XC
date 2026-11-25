@@ -5,7 +5,8 @@
     <LangVersion>7.3</LangVersion>
     <AssemblyName>XC2EMBY.Plugin</AssemblyName>
     <RootNamespace>Emby.Xtream.Plugin</RootNamespace>
-    <VersionPrefix>1.1.152</VersionPrefix>
+    <VersionPrefix>1.1.153</VersionPrefix>
+    <EmbySdkVersion Condition="'$(EmbySdkVersion)' == ''">4.8.0.80</EmbySdkVersion>
     <VersionSuffix></VersionSuffix>
     <Version Condition="'$(VersionSuffix)' == ''">$(VersionPrefix)</Version>
     <Version Condition="'$(VersionSuffix)' != ''">$(VersionPrefix)-$(VersionSuffix)</Version>
@@ -18,7 +19,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="mediabrowser.server.core" Version="4.8.0.80" />
+    <PackageReference Include="mediabrowser.server.core" Version="$(EmbySdkVersion)" />
     <PackageReference Include="System.Text.Json" Version="8.0.5" />
     <PackageReference Include="System.IO.Pipelines" Version="8.0.0" />
     <PackageReference Include="System.Memory" Version="4.6.3" />

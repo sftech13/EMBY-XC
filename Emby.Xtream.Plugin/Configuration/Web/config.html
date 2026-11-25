@@ -1287,8 +1287,20 @@
                         <input class="txtTunerCount" type="hidden" />
                         <div class="settingsOptionItem liveTvSettings">
                             <div>
-                                <div class="settingsOptionTitle">Direct Play</div>
-                                <div class="settingsOptionDescription">Let clients play source streams directly for faster startup.</div>
+                                <div class="settingsOptionTitle">Shared MPEG-TS Relay (Recommended)</div>
+                                <div class="settingsOptionDescription">Share one provider playback connection per channel through Emby, including remuxing and transcoding. Compatible clients receive original codecs without forced encoding. Uses bounded memory and takes priority over provider-direct playback and automatic HLS fallback. Explicit HLS output is unchanged.</div>
+                            </div>
+                            <div class="checkboxContainer checkboxContainer-withDescription">
+                                <label>
+                                    <input class="chkSharedLiveTvRelay" type="checkbox" is="emby-checkbox" />
+                                    <span>Enabled</span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="settingsOptionItem liveTvSettings">
+                            <div>
+                                <div class="settingsOptionTitle">Provider Direct Play</div>
+                                <div class="settingsOptionDescription">Let compatible clients connect directly to the provider. This bypasses guaranteed connection sharing. Applies when shared MPEG-TS relay is off, or when HLS is explicitly selected.</div>
                             </div>
                             <div class="checkboxContainer checkboxContainer-withDescription">
                                 <label>
@@ -1300,7 +1312,7 @@
                         <div class="settingsOptionItem liveTvSettings">
                             <div>
                                 <div class="settingsOptionTitle">Adaptive HLS Fallback</div>
-                                <div class="settingsOptionDescription">Temporarily use provider HLS on the next tune of a channel after two short playback sessions on one device, or three confirmed upstream read stalls within five minutes. Existing playback is not restarted; other channels remain MPEG-TS.</div>
+                                <div class="settingsOptionDescription">Advanced provider-direct mode only: temporarily use provider HLS after three confirmed upstream read stalls within five minutes. Ordinary stops and channel changes never trigger this. Disabled by shared relay mode; provider HLS must be supported and can use separate connections.</div>
                             </div>
                             <div class="checkboxContainer checkboxContainer-withDescription">
                                 <label>

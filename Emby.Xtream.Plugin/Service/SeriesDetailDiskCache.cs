@@ -96,6 +96,13 @@ namespace Emby.Xtream.Plugin.Service
                         utcNow.Ticks - entry.FetchedUtcTicks >= MaximumAge.Ticks || !IsUsable(entry.Detail))
                         return false;
                     detail = entry.Detail;
+                    // Older cache serialization omitted episode_num=0. Refresh
+                    // only ambiguous entries; do not clear unrelated cache files.
+                    if (detail.Episodes.Values.SelectMany(season => season).Any(episode => !episode.EpisodeNumberWasSpecified))
+                    {
+                        detail = null;
+                        return false;
+                    }
                     fetchedUtcTicks = entry.FetchedUtcTicks;
                     return true;
                 }
